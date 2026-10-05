@@ -2,7 +2,7 @@
 
 A WordPress plugin that will show what changes when a plugin update runs. It will capture site state before and after a single plugin update and report the difference in wp-admin.
 
-**Status:** foundation only. The plugin activates, adds **Tools → UpdateLens**, and the admin screen confirms the React ↔ REST wiring. No snapshot, diff or update logic exists yet.
+**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records which `wp_options` entries the update added, removed or changed (sizes and autoload state, never values) in its own database table. There is no report screen yet; **Tools → UpdateLens** only confirms the React ↔ REST wiring.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ composer lint:fix     # PHPCBF
 composer test         # PHPUnit unit tests (pure PHP, no WordPress install needed)
 ```
 
-Unit tests live in `tests/Unit/` and cover the pure snapshot and diff logic; they do not boot WordPress.
+Unit tests live in `tests/Unit/` and cover the pure snapshot, diff, persistence-format and update-lifecycle logic; they do not boot WordPress.
 
 ## Build and package
 
@@ -67,14 +67,15 @@ COMPOSER_BIN="docker run --rm -v $PWD/release/updatelens:/app -w /app composer c
 
 ```text
 updatelens.php           Plugin header, constants, autoloader, activation hooks
-uninstall.php            Data cleanup on plugin deletion (nothing stored yet)
+uninstall.php            Data cleanup on plugin deletion (drops the analyses table)
 includes/                PHP, PSR-4 namespace UpdateLens\
   Core/                  Plugin (hook wiring), Activator, Deactivator
   Admin/AdminPage.php    Tools → UpdateLens screen; enqueues the admin app
   Rest/                  REST controllers (namespace updatelens/v1)
   Snapshot/              wp_options snapshot (safe metadata only: fingerprint, size, autoload)
   Diff/                  wp_options diff between two snapshots (no values or fingerprints)
-  Update/ Storage/       Reserved for upcoming features (empty)
+  Update/                Plugin update analysis lifecycle (WordPress updater hooks + rules)
+  Storage/               Analyses table, SQL and JSON persistence formats
 libs/assets.php          Vendored Vite ↔ WordPress asset loader (kucrut/vite-for-wp)
 src/
   admin/                 React + TypeScript admin app (entry: main.tsx)

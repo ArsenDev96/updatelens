@@ -7,6 +7,8 @@
 
 namespace UpdateLens\Core;
 
+use UpdateLens\Storage\Schema;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -15,13 +17,11 @@ defined( 'ABSPATH' ) || exit;
 final class Activator {
 
 	/**
-	 * Activation callback.
-	 *
-	 * Intentionally empty for now. Future storage setup (custom tables via
-	 * dbDelta(), schema version option) belongs here.
+	 * Activation callback: create the database schema.
 	 *
 	 * @return void
 	 */
 	public static function activate() {
+		Schema::install();
 	}
 }

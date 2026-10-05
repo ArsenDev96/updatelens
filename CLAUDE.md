@@ -14,11 +14,11 @@ UpdateLens is a WordPress plugin that shows what changes when **one** plugin upd
 
 Initial snapshot sources:
 
-- `wp_options` incl. autoload size / autoloaded options — implemented (`Snapshot\OptionsSnapshotProvider`), not yet wired to anything
+- `wp_options` incl. autoload size / autoloaded options — implemented (`Snapshot\OptionsSnapshotProvider`)
 - WP-Cron events — planned
 - Action Scheduler actions — planned
 
-Current state: foundation (admin screen + one status REST route) plus the in-memory `wp_options` snapshot and diff engines (`OptionsSnapshotProvider` → `OptionsSnapshot` → `Diff\OptionsDiffBuilder` → `Diff\OptionsDiff`). No update interception, persistence, report REST routes or report UI yet. Do not start Update/Storage work unless the task asks for it.
+Current state: foundation (admin screen + one status REST route), the `wp_options` snapshot and diff engines, and the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`). No report REST routes or report UI yet.
 
 ## Architecture boundaries
 
@@ -31,7 +31,9 @@ Current state: foundation (admin screen + one status REST route) plus the in-mem
   - `Core/` – bootstrap, activation, deactivation
   - `Admin/` – wp-admin screens and asset loading
   - `Rest/` – REST controllers
-  - `Snapshot/`, `Diff/`, `Update/`, `Storage/` – reserved for the features above
+  - `Snapshot/` – capture safe state; `Diff/` – compare snapshots
+  - `Update/` – WordPress updater hooks (`PluginUpdateTracker`) and lifecycle rules (`PluginUpdateAnalyzer`, `UpdateClassifier`)
+  - `Storage/` – schema (`Schema`, `dbDelta`), SQL (`AnalysisRepository`), JSON persistence formats (`*Codec`)
 - The admin app is TypeScript + React + Tailwind + shadcn/ui in `src/admin/`, built by Vite into `assets/admin/dist/`. There is no public/frontend app.
 
 ## WordPress.org compatibility
@@ -76,6 +78,20 @@ The plugin must stay distributable on WordPress.org:
 - Value changes are detected by fingerprint, never inferred from size. An option appears only if value, size, raw autoload or effective autoload differs.
 - All deltas are signed `after - before`, in raw bytes/counts. Aggregate deltas come from the two snapshot summaries, not from summing changed records.
 - Diff results are deterministic: added/removed/changed sorted byte-wise by name, no timestamps or random ids.
+
+## Update lifecycle invariants
+
+- **UpdateLens observes the WordPress updater; it never owns it.** No custom updater, and never alter packages, files, activation state, update metadata, credentials or responses. Upgrader filters return their input unchanged.
+- **Analysis failure must never block an update.** Hook callbacks catch every `Throwable`; never return a `WP_Error` from an upgrader filter because of UpdateLens.
+- **V0.1 attributes single-plugin updates only** (`UpdateClassifier`): `Plugin_Upgrader::upgrade()` or `bulk_upgrade()` with exactly one plugin ("Update now" is a one-plugin `bulk_upgrade`, so `is_multi` cannot tell single from bulk — use `bulk` + `update_count` from `upgrader_pre_download`). Ignored: multi-plugin bulk updates, installs, themes, core, translations, cron/WP-CLI updates, UpdateLens itself, and Multisite (the tracker is not registered there).
+- Flow: `upgrader_pre_download` → BEFORE (`captured`); `upgrader_install_package_result` + `upgrader_process_complete` → IMMEDIATE diff (`awaiting_settle`) or `failed`; `shutdown` of a **later** wp-admin page request → SETTLED diff (`completed`). States are documented in `Update\AnalysisStatus`.
+- **The update request's own shutdown never settles** (the analyzer remembers the analyses it created in this request). Ajax, REST, cron, CLI and frontend requests never settle. A request that activates/deactivates the analysed plugin does not settle it.
+- Before any other update starts, analyses awaiting settle from earlier requests are settled first, so changes are never attributed to the wrong update. Another update in the same request abandons that request's analysis.
+- **The BEFORE snapshot is temporary**: cleared on every final state. Final records keep metadata, status/error and the immediate + settled diffs (the settled diff is authoritative) — never option values.
+- Persist snapshots/diffs only as versioned JSON via `Storage\*Codec` (never PHP `serialize()`); decoding validates everything. Stored errors use fixed messages and sanitized codes — never WordPress error messages (paths, URLs).
+- Every non-final analysis has a non-NULL `active_plugin` (unique), so there is at most one open analysis per plugin while history is kept. Transitions are compare-and-set on `status`.
+- Timestamps are UTC (`gmdate()`). Stale `captured` analyses (> `PluginUpdateAnalyzer::STALE_AFTER_SECONDS`) are abandoned on a later admin page request; no cron.
+- Bump `Storage\Schema::VERSION` when the table changes; `Schema::maybe_upgrade()` runs `dbDelta()` on bootstrap only when the stored version differs.
 
 ## Working rules
 

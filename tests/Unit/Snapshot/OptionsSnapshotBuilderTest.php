@@ -177,8 +177,9 @@ final class OptionsSnapshotBuilderTest extends TestCase {
 		$this->assertSame( array(), $snapshot->get_records() );
 		$this->assertSame(
 			array(
-				'options' => array(),
-				'summary' => array(
+				'fingerprint_context' => ( new OptionValueHasher( self::SECRET ) )->get_context(),
+				'options'             => array(),
+				'summary'             => array(
 					'option_count'     => 0,
 					'autoloaded_count' => 0,
 					'total_bytes'      => 0,
@@ -315,7 +316,30 @@ final class OptionsSnapshotBuilderTest extends TestCase {
 			array(
 				new OptionRecord( 'same', str_repeat( 'a', 64 ), 1, 'no', false ),
 				new OptionRecord( 'same', str_repeat( 'b', 64 ), 1, 'no', false ),
-			)
+			),
+			'test-context'
 		);
+	}
+
+	/**
+	 * A snapshot requires a fingerprint context.
+	 */
+	public function test_empty_fingerprint_context_is_rejected() {
+		$this->expectException( InvalidArgumentException::class );
+
+		new OptionsSnapshot( array(), '' );
+	}
+
+	/**
+	 * The snapshot carries the hasher's fingerprint context.
+	 */
+	public function test_snapshot_carries_fingerprint_context() {
+		$snapshot = $this->builder()->build( $this->fixture_rows() );
+		$expected = ( new OptionValueHasher( self::SECRET ) )->get_context();
+
+		$this->assertSame( $expected, $snapshot->get_fingerprint_context() );
+		$this->assertSame( $expected, $snapshot->to_array()['fingerprint_context'] );
+		$this->assertSame( $expected, $this->builder()->build( array() )->get_fingerprint_context(), 'Independent of the option data.' );
+		$this->assertNotSame( $expected, $this->builder( 'other-site' )->build( $this->fixture_rows() )->get_fingerprint_context() );
 	}
 }

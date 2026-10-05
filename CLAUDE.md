@@ -18,7 +18,7 @@ Initial snapshot sources:
 - WP-Cron events — planned
 - Action Scheduler actions — planned
 
-Current state: foundation (admin screen + one status REST route) plus the in-memory `wp_options` snapshot. No diffing, update interception, persistence or report UI yet. Do not start Diff/Update/Storage work unless the task asks for it.
+Current state: foundation (admin screen + one status REST route) plus the in-memory `wp_options` snapshot and diff engines (`OptionsSnapshotProvider` → `OptionsSnapshot` → `Diff\OptionsDiffBuilder` → `Diff\OptionsDiff`). No update interception, persistence, report REST routes or report UI yet. Do not start Update/Storage work unless the task asks for it.
 
 ## Architecture boundaries
 
@@ -65,6 +65,17 @@ The plugin must stay distributable on WordPress.org:
 - **Snapshot sources must not overlap.** Each piece of state belongs to exactly one provider. `wp_options` excludes `cron` because WP-Cron gets its own provider.
 - **Noise filtering stays conservative and tested** (`Snapshot\OptionNoiseFilter`): only transients (`_transient_*`, `_site_transient_*`), UpdateLens's own options and `cron`. Don't exclude persistent options just because they are large or change often (e.g. `rewrite_rules`). Every rule needs a test.
 - Every option UpdateLens stores must start with `Core\Plugin::OPTION_PREFIX` (`updatelens_`) so it never shows up in its own snapshots.
+- Each snapshot carries a non-secret, versioned fingerprint context (`OptionValueHasher::get_context()`, `hmac-sha256-v1:<hex>`). Bump `OptionValueHasher::SCHEME` whenever fingerprinting changes.
+
+## Diff invariants
+
+- Diffs work only on `OptionsSnapshot` objects; the diff engine never reads the database.
+- **Never compare snapshots with different fingerprint contexts** (rotated salts, other scheme): `OptionsDiffBuilder` throws `IncompatibleSnapshotsException` instead of reporting every option as changed.
+- **Fingerprints are internal.** The builder compares them; `OptionsDiff` and its records never contain fingerprints, contexts or option values. Tests assert a fake secret appears in no serialized form.
+- Raw autoload storage changes (`autoload_value_changed`, e.g. `yes` → `auto-on`) and effective autoload behavior changes (`autoload_behavior_changed`, `is_autoloaded` flipped) are distinct and reported separately.
+- Value changes are detected by fingerprint, never inferred from size. An option appears only if value, size, raw autoload or effective autoload differs.
+- All deltas are signed `after - before`, in raw bytes/counts. Aggregate deltas come from the two snapshot summaries, not from summing changed records.
+- Diff results are deterministic: added/removed/changed sorted byte-wise by name, no timestamps or random ids.
 
 ## Working rules
 

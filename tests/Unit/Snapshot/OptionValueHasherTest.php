@@ -90,6 +90,40 @@ final class OptionValueHasherTest extends TestCase {
 	}
 
 	/**
+	 * The context is deterministic for the same secret and versioned.
+	 */
+	public function test_context_is_deterministic_and_versioned() {
+		$context = ( new OptionValueHasher( self::SECRET ) )->get_context();
+
+		$this->assertSame( $context, ( new OptionValueHasher( self::SECRET ) )->get_context() );
+		$this->assertMatchesRegularExpression( '/^hmac-sha256-v1:[0-9a-f]{64}$/', $context );
+		$this->assertStringStartsWith( OptionValueHasher::SCHEME . ':', $context );
+	}
+
+	/**
+	 * A different secret (rotated salts) gives a different context.
+	 */
+	public function test_context_changes_with_secret() {
+		$this->assertNotSame(
+			( new OptionValueHasher( self::SECRET ) )->get_context(),
+			( new OptionValueHasher( 'test-secret-two' ) )->get_context()
+		);
+	}
+
+	/**
+	 * The context reveals neither the secret nor a plain hash of it, and is not a value fingerprint.
+	 */
+	public function test_context_does_not_expose_key() {
+		$hasher  = new OptionValueHasher( self::SECRET );
+		$context = $hasher->get_context();
+
+		$this->assertStringNotContainsString( self::SECRET, $context );
+		$this->assertStringNotContainsString( hash( 'sha256', self::SECRET ), $context );
+		$this->assertStringNotContainsString( bin2hex( hash_hmac( 'sha256', OptionValueHasher::KEY_CONTEXT, self::SECRET, true ) ), $context, 'Derived key must not appear.' );
+		$this->assertStringNotContainsString( $hasher->fingerprint( '' ), $context );
+	}
+
+	/**
 	 * An empty secret is rejected.
 	 */
 	public function test_empty_secret_is_rejected() {

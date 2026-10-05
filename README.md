@@ -46,7 +46,7 @@ composer lint:fix     # PHPCBF
 composer test         # PHPUnit unit tests (pure PHP, no WordPress install needed)
 ```
 
-Unit tests live in `tests/Unit/` and cover the pure snapshot logic; they do not boot WordPress.
+Unit tests live in `tests/Unit/` and cover the pure snapshot and diff logic; they do not boot WordPress.
 
 ## Build and package
 
@@ -73,7 +73,8 @@ includes/                PHP, PSR-4 namespace UpdateLens\
   Admin/AdminPage.php    Tools → UpdateLens screen; enqueues the admin app
   Rest/                  REST controllers (namespace updatelens/v1)
   Snapshot/              wp_options snapshot (safe metadata only: fingerprint, size, autoload)
-  Diff/ Update/ Storage/ Reserved for upcoming features (empty)
+  Diff/                  wp_options diff between two snapshots (no values or fingerprints)
+  Update/ Storage/       Reserved for upcoming features (empty)
 libs/assets.php          Vendored Vite ↔ WordPress asset loader (kucrut/vite-for-wp)
 src/
   admin/                 React + TypeScript admin app (entry: main.tsx)

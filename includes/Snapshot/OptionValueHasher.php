@@ -34,6 +34,17 @@ final class OptionValueHasher {
 	const KEY_CONTEXT = 'updatelens:option-value:v1';
 
 	/**
+	 * Fingerprint scheme identifier. Bump when the algorithm or key derivation
+	 * changes, so snapshots made under different schemes are never compared.
+	 */
+	const SCHEME = 'hmac-sha256-v1';
+
+	/**
+	 * Label for the fingerprint-context identifier.
+	 */
+	const CONTEXT_LABEL = 'updatelens:fingerprint-context:v1';
+
+	/**
 	 * Fingerprint key derived from the site secret (binary).
 	 *
 	 * @var string
@@ -73,6 +84,20 @@ final class OptionValueHasher {
 	 */
 	public function fingerprint( $raw_value ) {
 		return hash_hmac( self::ALGORITHM, (string) $raw_value, $this->key );
+	}
+
+	/**
+	 * Non-secret identifier of the hashing context (scheme + key).
+	 *
+	 * Equal for the same scheme and site secret, different when the WordPress
+	 * salts or the scheme change. Fingerprints are only comparable between
+	 * snapshots with the same context. An HMAC of a fixed label, so it reveals
+	 * nothing about the key and is safe to persist.
+	 *
+	 * @return string `<scheme>:<64 hex>`, e.g. `hmac-sha256-v1:3f…`.
+	 */
+	public function get_context() {
+		return self::SCHEME . ':' . hash_hmac( self::ALGORITHM, self::CONTEXT_LABEL, $this->key );
 	}
 
 	/**

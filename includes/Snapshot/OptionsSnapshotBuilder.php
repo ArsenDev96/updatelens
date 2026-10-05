@@ -79,6 +79,6 @@ final class OptionsSnapshotBuilder {
 			);
 		}
 
-		return new OptionsSnapshot( $records );
+		return new OptionsSnapshot( $records, $this->hasher->get_context() );
 	}
 }

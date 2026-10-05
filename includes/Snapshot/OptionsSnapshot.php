@@ -12,12 +12,19 @@ use InvalidArgumentException;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Option records (sorted by name) plus their summary.
+ * Option records (sorted by name) plus their summary and fingerprint context.
  *
  * Contains no raw option values and no capture time, so two snapshots of an
  * unchanged database are equal.
  */
 final class OptionsSnapshot {
+
+	/**
+	 * Fingerprint context the records were hashed under (OptionValueHasher::get_context()).
+	 *
+	 * @var string
+	 */
+	private $fingerprint_context;
 
 	/**
 	 * Records keyed by option name, sorted by byte-wise name order.
@@ -36,10 +43,16 @@ final class OptionsSnapshot {
 	/**
 	 * Constructor.
 	 *
-	 * @param OptionRecord[] $records Records in any order.
-	 * @throws InvalidArgumentException If two records share a name.
+	 * @param OptionRecord[] $records             Records in any order.
+	 * @param string         $fingerprint_context Context the fingerprints were made under.
+	 * @throws InvalidArgumentException If two records share a name or the context is empty.
 	 */
-	public function __construct( array $records ) {
+	public function __construct( array $records, $fingerprint_context ) {
+		if ( ! is_string( $fingerprint_context ) || '' === $fingerprint_context ) {
+			throw new InvalidArgumentException( 'OptionsSnapshot requires a fingerprint context.' );
+		}
+		$this->fingerprint_context = $fingerprint_context;
+
 		foreach ( $records as $record ) {
 			$name = $record->get_name();
 			if ( isset( $this->records[ $name ] ) ) {
@@ -85,9 +98,18 @@ final class OptionsSnapshot {
 	}
 
 	/**
+	 * Fingerprint context the records were hashed under.
+	 *
+	 * @return string
+	 */
+	public function get_fingerprint_context() {
+		return $this->fingerprint_context;
+	}
+
+	/**
 	 * Array form.
 	 *
-	 * @return array{options: array<int, array>, summary: array}
+	 * @return array{fingerprint_context: string, options: array<int, array>, summary: array}
 	 */
 	public function to_array() {
 		$options = array();
@@ -96,8 +118,9 @@ final class OptionsSnapshot {
 		}
 
 		return array(
-			'options' => $options,
-			'summary' => $this->summary->to_array(),
+			'fingerprint_context' => $this->fingerprint_context,
+			'options'             => $options,
+			'summary'             => $this->summary->to_array(),
 		);
 	}
 }

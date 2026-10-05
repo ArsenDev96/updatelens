@@ -18,7 +18,7 @@ Initial snapshot sources:
 - WP-Cron events — planned
 - Action Scheduler actions — planned
 
-Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`). No report UI yet.
+Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
 
 ## Architecture boundaries
 
@@ -116,6 +116,17 @@ The plugin must stay distributable on WordPress.org:
 - Post-update observations keep non-causal wording in the API, docs and UI (association `observed_after_update`, never "caused by").
 - Database errors never reach REST responses: reads fail with the generic `updatelens_reports_unavailable` (500).
 
+## Admin UI rules
+
+- **React displays backend semantics; it does not recreate business logic.** Statuses, outcomes, phase availability and reasons come from the Reports API; React maps them to text (`src/admin/utils/labels.ts`) and never derives them from other fields (e.g. no deadline arithmetic, no recomputing diffs).
+- **Phase wording stays observational/non-causal**: "During update", "After update", "Net result", "observed". Never "caused by", "created by <plugin>", "definitely".
+- **API internals are never shown** as main text: raw status/reason/outcome codes appear at most under "Technical details". Server error messages are never rendered; `api/errors.ts` maps failures to fixed texts.
+- **No option values exist in the UI** — only names, sizes and autoload state. Render only fields of the typed API contract (`src/admin/types/api.ts`).
+- **UTC API timestamps are localized only in presentation** (`Intl.DateTimeFormat`, browser time zone); **backend byte counts are formatted only in presentation** (`utils/format.ts`, 1 KB = 1024 B). Never change the values sent by PHP.
+- **No risk classification** (impact levels, "safe"/"dangerous", size thresholds) without an explicitly designed model.
+- Navigation is URL state on the admin page (`&analysis=<id>`, `&paged=<n>`) via the History API; no router dependency.
+- Frontend tests (Vitest + Testing Library, jsdom) live in `tests/admin/` (not `src/`, which ships in the release ZIP); mock `@wordpress/api-fetch` with API-shaped fixtures.
+
 ## Working rules
 
 - Make focused changes that do what the task asks. Don't add features outside the requested task.
@@ -134,6 +145,7 @@ npm run typecheck      # tsc
 npm run lint           # ESLint
 npm run format:check   # Prettier (wp-prettier); format:fix to apply
 npm run check          # typecheck + lint + format:check
+npm test               # Vitest frontend tests (tests/admin/)
 composer lint          # PHPCS (WordPress + PHPCompatibilityWP)
 composer test          # PHPUnit 9.6 unit tests (no WordPress needed)
 npm run release        # build + release/updatelens-<version>.zip (needs Composer; COMPOSER_BIN to override)

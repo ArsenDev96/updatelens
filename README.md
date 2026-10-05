@@ -2,7 +2,7 @@
 
 A WordPress plugin that will show what changes when a plugin update runs. It will capture site state before and after a single plugin update and report the difference in wp-admin.
 
-**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records the `wp_options` changes it observed during the update request and during the first admin request after it (names, sizes and autoload state, never values) in its own database table. These are observed changes, not proven causes. A read-only REST API returns the history and reports ([docs/rest-api.md](docs/rest-api.md)); there is no report screen yet, and **Tools → UpdateLens** only confirms the React ↔ REST wiring.
+**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records the `wp_options` changes it observed during the update request and during the first admin request after it (names, sizes and autoload state, never values) in its own database table. These are observed changes, not proven causes. **Tools → UpdateLens** shows the update history and a report per analysis (during update, after update, net result), backed by a read-only REST API ([docs/rest-api.md](docs/rest-api.md)).
 
 ## Requirements
 
@@ -41,12 +41,13 @@ npm run typecheck     # TypeScript
 npm run lint          # ESLint
 npm run format:check  # Prettier (wp-prettier) — `npm run format:fix` to apply
 npm run check         # all three
+npm test              # Vitest frontend tests (jsdom)
 composer lint         # PHPCS: WordPress Coding Standards + PHPCompatibilityWP (PHP 7.4+)
 composer lint:fix     # PHPCBF
 composer test         # PHPUnit unit tests (pure PHP, no WordPress install needed)
 ```
 
-Unit tests live in `tests/Unit/` and cover the pure snapshot, diff, persistence-format, update-lifecycle and report read-model logic; they do not boot WordPress.
+PHP unit tests live in `tests/Unit/` and cover the pure snapshot, diff, persistence-format, update-lifecycle and report read-model logic; they do not boot WordPress. Frontend tests live in `tests/admin/` and render the admin screens against API-shaped fixtures.
 
 ## Build and package
 
@@ -84,7 +85,7 @@ src/
   lib/                   Shared frontend utilities
 assets/admin/dist/       Build output (git-ignored)
 scripts/release.mjs      ZIP packaging
-tests/                   PHPUnit unit tests (not shipped)
+tests/                   PHPUnit (Unit/) and Vitest (admin/) tests (not shipped)
 docs/                    Developer documentation (REST API)
 ```
 

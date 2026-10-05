@@ -12,14 +12,13 @@ UpdateLens is a WordPress plugin that shows what changes when **one** plugin upd
 4. Calculate a diff.
 5. Show a report in wp-admin.
 
-Initial snapshot sources (planned, not implemented):
+Initial snapshot sources:
 
-- `wp_options`
-- autoload size / autoloaded options
-- WP-Cron events
-- Action Scheduler actions
+- `wp_options` incl. autoload size / autoloaded options — implemented (`Snapshot\OptionsSnapshotProvider`), not yet wired to anything
+- WP-Cron events — planned
+- Action Scheduler actions — planned
 
-Current state: foundation only (admin screen + one status REST route). Do not start Snapshot/Diff/Update/Storage work unless the task asks for it.
+Current state: foundation (admin screen + one status REST route) plus the in-memory `wp_options` snapshot. No diffing, update interception, persistence or report UI yet. Do not start Diff/Update/Storage work unless the task asks for it.
 
 ## Architecture boundaries
 
@@ -56,11 +55,22 @@ The plugin must stay distributable on WordPress.org:
 - Never expose or persist sensitive `wp_options` values unnecessarily (credentials, keys, tokens, salts, session data). Snapshot code must minimise and/or mask values; reports should show what changed without leaking secrets.
 - **No telemetry.** No external HTTP requests or data transmission. No external SaaS/backend in V1.
 
+## Snapshot invariants
+
+- **Raw `option_value` strings never leave `Snapshot\OptionsSnapshotBuilder`.** They are never persisted, logged, returned from REST or held in snapshot objects. Snapshots keep only name, keyed fingerprint, byte size and autoload state; tests assert a fake secret appears in no serialized form.
+- **Option values are compared by fingerprint**: HMAC-SHA256 (`Snapshot\OptionValueHasher`) keyed from `wp_salt( 'auth' )`. Never use an unkeyed hash. Fingerprints are only comparable within one site and one set of salts. Don't expose fingerprints via REST unless a task asks for it.
+- Read the stored strings via `$wpdb` (no `get_option()`, no unserializing); size is `strlen()` bytes. Snapshot code is read-only.
+- Autoload state: keep the raw column value and normalize via `Snapshot\AutoloadPolicy` (core's `wp_autoload_values_to_autoload()` on 6.6+, `yes` only before). Don't hardcode `yes`/`no`.
+- Snapshot content must be deterministic: sorted byte-wise by name, no timestamps inside the compared data.
+- **Snapshot sources must not overlap.** Each piece of state belongs to exactly one provider. `wp_options` excludes `cron` because WP-Cron gets its own provider.
+- **Noise filtering stays conservative and tested** (`Snapshot\OptionNoiseFilter`): only transients (`_transient_*`, `_site_transient_*`), UpdateLens's own options and `cron`. Don't exclude persistent options just because they are large or change often (e.g. `rewrite_rules`). Every rule needs a test.
+- Every option UpdateLens stores must start with `Core\Plugin::OPTION_PREFIX` (`updatelens_`) so it never shows up in its own snapshots.
+
 ## Working rules
 
 - Make focused changes that do what the task asks. Don't add features outside the requested task.
 - Avoid unrelated refactors, renames or dependency upgrades.
-- Add tests for business logic as features are introduced (no PHP test runner is set up yet — add PHPUnit with the first business logic).
+- Add PHPUnit tests for business logic as features are introduced (`tests/Unit/`, mirroring `includes/`). Unit tests don't boot WordPress: keep logic in pure classes that take plain data, and keep `$wpdb`/WordPress calls in thin wrappers.
 - Run the relevant checks before finishing (below).
 
 ## Commands
@@ -75,6 +85,7 @@ npm run lint           # ESLint
 npm run format:check   # Prettier (wp-prettier); format:fix to apply
 npm run check          # typecheck + lint + format:check
 composer lint          # PHPCS (WordPress + PHPCompatibilityWP)
+composer test          # PHPUnit 9.6 unit tests (no WordPress needed)
 npm run release        # build + release/updatelens-<version>.zip (needs Composer; COMPOSER_BIN to override)
 npm run i18n           # languages/updatelens.pot (needs WP-CLI)
 ```

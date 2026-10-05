@@ -43,9 +43,10 @@ npm run format:check  # Prettier (wp-prettier) — `npm run format:fix` to apply
 npm run check         # all three
 composer lint         # PHPCS: WordPress Coding Standards + PHPCompatibilityWP (PHP 7.4+)
 composer lint:fix     # PHPCBF
+composer test         # PHPUnit unit tests (pure PHP, no WordPress install needed)
 ```
 
-There are no automated tests yet; they will be added alongside the first business logic.
+Unit tests live in `tests/Unit/` and cover the pure snapshot logic; they do not boot WordPress.
 
 ## Build and package
 
@@ -71,7 +72,8 @@ includes/                PHP, PSR-4 namespace UpdateLens\
   Core/                  Plugin (hook wiring), Activator, Deactivator
   Admin/AdminPage.php    Tools → UpdateLens screen; enqueues the admin app
   Rest/                  REST controllers (namespace updatelens/v1)
-  Snapshot/ Diff/ Update/ Storage/   Reserved for upcoming features (empty)
+  Snapshot/              wp_options snapshot (safe metadata only: fingerprint, size, autoload)
+  Diff/ Update/ Storage/ Reserved for upcoming features (empty)
 libs/assets.php          Vendored Vite ↔ WordPress asset loader (kucrut/vite-for-wp)
 src/
   admin/                 React + TypeScript admin app (entry: main.tsx)
@@ -79,6 +81,7 @@ src/
   lib/                   Shared frontend utilities
 assets/admin/dist/       Build output (git-ignored)
 scripts/release.mjs      ZIP packaging
+tests/                   PHPUnit unit tests (not shipped)
 ```
 
 ### How the pieces connect

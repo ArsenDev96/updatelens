@@ -35,6 +35,14 @@ final class Plugin {
 	const REST_NAMESPACE = 'updatelens/v1';
 
 	/**
+	 * Prefix for every option UpdateLens stores in `wp_options`.
+	 *
+	 * The `wp_options` snapshot excludes names with this prefix, so UpdateLens
+	 * never reports its own internal state as a change.
+	 */
+	const OPTION_PREFIX = 'updatelens_';
+
+	/**
 	 * Whether the plugin has already been booted.
 	 *
 	 * @var bool

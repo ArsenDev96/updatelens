@@ -151,6 +151,81 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	}
 
 	/**
+	 * When true, every read throws like a failed query.
+	 *
+	 * @var bool
+	 */
+	public $fail_reads = false;
+
+	/**
+	 * Page of rows, newest first, projected like HISTORY_COLUMNS (flags as "0"/"1" strings, like MySQL).
+	 *
+	 * @param int $limit  Page size.
+	 * @param int $offset Offset.
+	 * @return array
+	 * @throws RuntimeException On failure.
+	 */
+	public function find_page( $limit, $offset ) {
+		if ( $this->fail_reads ) {
+			throw new RuntimeException( 'read failed' );
+		}
+
+		$rows = $this->rows;
+		krsort( $rows );
+
+		$page = array();
+		foreach ( array_slice( $rows, (int) $offset, (int) $limit ) as $row ) {
+			$item = self::project( $row, AnalysisRepository::REPORT_METADATA_COLUMNS );
+			foreach ( array( 'during_update_diff', 'post_update_diff', 'final_diff' ) as $column ) {
+				$item[ 'has_' . $column ] = null === $row[ $column ] ? '0' : '1';
+			}
+			$page[] = $item;
+		}
+
+		return $page;
+	}
+
+	/**
+	 * Number of rows.
+	 *
+	 * @return int
+	 * @throws RuntimeException On failure.
+	 */
+	public function count_all() {
+		if ( $this->fail_reads ) {
+			throw new RuntimeException( 'read failed' );
+		}
+
+		return count( $this->rows );
+	}
+
+	/**
+	 * Row projected like REPORT_COLUMNS.
+	 *
+	 * @param int $id ID.
+	 * @return array|null
+	 * @throws RuntimeException On failure.
+	 */
+	public function find_report( $id ) {
+		if ( $this->fail_reads ) {
+			throw new RuntimeException( 'read failed' );
+		}
+
+		return isset( $this->rows[ $id ] ) ? self::project( $this->rows[ $id ], AnalysisRepository::REPORT_COLUMNS ) : null;
+	}
+
+	/**
+	 * Project a row to a comma-separated column list.
+	 *
+	 * @param array  $row     Row.
+	 * @param string $columns Column list.
+	 * @return array
+	 */
+	private static function project( array $row, $columns ) {
+		return array_intersect_key( $row, array_flip( array_map( 'trim', explode( ',', $columns ) ) ) );
+	}
+
+	/**
 	 * Project a row to AnalysisRepository::OPEN_COLUMNS.
 	 *
 	 * @param array $row Row.

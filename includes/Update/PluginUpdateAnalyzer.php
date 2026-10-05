@@ -346,6 +346,31 @@ final class PluginUpdateAnalyzer {
 	}
 
 	/**
+	 * Expire `awaiting_settle` analyses whose settle window has passed.
+	 *
+	 * Lifecycle maintenance for readers (reports), which must never show an
+	 * analysis as waiting after its deadline. Same rule and result as on admin
+	 * page shutdown: no snapshot is taken, post-update and final diffs stay NULL.
+	 *
+	 * @return void
+	 */
+	public function expire_overdue() {
+		try {
+			$open = $this->repository->find_open();
+		} catch ( Throwable $e ) {
+			return;
+		}
+
+		foreach ( $open as $row ) {
+			if ( AnalysisStatus::AWAITING_SETTLE === $row['status']
+				&& ! in_array( (int) $row['id'], $this->request_analyses, true )
+				&& ! $this->is_settle_window_open( $row ) ) {
+				$this->expire( $row );
+			}
+		}
+	}
+
+	/**
 	 * Create the analysis with its BEFORE snapshot.
 	 *
 	 * @param string          $plugin_file Plugin basename.

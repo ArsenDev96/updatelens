@@ -18,7 +18,7 @@ Initial snapshot sources:
 - WP-Cron events — planned
 - Action Scheduler actions — planned
 
-Current state: foundation (admin screen + one status REST route), the `wp_options` snapshot and diff engines, and the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`). No report REST routes or report UI yet.
+Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`). No report UI yet.
 
 ## Architecture boundaries
 
@@ -34,6 +34,7 @@ Current state: foundation (admin screen + one status REST route), the `wp_option
   - `Snapshot/` – capture safe state; `Diff/` – compare snapshots
   - `Update/` – WordPress updater hooks (`PluginUpdateTracker`) and lifecycle rules (`PluginUpdateAnalyzer`, `UpdateClassifier`)
   - `Storage/` – schema (`Schema`, `dbDelta`), SQL (`AnalysisRepository`), JSON persistence formats (`*Codec`)
+  - `Report/` – safe read models of stored analyses for REST (`AnalysisReadModel`) and read access with lifecycle maintenance (`AnalysisReports`)
 - The admin app is TypeScript + React + Tailwind + shadcn/ui in `src/admin/`, built by Vite into `assets/admin/dist/`. There is no public/frontend app.
 
 ## WordPress.org compatibility
@@ -92,6 +93,7 @@ The plugin must stay distributable on WordPress.org:
 - Every non-final analysis has a non-NULL `active_plugin` (unique), so there is at most one open analysis per plugin while history is kept. Transitions are compare-and-set on `status`.
 - Timestamps are UTC (`gmdate()`). Stale `captured` analyses (> `PluginUpdateAnalyzer::STALE_AFTER_SECONDS`) are abandoned on a later admin page request; no cron.
 - Bump `Storage\Schema::VERSION` when the table changes; `Schema::maybe_upgrade()` runs `dbDelta()` on bootstrap only when the stored version differs. dbDelta cannot rename: renames run before it (`Schema::install()`).
+- A table missing despite a current version is recreated by `Schema::repair()`, which runs only in bounded contexts (the UpdateLens screen and report REST reads), never on every request.
 
 ## Observation and attribution rules
 
@@ -101,6 +103,18 @@ The plugin must stay distributable on WordPress.org:
 - `settle_outcome` explains every NULL phase diff: `admin_shutdown`, `next_update`, `expired`, or `not_applicable` (ended before settling).
 - Any incompatible comparison in any phase → `incompatible`; never store partial phase diffs.
 - Don't hide core/system options (e.g. `theme_mods_*`, `recently_activated`) from the stored diffs; classification belongs to presentation.
+
+## Reports API rules
+
+- **REST reports expose safe read models, never database rows.** Controllers call `Report\AnalysisReports`; only `Report\AnalysisReadModel` turns rows into API arrays, by whitelisting fields. Controllers never write SQL.
+- **Snapshot and fingerprint internals are never API fields**: no snapshots, fingerprints, fingerprint contexts, option values, raw diff JSON, user data or stored error messages. Errors expose a sanitized `code` only.
+- **Stored diffs are decoded only through `Storage\OptionsDiffCodec::decode()`**, which validates everything; never `json_decode()` stored data elsewhere. An unreadable diff becomes an unavailable phase (`data_corrupt`), never an error with the stored data.
+- **Report reads expire overdue analyses first** (`PluginUpdateAnalyzer::expire_overdue()`, same inclusive deadline rule, no late snapshot). Apart from that and `Schema::repair()`, report endpoints are read-only.
+- History lists read metadata and `IS NOT NULL` phase flags only, ordered by primary key; full diffs are decoded only for a single report.
+- **API timestamps are UTC ISO 8601** (`2026-10-05T17:46:23Z`) or `null`; never convert to site-local time in PHP. Counts, sizes and deltas are JSON integers; flags are booleans.
+- Unknown stored statuses/outcomes become `unknown`; never reinterpret them. Unavailable phases always carry a `Report\UnavailableReason` code.
+- Post-update observations keep non-causal wording in the API, docs and UI (association `observed_after_update`, never "caused by").
+- Database errors never reach REST responses: reads fail with the generic `updatelens_reports_unavailable` (500).
 
 ## Working rules
 

@@ -52,6 +52,28 @@ final class Schema {
 	}
 
 	/**
+	 * Like maybe_upgrade(), and also recreate the analyses table if it is missing
+	 * although the stored version is current (e.g. dropped manually).
+	 *
+	 * Costs one extra `SHOW TABLES` query, so it runs only in bounded contexts
+	 * (the UpdateLens screen and report REST requests), never on every request.
+	 *
+	 * @return bool Whether the analyses table exists afterwards.
+	 */
+	public static function repair() {
+		global $wpdb;
+
+		if ( ! self::maybe_upgrade() ) {
+			return false;
+		}
+		if ( self::table_exists( $wpdb->prefix . self::ANALYSES_TABLE ) ) {
+			return true;
+		}
+
+		return self::install();
+	}
+
+	/**
 	 * Create or update the tables, then record the schema version.
 	 *
 	 * The dbDelta() function adds columns and indexes but cannot rename; renames from older

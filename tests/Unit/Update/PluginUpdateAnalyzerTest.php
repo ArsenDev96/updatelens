@@ -402,6 +402,33 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 	}
 
 	/**
+	 * Expiring overdue analyses for readers: same boundary, never a snapshot, never a settle.
+	 *
+	 * @dataProvider provide_deadline
+	 *
+	 * @param int  $elapsed  Seconds after the update finished.
+	 * @param bool $eligible Whether the analysis is still within its window.
+	 */
+	public function test_expire_overdue( $elapsed, $eligible ) {
+		$this->start( $this->request(), 'other/other.php' ); // A `captured` analysis is left alone.
+		$this->update();
+		$captures = $this->captures;
+
+		$this->time += $elapsed;
+		$this->request()->expire_overdue();
+
+		$row = $this->repository->rows[2];
+		$this->assertSame( $eligible ? AnalysisStatus::AWAITING_SETTLE : AnalysisStatus::COMPLETED, $row['status'] );
+		$this->assertSame( $eligible ? null : SettleOutcome::EXPIRED, $row['settle_outcome'] );
+		$this->assertNotNull( $row['during_update_diff'] );
+		$this->assertNull( $row['post_update_diff'] );
+		$this->assertNull( $row['final_diff'] );
+		$this->assertSame( $eligible, null !== $row['immediate_snapshot'] );
+		$this->assertSame( AnalysisStatus::CAPTURED, $this->repository->rows[1]['status'] );
+		$this->assertSame( $captures, $this->captures, 'No snapshot taken.' );
+	}
+
+	/**
 	 * Expired: completed without a settled snapshot; during-update diff kept.
 	 */
 	public function test_expired_analysis() {

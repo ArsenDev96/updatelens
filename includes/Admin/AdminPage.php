@@ -8,6 +8,7 @@
 namespace UpdateLens\Admin;
 
 use UpdateLens\Core\Plugin;
+use UpdateLens\Storage\Schema;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -74,6 +75,12 @@ final class AdminPage {
 			self::SLUG,
 			array( $this, 'render' )
 		);
+
+		// Recreate the analyses table if it went missing. Checked only when
+		// this screen loads, not on every request.
+		if ( $this->hook_suffix && ! is_multisite() ) {
+			add_action( 'load-' . $this->hook_suffix, array( Schema::class, 'repair' ) );
+		}
 	}
 
 	/**

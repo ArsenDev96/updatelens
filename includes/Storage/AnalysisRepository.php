@@ -28,6 +28,22 @@ class AnalysisRepository {
 	const OPEN_COLUMNS = 'id, plugin_file, status, started_at, settle_deadline';
 
 	/**
+	 * Report metadata columns. Never snapshots, user IDs or stored error messages.
+	 */
+	const REPORT_METADATA_COLUMNS = 'id, plugin_file, plugin_name, version_before, version_after, status, settle_outcome, started_at, settle_deadline, completed_at, error_code';
+
+	/**
+	 * Columns of a history row: report metadata plus whether each phase diff is
+	 * stored (NULL check only; the diff JSON is not read).
+	 */
+	const HISTORY_COLUMNS = self::REPORT_METADATA_COLUMNS . ', during_update_diff IS NOT NULL AS has_during_update_diff, post_update_diff IS NOT NULL AS has_post_update_diff, final_diff IS NOT NULL AS has_final_diff';
+
+	/**
+	 * Columns of a full report: report metadata plus the phase diffs.
+	 */
+	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', during_update_diff, post_update_diff, final_diff';
+
+	/**
 	 * Database.
 	 *
 	 * @var wpdb
@@ -155,6 +171,65 @@ class AnalysisRepository {
 		$this->assert_no_error();
 
 		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * One page of analyses, newest first (HISTORY_COLUMNS).
+	 *
+	 * Ordered by primary key, so the page is read from the PK index without a sort.
+	 *
+	 * @param int $limit  Page size.
+	 * @param int $offset Rows to skip.
+	 * @return array<int, array<string, mixed>>
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function find_page( $limit, $offset ) {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Column list is a class constant.
+				'SELECT ' . self::HISTORY_COLUMNS . ' FROM %i ORDER BY id DESC LIMIT %d OFFSET %d',
+				$this->table,
+				(int) $limit,
+				(int) $offset
+			),
+			ARRAY_A
+		);
+		$this->assert_no_error();
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * Number of analyses.
+	 *
+	 * @return int
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function count_all() {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
+		$count = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $this->table ) );
+		$this->assert_no_error();
+
+		return (int) $count;
+	}
+
+	/**
+	 * One analysis for a report (REPORT_COLUMNS: no snapshots), by primary key.
+	 *
+	 * @param int $id Analysis ID.
+	 * @return array<string, mixed>|null
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function find_report( $id ) {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- Custom table; must not be cached. Column list is a class constant.
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT ' . self::REPORT_COLUMNS . ' FROM %i WHERE id = %d', $this->table, (int) $id ), ARRAY_A );
+		$this->assert_no_error();
+
+		return $row ? $row : null;
 	}
 
 	/**

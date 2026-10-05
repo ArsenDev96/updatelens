@@ -2,7 +2,7 @@
 
 A WordPress plugin that will show what changes when a plugin update runs. It will capture site state before and after a single plugin update and report the difference in wp-admin.
 
-**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records the `wp_options` changes it observed during the update request and during the first admin request after it (names, sizes and autoload state, never values) in its own database table. These are observed changes, not proven causes. There is no report screen yet; **Tools → UpdateLens** only confirms the React ↔ REST wiring.
+**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records the `wp_options` changes it observed during the update request and during the first admin request after it (names, sizes and autoload state, never values) in its own database table. These are observed changes, not proven causes. A read-only REST API returns the history and reports ([docs/rest-api.md](docs/rest-api.md)); there is no report screen yet, and **Tools → UpdateLens** only confirms the React ↔ REST wiring.
 
 ## Requirements
 
@@ -46,7 +46,7 @@ composer lint:fix     # PHPCBF
 composer test         # PHPUnit unit tests (pure PHP, no WordPress install needed)
 ```
 
-Unit tests live in `tests/Unit/` and cover the pure snapshot, diff, persistence-format and update-lifecycle logic; they do not boot WordPress.
+Unit tests live in `tests/Unit/` and cover the pure snapshot, diff, persistence-format, update-lifecycle and report read-model logic; they do not boot WordPress.
 
 ## Build and package
 
@@ -76,6 +76,7 @@ includes/                PHP, PSR-4 namespace UpdateLens\
   Diff/                  wp_options diff between two snapshots (no values or fingerprints)
   Update/                Plugin update analysis lifecycle (WordPress updater hooks + rules)
   Storage/               Analyses table, SQL and JSON persistence formats
+  Report/                Safe read models for the report REST endpoints
 libs/assets.php          Vendored Vite ↔ WordPress asset loader (kucrut/vite-for-wp)
 src/
   admin/                 React + TypeScript admin app (entry: main.tsx)
@@ -84,6 +85,7 @@ src/
 assets/admin/dist/       Build output (git-ignored)
 scripts/release.mjs      ZIP packaging
 tests/                   PHPUnit unit tests (not shipped)
+docs/                    Developer documentation (REST API)
 ```
 
 ### How the pieces connect

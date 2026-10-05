@@ -73,6 +73,35 @@ final class SchemaTest extends TestCase {
 	}
 
 	/**
+	 * Report queries read existing columns and never snapshots, user IDs or stored messages.
+	 */
+	public function test_report_columns_are_safe() {
+		$report = array_map( 'trim', explode( ',', AnalysisRepository::REPORT_COLUMNS ) );
+
+		$this->assertSame( array(), array_diff( $report, $this->columns() ) );
+		foreach ( array( AnalysisRepository::REPORT_COLUMNS, AnalysisRepository::HISTORY_COLUMNS ) as $columns ) {
+			foreach ( array( 'before_snapshot', 'immediate_snapshot', 'user_id', 'error_message', 'active_plugin' ) as $internal ) {
+				$this->assertStringNotContainsString( $internal, $columns );
+			}
+		}
+	}
+
+	/**
+	 * History rows check diffs for NULL only; they never select diff JSON.
+	 */
+	public function test_history_columns_do_not_read_diffs() {
+		$history = array_map( 'trim', explode( ',', AnalysisRepository::HISTORY_COLUMNS ) );
+
+		foreach ( $history as $column ) {
+			if ( '_diff' === substr( strtok( $column, ' ' ), -5 ) ) {
+				$this->assertMatchesRegularExpression( '/^[a-z_]+_diff IS NOT NULL AS has_[a-z_]+_diff$/', $column );
+			} else {
+				$this->assertContains( $column, $this->columns() );
+			}
+		}
+	}
+
+	/**
 	 * Indexes the lifecycle queries rely on.
 	 */
 	public function test_indexes() {

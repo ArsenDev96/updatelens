@@ -8,6 +8,7 @@
 namespace UpdateLens\Core;
 
 use UpdateLens\Admin\AdminPage;
+use UpdateLens\Rest\AnalysesController;
 use UpdateLens\Rest\StatusController;
 use UpdateLens\Storage\Schema;
 use UpdateLens\Update\PluginUpdateAnalyzer;
@@ -92,5 +93,10 @@ final class Plugin {
 	 */
 	public function register_rest_routes() {
 		( new StatusController() )->register_routes();
+
+		// Analyses exist on single sites only (see register_hooks()).
+		if ( ! is_multisite() ) {
+			( new AnalysesController() )->register_routes();
+		}
 	}
 }

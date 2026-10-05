@@ -20,16 +20,20 @@ use UpdateLens\Storage\OptionsSnapshotCodec;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Orchestrates BEFORE → update → IMMEDIATE → later admin request → SETTLED.
+ * Orchestrates BEFORE → update request → IMMEDIATE → first eligible admin
+ * request → SETTLED, and stores the during-update, post-update and final
+ * diffs (see ObservationPhase). Reports observed changes, not proven causes.
  *
  * Knows nothing about WordPress hooks (see PluginUpdateTracker). One instance
  * lives for one PHP request and remembers which analyses that request
  * created, so the update request's own shutdown never settles them.
  *
- * Attribution rules:
+ * Observation rules:
  * - Settling happens at shutdown of a later wp-admin page request, or right
- *   before another update starts (whichever comes first), so a later update's
- *   changes are never attributed to an earlier one.
+ *   before another update starts (whichever comes first), and only within
+ *   SETTLE_WINDOW_SECONDS of the update; after that the analysis completes
+ *   with outcome `expired` and no settled snapshot, so late settling never
+ *   collects unrelated site activity.
  * - If another update starts in the request that created an analysis, that
  *   analysis is abandoned: its settled state would include the other update.
  * - A request that activates or deactivates the plugin does not settle it.
@@ -42,14 +46,10 @@ final class PluginUpdateAnalyzer {
 	const STALE_AFTER_SECONDS = 900;
 
 	/**
-	 * Settled at shutdown of a later wp-admin page request.
+	 * How long after a successful update a settled snapshot may still be taken.
+	 * Inclusive: a request exactly at the deadline may settle.
 	 */
-	const SETTLED_AT_ADMIN_SHUTDOWN = 'admin_shutdown';
-
-	/**
-	 * Settled right before another update started.
-	 */
-	const SETTLED_BEFORE_NEXT_UPDATE = 'next_update';
+	const SETTLE_WINDOW_SECONDS = 300;
 
 	const ERROR_UPDATE_FAILED          = 'update_failed';
 	const ERROR_UPDATE_NOT_COMPLETED   = 'update_not_completed';
@@ -66,10 +66,10 @@ final class PluginUpdateAnalyzer {
 	const ERROR_MESSAGES = array(
 		self::ERROR_UPDATE_NOT_COMPLETED   => 'The WordPress update did not report completion.',
 		self::ERROR_ANALYSIS_FAILED        => 'UpdateLens could not analyse this update.',
-		self::ERROR_SNAPSHOT_CORRUPT       => 'The stored BEFORE snapshot could not be read.',
+		self::ERROR_SNAPSHOT_CORRUPT       => 'A stored snapshot could not be read.',
 		self::ERROR_CONTEXT_CHANGED        => 'Option values cannot be compared because the fingerprint context changed (for example, rotated WordPress salts).',
-		self::ERROR_STALE                  => 'The update never reported completion; the analysis expired.',
-		self::ERROR_ANOTHER_UPDATE_STARTED => 'Another update ran before this analysis settled, so its changes cannot be attributed reliably.',
+		self::ERROR_STALE                  => 'The update never reported completion; the analysis was abandoned.',
+		self::ERROR_ANOTHER_UPDATE_STARTED => 'Another update ran in the same request, so later observations could not be separated from it.',
 	);
 
 	/**
@@ -167,8 +167,9 @@ final class PluginUpdateAnalyzer {
 	 * An update is about to modify files.
 	 *
 	 * Called for every update; $plugin_file is set only for supported
-	 * single-plugin updates. Settles analyses from earlier requests first, so
-	 * this update is never part of their settled diff.
+	 * single-plugin updates. Analyses from earlier requests that await a
+	 * settled snapshot are settled first (or expired, if past their window),
+	 * so this update is never part of their observations.
 	 *
 	 * @param string|null                            $plugin_file Plugin to analyse, or null.
 	 * @param array{name?: string, version?: string} $plugin      Plugin header data before the update.
@@ -187,22 +188,32 @@ final class PluginUpdateAnalyzer {
 			$this->abandon_open( $id, self::ERROR_ANOTHER_UPDATE_STARTED );
 		}
 
-		$pending = $first_update ? $this->awaiting_from_earlier_requests() : array();
-		if ( ! $pending && null === $plugin_file ) {
+		$to_settle = array();
+		if ( $first_update ) {
+			foreach ( $this->awaiting_from_earlier_requests() as $row ) {
+				if ( $this->is_settle_window_open( $row ) ) {
+					$to_settle[] = $row;
+				} else {
+					$this->expire( $row );
+				}
+			}
+		}
+
+		if ( ! $to_settle && null === $plugin_file ) {
 			return;
 		}
 
 		try {
 			$snapshot = call_user_func( $this->capture );
 		} catch ( Throwable $e ) {
-			foreach ( $pending as $row ) {
-				$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED );
+			foreach ( $to_settle as $row ) {
+				$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NEXT_UPDATE );
 			}
 			return;
 		}
 
-		foreach ( $pending as $row ) {
-			$this->settle( $row, $snapshot, self::SETTLED_BEFORE_NEXT_UPDATE );
+		foreach ( $to_settle as $row ) {
+			$this->settle( $row, $snapshot, SettleOutcome::NEXT_UPDATE );
 		}
 
 		if ( null !== $plugin_file ) {
@@ -212,6 +223,9 @@ final class PluginUpdateAnalyzer {
 
 	/**
 	 * WordPress reported the end of a single-plugin update.
+	 *
+	 * On success, stores the during-update diff (BEFORE → IMMEDIATE) and keeps
+	 * both snapshots until the settle phase ends.
 	 *
 	 * @param string      $plugin_file   Plugin basename.
 	 * @param string|null $error_code    Null if the update succeeded, else a WordPress error code.
@@ -233,32 +247,37 @@ final class PluginUpdateAnalyzer {
 		}
 
 		if ( null !== $error_code ) {
-			$this->finish( $row, AnalysisStatus::FAILED, self::sanitize_error_code( $error_code ) );
+			$this->finish( $row, AnalysisStatus::FAILED, self::sanitize_error_code( $error_code ), SettleOutcome::NOT_APPLICABLE );
 			return;
 		}
 
-		$before = $this->decode_before( $row );
+		$before = $this->decode_snapshot( $row, 'before_snapshot', SettleOutcome::NOT_APPLICABLE );
 		if ( null === $before ) {
 			return;
 		}
 
 		try {
-			$diff_json = $this->diff_codec->encode( $this->diff_builder->build( $before, call_user_func( $this->capture ) ) );
+			$immediate          = call_user_func( $this->capture );
+			$during_update_json = $this->diff_codec->encode( $this->diff_builder->build( $before, $immediate ) );
+			$immediate_json     = $this->snapshot_codec->encode( $immediate );
 		} catch ( IncompatibleSnapshotsException $e ) {
-			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED );
+			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED, SettleOutcome::NOT_APPLICABLE );
 			return;
 		} catch ( Throwable $e ) {
-			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED );
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NOT_APPLICABLE );
 			return;
 		}
 
+		$now = $this->now();
 		$this->transition(
 			$row,
 			array(
-				'status'         => AnalysisStatus::AWAITING_SETTLE,
-				'version_after'  => null === $version_after ? null : (string) $version_after,
-				'immediate_diff' => $diff_json,
-				'updated_at'     => $this->timestamp(),
+				'status'             => AnalysisStatus::AWAITING_SETTLE,
+				'version_after'      => null === $version_after ? null : (string) $version_after,
+				'during_update_diff' => $during_update_json,
+				'immediate_snapshot' => $immediate_json,
+				'settle_deadline'    => self::datetime( $now + self::SETTLE_WINDOW_SECONDS ),
+				'updated_at'         => self::datetime( $now ),
 			)
 		);
 	}
@@ -267,8 +286,8 @@ final class PluginUpdateAnalyzer {
 	 * The request is ending (WordPress `shutdown`).
 	 *
 	 * Fails analyses this request started whose update never reported back.
-	 * On a wp-admin page request that ran no update, also expires stale
-	 * analyses and settles those awaiting a settled capture.
+	 * On a wp-admin page request that ran no update, also abandons stale
+	 * analyses, expires those past their settle window and settles the rest.
 	 *
 	 * A plugin activated or deactivated during this request (e.g. the
 	 * reactivation request after update.php) did not run a full request
@@ -301,8 +320,13 @@ final class PluginUpdateAnalyzer {
 
 			if ( AnalysisStatus::CAPTURED === $row['status'] ) {
 				if ( $this->is_stale( $row ) ) {
-					$this->finish( $row, AnalysisStatus::ABANDONED, self::ERROR_STALE );
+					$this->finish( $row, AnalysisStatus::ABANDONED, self::ERROR_STALE, SettleOutcome::NOT_APPLICABLE );
 				}
+				continue;
+			}
+
+			if ( ! $this->is_settle_window_open( $row ) ) {
+				$this->expire( $row );
 				continue;
 			}
 
@@ -314,10 +338,10 @@ final class PluginUpdateAnalyzer {
 				try {
 					$snapshot = call_user_func( $this->capture );
 				} catch ( Throwable $e ) {
-					return; // Try again on a later request.
+					return; // Try again on a later request within the window.
 				}
 			}
-			$this->settle( $row, $snapshot, self::SETTLED_AT_ADMIN_SHUTDOWN );
+			$this->settle( $row, $snapshot, SettleOutcome::ADMIN_SHUTDOWN );
 		}
 	}
 
@@ -337,10 +361,10 @@ final class PluginUpdateAnalyzer {
 				if ( AnalysisStatus::CAPTURED === $open['status'] && ! $this->is_stale( $open ) ) {
 					return; // Another request is updating this plugin right now.
 				}
-				$this->finish( $open, AnalysisStatus::ABANDONED, AnalysisStatus::CAPTURED === $open['status'] ? self::ERROR_STALE : self::ERROR_ANOTHER_UPDATE_STARTED );
+				$this->finish( $open, AnalysisStatus::ABANDONED, AnalysisStatus::CAPTURED === $open['status'] ? self::ERROR_STALE : self::ERROR_ANOTHER_UPDATE_STARTED, SettleOutcome::NOT_APPLICABLE );
 			}
 
-			$now = $this->timestamp();
+			$now = self::datetime( $this->now() );
 			$id  = $this->repository->create(
 				array(
 					'plugin_file'     => $plugin_file,
@@ -362,57 +386,84 @@ final class PluginUpdateAnalyzer {
 	}
 
 	/**
-	 * Compare BEFORE with a settled snapshot and complete the analysis.
+	 * Store the post-update (IMMEDIATE → SETTLED) and final (BEFORE → SETTLED)
+	 * diffs and complete the analysis.
 	 *
-	 * @param array           $row      Analysis in `awaiting_settle`.
-	 * @param OptionsSnapshot $snapshot Settled snapshot.
-	 * @param string          $trigger  What triggered settling.
+	 * @param array           $open     Open analysis in `awaiting_settle` (metadata columns).
+	 * @param OptionsSnapshot $settled  Settled snapshot.
+	 * @param string          $outcome  SettleOutcome::ADMIN_SHUTDOWN or NEXT_UPDATE.
 	 * @return void
 	 */
-	private function settle( array $row, OptionsSnapshot $snapshot, $trigger ) {
-		$before = $this->decode_before( $row );
+	private function settle( array $open, OptionsSnapshot $settled, $outcome ) {
+		try {
+			$row = $this->repository->find( (int) $open['id'] );
+		} catch ( Throwable $e ) {
+			return;
+		}
+		if ( null === $row || AnalysisStatus::AWAITING_SETTLE !== $row['status'] ) {
+			return;
+		}
+
+		$before = $this->decode_snapshot( $row, 'before_snapshot', $outcome );
 		if ( null === $before ) {
+			return;
+		}
+		$immediate = $this->decode_snapshot( $row, 'immediate_snapshot', $outcome );
+		if ( null === $immediate ) {
 			return;
 		}
 
 		try {
-			$diff_json = $this->diff_codec->encode( $this->diff_builder->build( $before, $snapshot ) );
+			$post_update_json = $this->diff_codec->encode( $this->diff_builder->build( $immediate, $settled ) );
+			$final_json       = $this->diff_codec->encode( $this->diff_builder->build( $before, $settled ) );
 		} catch ( IncompatibleSnapshotsException $e ) {
-			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED );
+			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED, $outcome );
 			return;
 		} catch ( Throwable $e ) {
-			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED );
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, $outcome );
 			return;
 		}
 
-		$now = $this->timestamp();
 		$this->transition(
 			$row,
 			array(
-				'status'          => AnalysisStatus::COMPLETED,
-				'settled_diff'    => $diff_json,
-				'settle_trigger'  => $trigger,
-				'before_snapshot' => null,
-				'active_plugin'   => null,
-				'completed_at'    => $now,
-				'updated_at'      => $now,
-			)
+				'status'           => AnalysisStatus::COMPLETED,
+				'post_update_diff' => $post_update_json,
+				'final_diff'       => $final_json,
+			) + $this->closing_changes( $outcome )
 		);
 	}
 
 	/**
-	 * Decode the stored BEFORE snapshot, failing the analysis if it is unreadable.
+	 * Complete an analysis whose settle window passed without a settled snapshot.
 	 *
-	 * @param array $row Analysis.
+	 * The during-update diff stays; post-update and final diffs remain NULL.
+	 *
+	 * @param array $row Open analysis in `awaiting_settle`.
+	 * @return void
+	 */
+	private function expire( array $row ) {
+		$this->transition(
+			$row,
+			array( 'status' => AnalysisStatus::COMPLETED ) + $this->closing_changes( SettleOutcome::EXPIRED )
+		);
+	}
+
+	/**
+	 * Decode a stored snapshot, failing the analysis if it is missing or unreadable.
+	 *
+	 * @param array  $row     Analysis with snapshot columns.
+	 * @param string $column  `before_snapshot` or `immediate_snapshot`.
+	 * @param string $outcome Settle outcome to record on failure.
 	 * @return OptionsSnapshot|null
 	 */
-	private function decode_before( array $row ) {
+	private function decode_snapshot( array $row, $column, $outcome ) {
 		try {
-			return $this->snapshot_codec->decode( $row['before_snapshot'] );
+			return $this->snapshot_codec->decode( $row[ $column ] );
 		} catch ( UnexpectedValueException $e ) {
-			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_SNAPSHOT_CORRUPT );
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_SNAPSHOT_CORRUPT, $outcome );
 		} catch ( Throwable $e ) {
-			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED );
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, $outcome );
 		}
 
 		return null;
@@ -432,7 +483,7 @@ final class PluginUpdateAnalyzer {
 			return;
 		}
 		if ( null !== $row && in_array( $row['status'], array( AnalysisStatus::CAPTURED, AnalysisStatus::AWAITING_SETTLE ), true ) ) {
-			$this->finish( $row, AnalysisStatus::ABANDONED, $error_code );
+			$this->finish( $row, AnalysisStatus::ABANDONED, $error_code, SettleOutcome::NOT_APPLICABLE );
 		}
 	}
 
@@ -449,31 +500,47 @@ final class PluginUpdateAnalyzer {
 			return;
 		}
 		if ( null !== $row && AnalysisStatus::CAPTURED === $row['status'] ) {
-			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_UPDATE_NOT_COMPLETED );
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_UPDATE_NOT_COMPLETED, SettleOutcome::NOT_APPLICABLE );
 		}
 	}
 
 	/**
-	 * Move an analysis to a final state, clearing its BEFORE snapshot.
+	 * Move an analysis to a final non-completed state.
 	 *
 	 * @param array  $row        Analysis.
 	 * @param string $status     Final status.
 	 * @param string $error_code Error code.
+	 * @param string $outcome    Settle outcome.
 	 * @return void
 	 */
-	private function finish( array $row, $status, $error_code ) {
-		$now = $this->timestamp();
+	private function finish( array $row, $status, $error_code, $outcome ) {
 		$this->transition(
 			$row,
 			array(
-				'status'          => $status,
-				'error_code'      => $error_code,
-				'error_message'   => array_key_exists( $error_code, self::ERROR_MESSAGES ) ? self::ERROR_MESSAGES[ $error_code ] : 'The WordPress update did not succeed.',
-				'before_snapshot' => null,
-				'active_plugin'   => null,
-				'completed_at'    => $now,
-				'updated_at'      => $now,
-			)
+				'status'        => $status,
+				'error_code'    => $error_code,
+				'error_message' => array_key_exists( $error_code, self::ERROR_MESSAGES ) ? self::ERROR_MESSAGES[ $error_code ] : 'The WordPress update did not succeed.',
+			) + $this->closing_changes( $outcome )
+		);
+	}
+
+	/**
+	 * Columns set on every final state: outcome, timestamps, and removal of the
+	 * temporary snapshots and the open-analysis marker.
+	 *
+	 * @param string $outcome Settle outcome.
+	 * @return array<string, mixed>
+	 */
+	private function closing_changes( $outcome ) {
+		$now = self::datetime( $this->now() );
+
+		return array(
+			'settle_outcome'     => $outcome,
+			'before_snapshot'    => null,
+			'immediate_snapshot' => null,
+			'active_plugin'      => null,
+			'completed_at'       => $now,
+			'updated_at'         => $now,
 		);
 	}
 
@@ -488,7 +555,7 @@ final class PluginUpdateAnalyzer {
 		try {
 			$this->repository->transition( (int) $row['id'], $row['status'], $changes );
 		} catch ( Throwable $e ) {
-			return; // Left open; a later request settles it or the stale rule expires it.
+			return; // Left open; a later request settles, expires or abandons it.
 		}
 	}
 
@@ -515,6 +582,18 @@ final class PluginUpdateAnalyzer {
 	}
 
 	/**
+	 * Whether an `awaiting_settle` analysis may still take a settled snapshot (now <= deadline).
+	 *
+	 * @param array $row Analysis.
+	 * @return bool
+	 */
+	private function is_settle_window_open( array $row ) {
+		$deadline = empty( $row['settle_deadline'] ) ? false : strtotime( $row['settle_deadline'] . ' UTC' );
+
+		return false !== $deadline && $this->now() <= $deadline;
+	}
+
+	/**
 	 * Whether a `captured` analysis is older than STALE_AFTER_SECONDS.
 	 *
 	 * @param array $row Analysis.
@@ -523,16 +602,26 @@ final class PluginUpdateAnalyzer {
 	private function is_stale( array $row ) {
 		$started = strtotime( $row['started_at'] . ' UTC' );
 
-		return false === $started || ( (int) call_user_func( $this->now ) - $started ) > self::STALE_AFTER_SECONDS;
+		return false === $started || ( $this->now() - $started ) > self::STALE_AFTER_SECONDS;
 	}
 
 	/**
-	 * Current UTC time as a MySQL DATETIME string.
+	 * Current Unix time from the injected clock.
 	 *
+	 * @return int
+	 */
+	private function now() {
+		return (int) call_user_func( $this->now );
+	}
+
+	/**
+	 * Unix time as a UTC MySQL DATETIME string.
+	 *
+	 * @param int $time Unix time.
 	 * @return string
 	 */
-	private function timestamp() {
-		return gmdate( 'Y-m-d H:i:s', (int) call_user_func( $this->now ) );
+	private static function datetime( $time ) {
+		return gmdate( 'Y-m-d H:i:s', $time );
 	}
 
 	/**

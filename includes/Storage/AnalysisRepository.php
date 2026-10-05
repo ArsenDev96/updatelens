@@ -23,6 +23,11 @@ defined( 'ABSPATH' ) || exit;
 class AnalysisRepository {
 
 	/**
+	 * Columns returned for open analyses: enough to decide what to do, without snapshots.
+	 */
+	const OPEN_COLUMNS = 'id, plugin_file, status, started_at, settle_deadline';
+
+	/**
 	 * Database.
 	 *
 	 * @var wpdb
@@ -109,7 +114,7 @@ class AnalysisRepository {
 	}
 
 	/**
-	 * The open (non-terminal) analysis for a plugin, if any.
+	 * The open (non-terminal) analysis for a plugin, if any (metadata columns only).
 	 *
 	 * @param string $plugin_file Plugin basename.
 	 * @return array<string, mixed>|null
@@ -117,15 +122,19 @@ class AnalysisRepository {
 	 */
 	public function find_open_for_plugin( $plugin_file ) {
 		$wpdb = $this->wpdb;
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
-		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM %i WHERE active_plugin = %s', $this->table, (string) $plugin_file ), ARRAY_A );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- Custom table; must not be cached. Column list is a class constant.
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT ' . self::OPEN_COLUMNS . ' FROM %i WHERE active_plugin = %s', $this->table, (string) $plugin_file ), ARRAY_A );
 		$this->assert_no_error();
 
 		return $row ? $row : null;
 	}
 
 	/**
-	 * All open (non-terminal) analyses, oldest first.
+	 * All open (non-terminal) analyses, oldest first (metadata columns only).
+	 *
+	 * Runs at shutdown of wp-admin pages: uses the `status` index and reads at
+	 * most one row per plugin (open analyses are unique per plugin), never the
+	 * snapshot or diff columns.
 	 *
 	 * @return array<int, array<string, mixed>>
 	 * @throws RuntimeException If the query fails.
@@ -135,7 +144,8 @@ class AnalysisRepository {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT * FROM %i WHERE status IN (%s, %s) ORDER BY id ASC',
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Column list is a class constant.
+				'SELECT ' . self::OPEN_COLUMNS . ' FROM %i WHERE status IN (%s, %s) ORDER BY id ASC',
 				$this->table,
 				AnalysisStatus::CAPTURED,
 				AnalysisStatus::AWAITING_SETTLE

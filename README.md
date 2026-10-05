@@ -2,7 +2,7 @@
 
 A WordPress plugin that will show what changes when a plugin update runs. It will capture site state before and after a single plugin update and report the difference in wp-admin.
 
-**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records which `wp_options` entries the update added, removed or changed (sizes and autoload state, never values) in its own database table. There is no report screen yet; **Tools → UpdateLens** only confirms the React ↔ REST wiring.
+**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records the `wp_options` changes it observed during the update request and during the first admin request after it (names, sizes and autoload state, never values) in its own database table. These are observed changes, not proven causes. There is no report screen yet; **Tools → UpdateLens** only confirms the React ↔ REST wiring.
 
 ## Requirements
 

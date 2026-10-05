@@ -84,14 +84,23 @@ The plugin must stay distributable on WordPress.org:
 - **UpdateLens observes the WordPress updater; it never owns it.** No custom updater, and never alter packages, files, activation state, update metadata, credentials or responses. Upgrader filters return their input unchanged.
 - **Analysis failure must never block an update.** Hook callbacks catch every `Throwable`; never return a `WP_Error` from an upgrader filter because of UpdateLens.
 - **V0.1 attributes single-plugin updates only** (`UpdateClassifier`): `Plugin_Upgrader::upgrade()` or `bulk_upgrade()` with exactly one plugin ("Update now" is a one-plugin `bulk_upgrade`, so `is_multi` cannot tell single from bulk — use `bulk` + `update_count` from `upgrader_pre_download`). Ignored: multi-plugin bulk updates, installs, themes, core, translations, cron/WP-CLI updates, UpdateLens itself, and Multisite (the tracker is not registered there).
-- Flow: `upgrader_pre_download` → BEFORE (`captured`); `upgrader_install_package_result` + `upgrader_process_complete` → IMMEDIATE diff (`awaiting_settle`) or `failed`; `shutdown` of a **later** wp-admin page request → SETTLED diff (`completed`). States are documented in `Update\AnalysisStatus`.
+- Flow: `upgrader_pre_download` → BEFORE (`captured`); `upgrader_install_package_result` + `upgrader_process_complete` → IMMEDIATE + during-update diff (`awaiting_settle`) or `failed`; `shutdown` of a **later** wp-admin page request within the settle window → SETTLED + post-update and final diffs (`completed`). States: `Update\AnalysisStatus`; settle outcomes: `Update\SettleOutcome`.
 - **The update request's own shutdown never settles** (the analyzer remembers the analyses it created in this request). Ajax, REST, cron, CLI and frontend requests never settle. A request that activates/deactivates the analysed plugin does not settle it.
-- Before any other update starts, analyses awaiting settle from earlier requests are settled first, so changes are never attributed to the wrong update. Another update in the same request abandons that request's analysis.
-- **The BEFORE snapshot is temporary**: cleared on every final state. Final records keep metadata, status/error and the immediate + settled diffs (the settled diff is authoritative) — never option values.
+- Before any other update starts, analyses awaiting settle from earlier requests are settled first (or expired, if past their deadline), so another update's changes never appear in their phases. Another update in the same request abandons that request's analysis.
+- **BEFORE and IMMEDIATE snapshots are temporary**: cleared on every final state. Final records keep metadata, status/error, settle outcome and the phase diffs — never option values or snapshots.
 - Persist snapshots/diffs only as versioned JSON via `Storage\*Codec` (never PHP `serialize()`); decoding validates everything. Stored errors use fixed messages and sanitized codes — never WordPress error messages (paths, URLs).
 - Every non-final analysis has a non-NULL `active_plugin` (unique), so there is at most one open analysis per plugin while history is kept. Transitions are compare-and-set on `status`.
 - Timestamps are UTC (`gmdate()`). Stale `captured` analyses (> `PluginUpdateAnalyzer::STALE_AFTER_SECONDS`) are abandoned on a later admin page request; no cron.
-- Bump `Storage\Schema::VERSION` when the table changes; `Schema::maybe_upgrade()` runs `dbDelta()` on bootstrap only when the stored version differs.
+- Bump `Storage\Schema::VERSION` when the table changes; `Schema::maybe_upgrade()` runs `dbDelta()` on bootstrap only when the stored version differs. dbDelta cannot rename: renames run before it (`Schema::install()`).
+
+## Observation and attribution rules
+
+- **UpdateLens reports observed changes, not guaranteed causality.** Names and labels describe _when_ a change was observed, never that the plugin caused it (no `plugin_changes`, `caused_by`, …).
+- Phases are distinct and all kept (`Update\ObservationPhase`): `during_update` = BEFORE → IMMEDIATE (inside the update request; strongest association); `post_update` = IMMEDIATE → SETTLED (first eligible admin request after it; other site activity may contribute); `final` = BEFORE → SETTLED (net).
+- **The settle window is bounded**: `PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS` (300, inclusive) from the persisted `settle_deadline`. After it, the analysis completes with `settle_outcome = expired`: no late settled snapshot, post-update and final diffs stay NULL. Late settling must never collect unrelated site changes indefinitely.
+- `settle_outcome` explains every NULL phase diff: `admin_shutdown`, `next_update`, `expired`, or `not_applicable` (ended before settling).
+- Any incompatible comparison in any phase → `incompatible`; never store partial phase diffs.
+- Don't hide core/system options (e.g. `theme_mods_*`, `recently_activated`) from the stored diffs; classification belongs to presentation.
 
 ## Working rules
 

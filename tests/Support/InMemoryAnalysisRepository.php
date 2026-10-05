@@ -21,23 +21,26 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	 * Columns of a row, with defaults.
 	 */
 	const COLUMNS = array(
-		'id'              => null,
-		'plugin_file'     => '',
-		'plugin_name'     => '',
-		'version_before'  => '',
-		'version_after'   => null,
-		'user_id'         => 0,
-		'status'          => '',
-		'active_plugin'   => null,
-		'settle_trigger'  => null,
-		'started_at'      => '',
-		'updated_at'      => '',
-		'completed_at'    => null,
-		'before_snapshot' => null,
-		'immediate_diff'  => null,
-		'settled_diff'    => null,
-		'error_code'      => null,
-		'error_message'   => null,
+		'id'                 => null,
+		'plugin_file'        => '',
+		'plugin_name'        => '',
+		'version_before'     => '',
+		'version_after'      => null,
+		'user_id'            => 0,
+		'status'             => '',
+		'active_plugin'      => null,
+		'settle_outcome'     => null,
+		'started_at'         => '',
+		'updated_at'         => '',
+		'settle_deadline'    => null,
+		'completed_at'       => null,
+		'before_snapshot'    => null,
+		'immediate_snapshot' => null,
+		'during_update_diff' => null,
+		'post_update_diff'   => null,
+		'final_diff'         => null,
+		'error_code'         => null,
+		'error_message'      => null,
 	);
 
 	/**
@@ -114,7 +117,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	}
 
 	/**
-	 * Open row for a plugin.
+	 * Open row for a plugin (metadata columns only, like the real repository).
 	 *
 	 * @param string $plugin_file Plugin.
 	 * @return array|null
@@ -122,7 +125,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	public function find_open_for_plugin( $plugin_file ) {
 		foreach ( $this->rows as $row ) {
 			if ( $row['active_plugin'] === $plugin_file ) {
-				return $row;
+				return self::open_columns( $row );
 			}
 		}
 
@@ -130,12 +133,12 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	}
 
 	/**
-	 * Open rows, oldest first.
+	 * Open rows, oldest first (metadata columns only, like the real repository).
 	 *
 	 * @return array
 	 */
 	public function find_open() {
-		return array_values(
+		$open = array_values(
 			array_filter(
 				$this->rows,
 				static function ( $row ) {
@@ -143,5 +146,17 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 				}
 			)
 		);
+
+		return array_map( array( self::class, 'open_columns' ), $open );
+	}
+
+	/**
+	 * Project a row to AnalysisRepository::OPEN_COLUMNS.
+	 *
+	 * @param array $row Row.
+	 * @return array
+	 */
+	private static function open_columns( array $row ) {
+		return array_intersect_key( $row, array_flip( array_map( 'trim', explode( ',', AnalysisRepository::OPEN_COLUMNS ) ) ) );
 	}
 }

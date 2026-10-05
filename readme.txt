@@ -11,7 +11,7 @@ Understand what changes when your WordPress plugins update.
 
 == Description ==
 
-UpdateLens is in early development. When you update a single plugin from wp-admin, it records which options the update added, removed or changed (names, sizes and autoload state; never option values) in its own database table. There is no report screen yet. Deleting the plugin removes this data.
+UpdateLens is in early development. When you update a single plugin from wp-admin, it records which options changed during the update and during the first admin page load afterwards (names, sizes and autoload state; never option values) in its own database table. These are observed changes; other site activity at the same time can also appear. There is no report screen yet. Deleting the plugin removes this data.
 
 UpdateLens does not send any data to external services.
 

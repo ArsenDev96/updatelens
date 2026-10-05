@@ -1,0 +1,19 @@
+{
+  "useTabs": true,
+  "tabWidth": 4,
+  "printWidth": 80,
+  "singleQuote": true,
+  "trailingComma": "es5",
+  "bracketSpacing": true,
+  "bracketSameLine": false,
+  "parenSpacing": true,
+  "arrowParens": "always",
+  "semi": true,
+  "plugins": ["prettier-plugin-tailwindcss"],
+  "overrides": [
+    {
+      "files": ["*.json", "*.md", "*.yml", "*.yaml"],
+      "options": { "useTabs": false, "tabWidth": 2, "parenSpacing": false }
+    }
+  ]
+}

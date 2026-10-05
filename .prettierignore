@@ -1,0 +1,6 @@
+/assets/admin/dist/
+/release/
+/vendor/
+/languages/
+/composer.lock
+/package-lock.json

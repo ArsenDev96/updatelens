@@ -2,6 +2,7 @@ import { __, sprintf } from '@wordpress/i18n';
 import {
 	useCallback,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 	type MouseEvent,
@@ -28,12 +29,19 @@ import type {
 	Provider,
 	ReportPhase,
 } from '../types/api';
+import {
+	cronChangeCount,
+	optionsChangeCount,
+	reportChangeCounts,
+	type PhaseChangeCounts,
+} from '../utils/changes';
 import { formatDateTime } from '../utils/format';
 import {
 	cronPhaseNote,
 	cronUnavailableReasonText,
 	defaultPhase,
 	defaultProvider,
+	noChangesText,
 	PHASE_KEYS,
 	phaseLabel,
 	phaseNote,
@@ -125,7 +133,12 @@ function Report( {
 	const [ chosenProvider, setChosenProvider ] = useState< Provider | null >(
 		null
 	);
-	const initial = defaultPhase( report.phases );
+	// Counts come from the summaries only; computed once per loaded report.
+	const counts = useMemo(
+		() => reportChangeCounts( report.phases ),
+		[ report.phases ]
+	);
+	const initial = defaultPhase( report.phases, counts );
 	const selected = chosen ?? initial;
 
 	useEffect( () => {
@@ -178,16 +191,20 @@ function Report( {
 
 			{ selected && (
 				<PhaseTabs
-					phases={ report.phases }
+					counts={ counts }
 					selected={ selected }
 					onSelect={ setChosen }
 				>
 					<PhasePanel
 						phase={ selected }
 						data={ report.phases[ selected ] }
+						counts={ counts[ selected ] }
 						provider={
 							chosenProvider ??
-							defaultProvider( report.phases[ selected ] )
+							defaultProvider(
+								report.phases[ selected ],
+								counts[ selected ]
+							)
 						}
 						onProvider={ setChosenProvider }
 						windowSeconds={ report.observation_window_seconds }
@@ -236,12 +253,14 @@ function Notice( {
 function PhasePanel( {
 	phase,
 	data,
+	counts,
 	provider,
 	onProvider,
 	windowSeconds,
 }: {
 	phase: PhaseKey;
 	data: ReportPhase;
+	counts: PhaseChangeCounts;
 	provider: Provider;
 	onProvider: ( provider: Provider ) => void;
 	windowSeconds: number;
@@ -251,8 +270,16 @@ function PhasePanel( {
 			<p className="text-sm text-muted-foreground">
 				{ phaseNote( phase ) }
 			</p>
+			{ counts.options === 0 && counts.cron === 0 && (
+				<p className="text-sm font-medium">
+					{ __(
+						'No tracked changes observed during this phase.',
+						'updatelens'
+					) }
+				</p>
+			) }
 			<ProviderTabs
-				phase={ data }
+				counts={ counts }
 				selected={ provider }
 				onSelect={ onProvider }
 			>
@@ -286,6 +313,9 @@ function OptionsPanel( {
 			/>
 		);
 	}
+	if ( optionsChangeCount( data ) === 0 ) {
+		return <NoChanges text={ noChangesText( 'options' ) } />;
+	}
 	return (
 		<div className="space-y-4">
 			<PhaseSummary summary={ data.summary } />
@@ -308,11 +338,33 @@ function CronPanel( {
 			/>
 		);
 	}
+	if ( cronChangeCount( data ) === 0 ) {
+		return <NoChanges text={ noChangesText( 'cron' ) } />;
+	}
 	return (
 		<div className="space-y-4">
 			<p className="text-sm text-muted-foreground">{ cronPhaseNote() }</p>
 			<CronSummary summary={ data.summary } />
 			<CronDiffList phase={ data } />
+		</div>
+	);
+}
+
+/**
+ * Compact state of a signal that was captured without changes.
+ *
+ * @param props      Props.
+ * @param props.text Title and description.
+ */
+function NoChanges( {
+	text,
+}: {
+	text: { title: string; description: string };
+} ) {
+	return (
+		<div className="rounded-lg border bg-card px-4 py-3 text-sm">
+			<p className="font-medium">{ text.title }</p>
+			<p className="text-muted-foreground">{ text.description }</p>
 		</div>
 	);
 }

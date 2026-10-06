@@ -4,7 +4,11 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 import type { ChangedOption, OptionState } from '../types/api';
-import { formatBytes, formatBytesDelta } from '../utils/format';
+import {
+	formatBytes,
+	formatBytesDelta,
+	formatBytesPair,
+} from '../utils/format';
 
 /*
  * Option rows. They show names, sizes and autoload state only: option values
@@ -67,88 +71,106 @@ export function OptionStateRow( {
 	);
 }
 
+function To() {
+	return (
+		<>
+			{ ' ' }
+			<span aria-hidden="true">→</span>
+			<span className="sr-only">{ __( 'to', 'updatelens' ) }</span>{ ' ' }
+		</>
+	);
+}
+
 /**
- * Option present before and after whose value, size or autoload state differs.
+ * Option present before and after whose value, size or autoload state
+ * differs. One line for the value; autoload details only if they changed.
  *
  * @param props        Props.
  * @param props.option Changed option.
  */
 export function ChangedOptionRow( { option }: { option: ChangedOption } ) {
+	const [ before, after ] = formatBytesPair(
+		option.before_size,
+		option.after_size
+	);
+	const autoloadChanged =
+		option.autoload_value_changed || option.autoload_behavior_changed;
+
 	return (
-		<li className="space-y-2 border-l-2 border-l-sky-300 px-4 py-2.5">
+		<li className="space-y-1.5 border-l-2 border-l-sky-300 px-4 py-2.5">
 			<OptionName name={ option.name } />
-			<dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_minmax(0,1fr)]">
-				<dt className="text-muted-foreground">
-					{ __( 'Value', 'updatelens' ) }
-				</dt>
-				<dd className="flex flex-wrap items-baseline gap-x-2">
-					<span>
-						{ option.value_changed
-							? __( 'Value changed', 'updatelens' )
-							: __( 'Value unchanged', 'updatelens' ) }
-					</span>
+			<p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+				<span>
+					{ option.value_changed
+						? __( 'Value changed', 'updatelens' )
+						: __( 'Value unchanged', 'updatelens' ) }
+				</span>
+				<span aria-hidden="true" className="text-muted-foreground">
+					·
+				</span>
+				{ option.size_delta === 0 ? (
 					<span className="tabular-nums text-muted-foreground">
-						{ formatBytes( option.before_size ) }{ ' ' }
-						<span aria-hidden="true">→</span>
-						<span className="sr-only">
-							{ __( 'to', 'updatelens' ) }
-						</span>{ ' ' }
-						{ formatBytes( option.after_size ) }
+						{ after }
 					</span>
-					{ option.size_delta !== 0 && (
-						<span className="font-medium tabular-nums">
-							{ formatBytesDelta( option.size_delta ) }
-						</span>
-					) }
-				</dd>
-
-				<dt className="text-muted-foreground">
-					{ __( 'Autoload setting', 'updatelens' ) }
-				</dt>
-				<dd>
-					{ option.autoload_value_changed ? (
-						<Raw>
-							{ option.before_autoload }{ ' ' }
-							<span aria-hidden="true">→</span>
-							<span className="sr-only">
-								{ __( 'to', 'updatelens' ) }
-							</span>{ ' ' }
-							{ option.after_autoload }
-						</Raw>
-					) : (
-						<>
-							<Raw>{ option.after_autoload }</Raw>{ ' ' }
-							<span className="text-muted-foreground">
-								{ __( '(unchanged)', 'updatelens' ) }
-							</span>
-						</>
-					) }
-				</dd>
-
-				<dt className="text-muted-foreground">
-					{ __( 'Autoload behavior', 'updatelens' ) }
-				</dt>
-				<dd>
-					{ option.autoload_behavior_changed ? (
-						<span className="inline-flex flex-wrap items-baseline gap-x-2 rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-900 ring-1 ring-amber-200">
-							{ onOff( option.before_is_autoloaded ) }{ ' ' }
-							<span aria-hidden="true">→</span>
-							<span className="sr-only">
-								{ __( 'to', 'updatelens' ) }
-							</span>{ ' ' }
-							{ onOff( option.after_is_autoloaded ) }
-							<span className="font-normal">
-								{ __( '(behavior changed)', 'updatelens' ) }
-							</span>
-						</span>
-					) : (
+				) : (
+					<span className="tabular-nums">
 						<span className="text-muted-foreground">
-							{ onOff( option.after_is_autoloaded ) }{ ' ' }
-							{ __( '(no effective change)', 'updatelens' ) }
+							{ before }
+							<To />
+							{ after }
+						</span>{ ' ' }
+						<span className="font-medium">
+							({ formatBytesDelta( option.size_delta ) })
 						</span>
-					) }
-				</dd>
-			</dl>
+					</span>
+				) }
+			</p>
+			{ autoloadChanged && (
+				<dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_minmax(0,1fr)]">
+					<dt className="text-muted-foreground">
+						{ __( 'Autoload setting', 'updatelens' ) }
+					</dt>
+					<dd>
+						{ option.autoload_value_changed ? (
+							<Raw>
+								{ option.before_autoload }
+								<To />
+								{ option.after_autoload }
+							</Raw>
+						) : (
+							<>
+								<Raw>{ option.after_autoload }</Raw>{ ' ' }
+								<span className="text-muted-foreground">
+									{ __( '(unchanged)', 'updatelens' ) }
+								</span>
+							</>
+						) }
+					</dd>
+
+					<dt className="text-muted-foreground">
+						{ __( 'Autoload behavior', 'updatelens' ) }
+					</dt>
+					<dd>
+						{ option.autoload_behavior_changed ? (
+							<span className="inline-flex flex-wrap items-baseline gap-x-2 rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-900 ring-1 ring-amber-200">
+								<span>
+									{ onOff( option.before_is_autoloaded ) }
+									<To />
+									{ onOff( option.after_is_autoloaded ) }
+								</span>
+								<span className="font-normal">
+									{ __( '(behavior changed)', 'updatelens' ) }
+								</span>
+							</span>
+						) : (
+							<span className="text-muted-foreground">
+								{ onOff( option.after_is_autoloaded ) }{ ' ' }
+								{ __( '(no effective change)', 'updatelens' ) }
+							</span>
+						) }
+					</dd>
+				</dl>
+			) }
 		</li>
 	);
 }

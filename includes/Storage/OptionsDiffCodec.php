@@ -29,6 +29,15 @@ final class OptionsDiffCodec {
 	const SCHEMA = 1;
 
 	/**
+	 * How encode() begins a diff without added, removed or changed options.
+	 *
+	 * Lets SQL tell a recorded phase without changes from one with changes
+	 * (`NOT LIKE` prefix) without reading the diff. Contains no SQL LIKE
+	 * wildcards, quotes or backslashes.
+	 */
+	const EMPTY_PREFIX = '{"schema":' . self::SCHEMA . ',"added":[],"removed":[],"changed":[],';
+
+	/**
 	 * Maximum JSON nesting depth accepted when decoding.
 	 */
 	const MAX_DEPTH = 8;

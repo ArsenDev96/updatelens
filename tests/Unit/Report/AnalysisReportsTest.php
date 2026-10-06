@@ -227,6 +227,19 @@ final class AnalysisReportsTest extends TestCase {
 				'has_during_update' => true,
 				'has_post_update'   => true,
 				'has_final'         => true,
+				'phases'            => array_fill_keys(
+					array( 'during_update', 'post_update', 'final' ),
+					array(
+						'options' => array(
+							'recorded'    => true,
+							'has_changes' => true,
+						),
+						'cron'    => array(
+							'recorded'    => true,
+							'has_changes' => false,
+						),
+					)
+				),
 			),
 			$history['items'][0]
 		);
@@ -969,15 +982,82 @@ final class AnalysisReportsTest extends TestCase {
 	}
 
 	/**
-	 * History stays options-only and reads no Cron data.
+	 * History carries only recorded/has-changes flags per signal; `has_<phase>` stays options-only.
 	 */
-	public function test_history_is_unchanged_by_cron() {
+	public function test_history_has_only_cron_flags() {
 		$this->cron_update( self::malformed( self::cron_before() ), self::malformed( self::cron_immediate() ), self::malformed( self::cron_settled() ) );
+		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
 		$items = $this->reports()->history( 1, 20 )['items'];
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'error', 'has_during_update', 'has_post_update', 'has_final' ), array_keys( $items[0] ) );
-		$this->assertTrue( $items[0]['has_final'], 'Flags describe the options signal.' );
-		$this->assertStringNotContainsString( 'cron', strtolower( self::json( $items ) ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'error', 'has_during_update', 'has_post_update', 'has_final', 'phases' ), array_keys( $items[1] ) );
+		$this->assertTrue( $items[1]['has_final'], 'Flags describe the options signal.' );
+		$this->assertSame(
+			array(
+				'recorded'    => false,
+				'has_changes' => null,
+			),
+			$items[1]['phases']['final']['cron'],
+			'Malformed Cron state: not recorded.'
+		);
+		$this->assertTrue( $items[0]['phases']['final']['cron']['has_changes'] );
+		foreach ( array( 'acme_cleanup', 'wp_version_check', 'acme_update_once', self::CRON_SECRET, 'reason', 'malformed' ) as $needle ) {
+			$this->assertStringNotContainsString( $needle, self::json( $items ) );
+		}
+	}
+
+	/**
+	 * For analyses from the real lifecycle, History flags agree with the decoded reports:
+	 * recorded = available, has_changes = any added/removed/changed/rescheduled record.
+	 */
+	public function test_history_flags_match_reports() {
+		$this->completed_update( 'a/a.php' );
+		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
+		$this->cron_update( self::cron_before(), self::malformed( self::cron_immediate() ), self::cron_settled() );
+		// An update that changes nothing (like Rank Math 1.0.278 → 1.0.279 in dogfooding).
+		$request = $this->site->request();
+		$this->site->start( $request, 'quiet/quiet.php' );
+		$this->site->time += 5;
+		$request->update_finished( 'quiet/quiet.php', null, '1.0.1' );
+		$request->request_ending( true );
+		$this->site->time += 10;
+		$this->site->admin_page();
+		$this->cron_update( self::cron_before(), self::cron_immediate(), null ); // Still awaiting.
+
+		$reports = $this->reports();
+		$seen    = array();
+		foreach ( $reports->history( 1, 20 )['items'] as $item ) {
+			$report = $reports->report( $item['id'] );
+			foreach ( $item['phases'] as $phase => $signals ) {
+				foreach ( $signals as $signal => $flags ) {
+					$data  = $report['phases'][ $phase ][ $signal ];
+					$label = "#{$item['id']} {$phase} {$signal}";
+					$this->assertSame( $data['available'], $flags['recorded'], $label );
+					if ( ! $data['available'] ) {
+						$this->assertNull( $flags['has_changes'], $label );
+						$seen['not recorded'] = true;
+						continue;
+					}
+					$records = count( $data['added'] ) + count( $data['removed'] ) + count( $data['changed'] ) + ( isset( $data['rescheduled'] ) ? count( $data['rescheduled'] ) : 0 );
+					$this->assertSame( $records > 0, $flags['has_changes'], $label );
+					$seen[ $records > 0 ? 'changes' : 'no changes' ] = true;
+				}
+			}
+		}
+		$this->assertCount( 3, $seen, 'Covers changes, no changes and not recorded.' );
+
+		$quiet = $reports->history( 1, 20 )['items'][1];
+		$this->assertSame( 'quiet/quiet.php', $quiet['plugin']['file'] );
+		foreach ( $quiet['phases'] as $signals ) {
+			foreach ( $signals as $flags ) {
+				$this->assertSame(
+					array(
+						'recorded'    => true,
+						'has_changes' => false,
+					),
+					$flags
+				);
+			}
+		}
 	}
 
 	/**

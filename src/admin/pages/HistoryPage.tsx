@@ -2,6 +2,7 @@ import { __ } from '@wordpress/i18n';
 import { useCallback, useEffect, useRef, type MouseEvent } from 'react';
 
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 import { getAnalyses, PER_PAGE } from '../api/analyses';
 import { LoadError } from '../components/LoadError';
@@ -9,9 +10,10 @@ import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { useRequest } from '../hooks/use-request';
-import type { AnalysisHistoryItem, PhaseKey } from '../types/api';
+import type { AnalysisHistoryItem } from '../types/api';
+import { historyPhaseState } from '../utils/changes';
 import { formatDateTime } from '../utils/format';
-import { PHASE_KEYS, phaseLabel } from '../utils/labels';
+import { historyPhaseText, PHASE_KEYS, phaseLabel } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
 
 interface HistoryPageProps {
@@ -23,18 +25,6 @@ interface HistoryPageProps {
 	/** Move focus to the heading (after in-app navigation). */
 	focusHeading: boolean;
 }
-
-const HAS_PHASE: Record<
-	PhaseKey,
-	keyof Pick<
-		AnalysisHistoryItem,
-		'has_during_update' | 'has_post_update' | 'has_final'
-	>
-> = {
-	during_update: 'has_during_update',
-	post_update: 'has_post_update',
-	final: 'has_final',
-};
 
 export function HistoryPage( {
 	page,
@@ -167,7 +157,7 @@ function HistoryRow( {
 				<p className="font-mono text-xs text-muted-foreground">
 					<Versions plugin={ item.plugin } />
 				</p>
-				<PhaseAvailability item={ item } />
+				<PhaseChanges item={ item } />
 			</div>
 			<div className="flex items-center justify-between gap-4 text-sm sm:flex-col sm:items-end sm:justify-center sm:gap-1">
 				{ date && (
@@ -187,27 +177,35 @@ function HistoryRow( {
 	);
 }
 
-function PhaseAvailability( { item }: { item: AnalysisHistoryItem } ) {
+/**
+ * Per phase: whether changes were observed, none were, or nothing was
+ * recorded. Recorded without changes is never shown like a change.
+ *
+ * @param props      Props.
+ * @param props.item History item.
+ */
+function PhaseChanges( { item }: { item: AnalysisHistoryItem } ) {
 	return (
-		<ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+		<ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
 			{ PHASE_KEYS.map( ( phase ) => {
-				const stored = item[ HAS_PHASE[ phase ] ];
+				const state = historyPhaseState( item.phases[ phase ] );
 				return (
 					<li
 						key={ phase }
-						className="inline-flex items-center gap-1"
+						className="inline-flex items-baseline gap-1.5"
 					>
-						<span>{ phaseLabel( phase ) }</span>
-						<span
-							aria-hidden="true"
-							className={ stored ? 'text-emerald-700' : '' }
-						>
-							{ stored ? '✓' : '–' }
+						<span className="text-muted-foreground">
+							{ phaseLabel( phase ) }
+							<span className="sr-only">:</span>
 						</span>
-						<span className="sr-only">
-							{ stored
-								? __( 'recorded', 'updatelens' )
-								: __( 'not recorded', 'updatelens' ) }
+						<span
+							className={ cn(
+								state === 'changes'
+									? 'font-medium text-foreground'
+									: 'text-muted-foreground'
+							) }
+						>
+							{ historyPhaseText( state ) }
 						</span>
 					</li>
 				);

@@ -33,16 +33,43 @@ class AnalysisRepository {
 	const REPORT_METADATA_COLUMNS = 'id, plugin_file, plugin_name, version_before, version_after, status, settle_outcome, started_at, settle_deadline, completed_at, error_code';
 
 	/**
-	 * Columns of a history row: report metadata plus whether each phase diff is
-	 * stored (NULL check only; the diff JSON is not read).
+	 * Phase diff columns summarized in history rows, with how their codec
+	 * begins a diff without changes.
 	 */
-	const HISTORY_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff IS NOT NULL AS has_options_during_update_diff, options_post_update_diff IS NOT NULL AS has_options_post_update_diff, options_final_diff IS NOT NULL AS has_options_final_diff';
+	const HISTORY_DIFFS = array(
+		'options_during_update_diff' => OptionsDiffCodec::EMPTY_PREFIX,
+		'options_post_update_diff'   => OptionsDiffCodec::EMPTY_PREFIX,
+		'options_final_diff'         => OptionsDiffCodec::EMPTY_PREFIX,
+		'cron_during_update_diff'    => CronDiffCodec::EMPTY_PREFIX,
+		'cron_post_update_diff'      => CronDiffCodec::EMPTY_PREFIX,
+		'cron_final_diff'            => CronDiffCodec::EMPTY_PREFIX,
+	);
 
 	/**
 	 * Columns of a full report: report metadata plus the options and Cron
 	 * phase diffs and Cron phase reasons. Never snapshots.
 	 */
 	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff, cron_during_update_diff, cron_post_update_diff, cron_final_diff, cron_during_update_reason, cron_post_update_reason, cron_final_reason';
+
+	/**
+	 * Columns of a history row: report metadata plus, per phase diff, whether
+	 * it is stored (`has_<column>`) and whether it has changes
+	 * (`has_changes_<column>`, NULL if not stored).
+	 *
+	 * Both are computed in SQL: NULL check and a prefix comparison with the
+	 * codec's empty diff. The diff JSON is never returned or decoded.
+	 *
+	 * @return string
+	 */
+	public static function history_columns() {
+		$columns = array( self::REPORT_METADATA_COLUMNS );
+		foreach ( self::HISTORY_DIFFS as $column => $empty_prefix ) {
+			$columns[] = "{$column} IS NOT NULL AS has_{$column}";
+			$columns[] = "{$column} NOT LIKE '{$empty_prefix}%' AS has_changes_{$column}";
+		}
+
+		return implode( ', ', $columns );
+	}
 
 	/**
 	 * Database.
@@ -175,7 +202,7 @@ class AnalysisRepository {
 	}
 
 	/**
-	 * One page of analyses, newest first (HISTORY_COLUMNS).
+	 * One page of analyses, newest first (history_columns()).
 	 *
 	 * Ordered by primary key, so the page is read from the PK index without a sort.
 	 *
@@ -189,8 +216,8 @@ class AnalysisRepository {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Column list is a class constant.
-				'SELECT ' . self::HISTORY_COLUMNS . ' FROM %i ORDER BY id DESC LIMIT %d OFFSET %d',
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Column list is built from class constants only.
+				'SELECT ' . self::history_columns() . ' FROM %i ORDER BY id DESC LIMIT %d OFFSET %d',
 				$this->table,
 				(int) $limit,
 				(int) $offset

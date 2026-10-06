@@ -117,7 +117,18 @@ final class AnalysisReadModelTest extends TestCase {
 	 * Only whitelisted fields, with JSON types; database strings become ints/bools.
 	 */
 	public function test_history_item_fields_and_types() {
-		$item = ( new AnalysisReadModel() )->history_item( self::row( array( 'has_options_during_update_diff' => '1' ) ) );
+		$item = ( new AnalysisReadModel() )->history_item(
+			self::row(
+				array(
+					'has_options_during_update_diff' => '1',
+					'has_changes_options_during_update_diff' => '1',
+				)
+			)
+		);
+		$none = array(
+			'recorded'    => false,
+			'has_changes' => null,
+		);
 
 		$this->assertSame(
 			array(
@@ -139,9 +150,73 @@ final class AnalysisReadModelTest extends TestCase {
 				'has_during_update' => true,
 				'has_post_update'   => false,
 				'has_final'         => false,
+				'phases'            => array(
+					'during_update' => array(
+						'options' => array(
+							'recorded'    => true,
+							'has_changes' => true,
+						),
+						'cron'    => $none,
+					),
+					'post_update'   => array(
+						'options' => $none,
+						'cron'    => $none,
+					),
+					'final'         => array(
+						'options' => $none,
+						'cron'    => $none,
+					),
+				),
 			),
 			$item
 		);
+	}
+
+	/**
+	 * Each signal says independently whether it was recorded and whether it has changes.
+	 */
+	public function test_history_change_flags_per_signal() {
+		$item = ( new AnalysisReadModel() )->history_item(
+			self::row(
+				array(
+					'has_options_final_diff'            => '1',
+					'has_changes_options_final_diff'    => '0',
+					'has_cron_final_diff'               => '1',
+					'has_changes_cron_final_diff'       => '1',
+					'has_options_during_update_diff'    => '1',
+					'has_changes_options_during_update_diff' => null,
+					'has_cron_post_update_diff'         => '0',
+					'has_changes_cron_post_update_diff' => '1',
+				)
+			)
+		);
+
+		$this->assertSame(
+			array(
+				'recorded'    => true,
+				'has_changes' => false,
+			),
+			$item['phases']['final']['options'],
+			'Recorded without changes.'
+		);
+		$this->assertSame(
+			array(
+				'recorded'    => true,
+				'has_changes' => true,
+			),
+			$item['phases']['final']['cron']
+		);
+		$this->assertFalse( $item['phases']['during_update']['options']['has_changes'], 'A missing SQL flag is not a change.' );
+		$this->assertSame(
+			array(
+				'recorded'    => false,
+				'has_changes' => null,
+			),
+			$item['phases']['post_update']['cron'],
+			'Not recorded: no change flag, whatever the row says.'
+		);
+		$this->assertTrue( $item['has_final'] );
+		$this->assertFalse( $item['has_post_update'], 'has_<phase> stays options-only.' );
 	}
 
 	/**

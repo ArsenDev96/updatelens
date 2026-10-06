@@ -86,11 +86,26 @@ interface AnalysisBase {
 	error: AnalysisError | null;
 }
 
-/** Row of GET /updatelens/v1/analyses. Flags say whether an options diff is stored per phase. */
+/** History facts of one signal in one phase (computed without decoding the diff). */
+export interface HistorySignal {
+	/** Whether a diff is stored. */
+	recorded: boolean;
+	/** Whether the stored diff has any record; null if not recorded. */
+	has_changes: boolean | null;
+}
+
+export interface HistoryPhase {
+	options: HistorySignal;
+	cron: HistorySignal;
+}
+
+/** Row of GET /updatelens/v1/analyses. */
 export interface AnalysisHistoryItem extends AnalysisBase {
+	/** Whether an options diff is stored per phase. */
 	has_during_update: boolean;
 	has_post_update: boolean;
 	has_final: boolean;
+	phases: Record< PhaseKey, HistoryPhase >;
 }
 
 /** Options totals and signed deltas (`after - before`) in raw counts and bytes. */

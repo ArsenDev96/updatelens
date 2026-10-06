@@ -88,26 +88,39 @@ final class SchemaTest extends TestCase {
 		$report = array_map( 'trim', explode( ',', AnalysisRepository::REPORT_COLUMNS ) );
 
 		$this->assertSame( array(), array_diff( $report, $this->columns() ) );
-		foreach ( array( AnalysisRepository::REPORT_COLUMNS, AnalysisRepository::HISTORY_COLUMNS ) as $columns ) {
+		foreach ( array( AnalysisRepository::REPORT_COLUMNS, AnalysisRepository::history_columns() ) as $columns ) {
 			foreach ( array( '_snapshot', 'fingerprint', 'user_id', 'error_message', 'active_plugin' ) as $internal ) {
 				$this->assertStringNotContainsString( $internal, $columns );
 			}
 		}
-		$this->assertStringNotContainsString( 'cron_', AnalysisRepository::HISTORY_COLUMNS, 'History reads no Cron data.' );
+		$this->assertStringNotContainsString( '_reason', AnalysisRepository::history_columns(), 'History reads no Cron reasons.' );
 	}
 
 	/**
-	 * History rows check diffs for NULL only; they never select diff JSON.
+	 * History rows select metadata plus per-diff flags computed in SQL; they never select diff JSON.
 	 */
 	public function test_history_columns_do_not_read_diffs() {
-		$history = array_map( 'trim', explode( ',', AnalysisRepository::HISTORY_COLUMNS ) );
+		$expected = array();
+		foreach ( AnalysisRepository::HISTORY_DIFFS as $column => $empty_prefix ) {
+			$expected[] = "{$column} IS NOT NULL AS has_{$column}";
+			$expected[] = "{$column} NOT LIKE '{$empty_prefix}%' AS has_changes_{$column}";
+		}
+		$metadata = array_map( 'trim', explode( ',', AnalysisRepository::REPORT_METADATA_COLUMNS ) );
 
-		foreach ( $history as $column ) {
-			if ( '_diff' === substr( strtok( $column, ' ' ), -5 ) ) {
-				$this->assertMatchesRegularExpression( '/^[a-z_]+_diff IS NOT NULL AS has_[a-z_]+_diff$/', $column );
-			} else {
-				$this->assertContains( $column, $this->columns() );
-			}
+		$this->assertSame( array(), array_diff( $metadata, $this->columns() ) );
+		$this->assertSame( implode( ', ', array_merge( array( AnalysisRepository::REPORT_METADATA_COLUMNS ), $expected ) ), AnalysisRepository::history_columns() );
+		$this->assertSame( array(), array_diff( array_keys( AnalysisRepository::HISTORY_DIFFS ), $this->columns() ) );
+		foreach ( array_keys( AnalysisRepository::HISTORY_DIFFS ) as $column ) {
+			$this->assertStringEndsWith( '_diff', $column );
+		}
+	}
+
+	/**
+	 * The empty-diff prefixes are safe inside a single-quoted SQL LIKE literal.
+	 */
+	public function test_history_empty_prefixes_are_safe_sql_literals() {
+		foreach ( AnalysisRepository::HISTORY_DIFFS as $empty_prefix ) {
+			$this->assertDoesNotMatchRegularExpression( '/[%_\\\\\']/', $empty_prefix );
 		}
 	}
 

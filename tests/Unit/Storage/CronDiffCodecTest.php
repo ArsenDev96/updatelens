@@ -102,6 +102,23 @@ final class CronDiffCodecTest extends TestCase {
 	}
 
 	/**
+	 * A diff starts with EMPTY_PREFIX exactly when it has no records (history flags rely on it).
+	 *
+	 * @dataProvider provide_diffs
+	 *
+	 * @param array $before Events before.
+	 * @param array $after  Events after.
+	 */
+	public function test_empty_prefix_marks_diffs_without_changes( array $before, array $after ) {
+		$diff    = $this->diff( $before, $after )->to_array();
+		$records = count( $diff['added'] ) + count( $diff['removed'] ) + count( $diff['rescheduled'] ) + count( $diff['changed'] );
+		$json    = ( new CronDiffCodec() )->encode( $this->diff( $before, $after ) );
+		$empty   = 0 === strpos( $json, CronDiffCodec::EMPTY_PREFIX );
+
+		$this->assertSame( 0 === $records, $empty );
+	}
+
+	/**
 	 * Diffs of each category.
 	 *
 	 * @return array<string, array{array, array}>

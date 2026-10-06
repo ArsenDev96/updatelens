@@ -122,6 +122,39 @@ final class OptionsDiffCodecTest extends TestCase {
 	}
 
 	/**
+	 * A diff starts with EMPTY_PREFIX exactly when it has no added, removed or changed options.
+	 */
+	public function test_empty_prefix_marks_diffs_without_changes() {
+		$codec   = new OptionsDiffCodec();
+		$builder = new OptionsSnapshotBuilder( new OptionValueHasher( 's' ), new OptionNoiseFilter(), new AutoloadPolicy( array( 'yes' ) ) );
+		$row     = static function ( $name, $value, $autoload = 'yes' ) {
+			return array(
+				'option_name'  => $name,
+				'option_value' => $value,
+				'autoload'     => $autoload,
+			);
+		};
+		$base    = array( $row( 'a', 'one' ), $row( 'b', 'two' ) );
+		$diff    = static function ( array $before, array $after ) use ( $codec, $builder ) {
+			return $codec->encode( ( new OptionsDiffBuilder() )->build( $builder->build( $before ), $builder->build( $after ) ) );
+		};
+
+		$this->assertStringStartsWith( OptionsDiffCodec::EMPTY_PREFIX, $diff( array(), array() ) );
+		$this->assertStringStartsWith( OptionsDiffCodec::EMPTY_PREFIX, $diff( $base, $base ) );
+		foreach (
+			array(
+				'added'    => array( $base, array_merge( $base, array( $row( 'c', 'new' ) ) ) ),
+				'removed'  => array( $base, array( $row( 'a', 'one' ) ) ),
+				'changed'  => array( $base, array( $row( 'a', 'one' ), $row( 'b', 'three' ) ) ),
+				'autoload' => array( $base, array( $row( 'a', 'one' ), $row( 'b', 'two', 'no' ) ) ),
+			) as $case => $sides
+		) {
+			$this->assertStringStartsNotWith( OptionsDiffCodec::EMPTY_PREFIX, $diff( $sides[0], $sides[1] ), $case );
+		}
+		$this->assertStringStartsNotWith( OptionsDiffCodec::EMPTY_PREFIX, $codec->encode( self::sample_diff() ) );
+	}
+
+	/**
 	 * Mutations of a valid stored diff that must be rejected.
 	 *
 	 * @return array

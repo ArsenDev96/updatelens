@@ -62,8 +62,8 @@ describe( 'WP-Cron in reports', () => {
 		expect(
 			within( signals )
 				.getAllByRole( 'tab' )
-				.map( ( t ) => t.textContent )
-		).toEqual( [ 'Options', 'WP-Cron' ] );
+				.map( ( t ) => t.getAttribute( 'aria-label' ) )
+		).toEqual( [ 'Options, 6 changes', 'WP-Cron, 5 changes' ] );
 		expect( tab( /^Options/ ) ).toHaveAttribute( 'aria-selected', 'true' );
 		expect( signalPanel() ).toHaveTextContent( 'ulfx_a_feature_flags' );
 
@@ -104,7 +104,7 @@ describe( 'WP-Cron in reports', () => {
 		);
 		expect( tab( /Net result/ ) ).not.toHaveTextContent( 'not available' );
 		expect( tab( /^WP-Cron/ ) ).toHaveAttribute( 'aria-selected', 'true' );
-		expect( tab( /^Options/ ) ).toHaveTextContent( '(not available)' );
+		expect( tab( /^Options/ ) ).toHaveTextContent( 'Not available' );
 	} );
 
 	it( 'shows the Cron summary with rescheduled as a separate count', async () => {
@@ -291,8 +291,12 @@ describe( 'WP-Cron in reports', () => {
 		expect( signalPanel() ).toHaveTextContent(
 			'WP-Cron event arguments are fingerprinted for matching but are never stored or shown. Events with the same hook may therefore represent different argument sets.'
 		);
-		expect( signalPanel() ).toHaveTextContent(
-			'A moved one-time event may represent a reschedule or a new equivalent event after execution.'
+		// No one-time event moved or disappeared here, so that note is left out.
+		expect( signalPanel() ).not.toHaveTextContent(
+			'A moved one-time event may represent'
+		);
+		expect( signalPanel() ).not.toHaveTextContent(
+			'One-time jobs may disappear'
 		);
 	} );
 
@@ -305,7 +309,10 @@ describe( 'WP-Cron in reports', () => {
 		expect( tab( /Net result/ ) ).not.toHaveTextContent( 'not available' );
 		expect( tab( /^Options/ ) ).toHaveAttribute( 'aria-selected', 'true' );
 		expect( signalPanel() ).toHaveTextContent( 'ulfx_a_feature_flags' );
-		expect( tab( /^WP-Cron/ ) ).toHaveTextContent( '(not available)' );
+		expect( tab( /^WP-Cron/ ) ).toHaveTextContent( 'Not available' );
+		expect( tab( /^WP-Cron/ ) ).toHaveAccessibleName(
+			'WP-Cron, not available'
+		);
 
 		await user.click( tab( /^WP-Cron/ ) );
 		expect( signalPanel() ).toHaveTextContent(
@@ -335,7 +342,7 @@ describe( 'WP-Cron in reports', () => {
 		expect( tab( /After update/ ) ).not.toHaveTextContent(
 			'not available'
 		);
-		expect( tab( /^WP-Cron/ ) ).toHaveTextContent( '(not available)' );
+		expect( tab( /^WP-Cron/ ) ).toHaveTextContent( 'Not available' );
 		expect( signalPanel() ).toHaveTextContent(
 			"UpdateLens couldn't capture or read the WP-Cron state this phase needs."
 		);

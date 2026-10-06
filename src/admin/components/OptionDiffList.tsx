@@ -1,72 +1,124 @@
-import { __, sprintf } from '@wordpress/i18n';
-import type { ReactNode } from 'react';
+import { _n, __, sprintf } from '@wordpress/i18n';
 
 import type { AvailableOptionsPhase } from '../types/api';
+import { formatCount } from '../utils/format';
+import { DiffSection } from './DiffSection';
 import { ChangedOptionRow, OptionStateRow } from './OptionRows';
 
 /**
- * Added, removed and changed options of one phase. Every section is always
- * shown; an empty one says so in one line.
+ * Added, removed and changed options of one phase with changes. Empty lists
+ * are left out (the summary shows their zero count); long lists collapse.
  *
  * @param props       Props.
- * @param props.phase Available phase.
+ * @param props.phase Available phase with at least one change.
  */
 export function OptionDiffList( { phase }: { phase: AvailableOptionsPhase } ) {
 	const titles = {
-		/* translators: %d: number of options. */
-		added: sprintf( __( 'Added (%d)', 'updatelens' ), phase.added.length ),
-		/* translators: %d: number of options. */
-		removed: sprintf(
-			__( 'Removed (%d)', 'updatelens' ),
-			phase.removed.length
+		/* translators: %s: number of options. */
+		added: sprintf(
+			__( 'Added (%s)', 'updatelens' ),
+			formatCount( phase.added.length )
 		),
-		/* translators: %d: number of options. */
+		/* translators: %s: number of options. */
+		removed: sprintf(
+			__( 'Removed (%s)', 'updatelens' ),
+			formatCount( phase.removed.length )
+		),
+		/* translators: %s: number of options. */
 		changed: sprintf(
-			__( 'Changed (%d)', 'updatelens' ),
-			phase.changed.length
+			__( 'Changed (%s)', 'updatelens' ),
+			formatCount( phase.changed.length )
 		),
 	};
 
 	return (
 		<div className="space-y-5">
-			<Section
-				id="added"
-				title={ titles.added }
-				empty={ __( 'No added options.', 'updatelens' ) }
-				count={ phase.added.length }
-			>
-				{ phase.added.map( ( option ) => (
-					<OptionStateRow
-						key={ option.name }
-						option={ option }
-						kind="added"
-					/>
-				) ) }
-			</Section>
-			<Section
-				id="removed"
-				title={ titles.removed }
-				empty={ __( 'No removed options.', 'updatelens' ) }
-				count={ phase.removed.length }
-			>
-				{ phase.removed.map( ( option ) => (
-					<OptionStateRow
-						key={ option.name }
-						option={ option }
-						kind="removed"
-					/>
-				) ) }
-			</Section>
-			<Section
-				id="changed"
-				title={ titles.changed }
-				empty={ __( 'No changed options.', 'updatelens' ) }
-				count={ phase.changed.length }
-			>
-				{ phase.changed.map( ( option ) => (
-					<ChangedOptionRow key={ option.name } option={ option } />
-				) ) }
-			</Section>
+			{ phase.added.length > 0 && (
+				<DiffSection
+					id="updatelens-options-added"
+					title={ titles.added }
+					items={ phase.added }
+					renderItem={ ( option ) => (
+						<OptionStateRow
+							key={ option.name }
+							option={ option }
+							kind="added"
+						/>
+					) }
+					moreLabel={ ( hidden ) =>
+						sprintf(
+							/* translators: %s: number of hidden rows. */
+							_n(
+								'Show %s more added option',
+								'Show %s more added options',
+								hidden,
+								'updatelens'
+							),
+							formatCount( hidden )
+						)
+					}
+					lessLabel={ __( 'Show fewer added options', 'updatelens' ) }
+				/>
+			) }
+			{ phase.removed.length > 0 && (
+				<DiffSection
+					id="updatelens-options-removed"
+					title={ titles.removed }
+					items={ phase.removed }
+					renderItem={ ( option ) => (
+						<OptionStateRow
+							key={ option.name }
+							option={ option }
+							kind="removed"
+						/>
+					) }
+					moreLabel={ ( hidden ) =>
+						sprintf(
+							/* translators: %s: number of hidden rows. */
+							_n(
+								'Show %s more removed option',
+								'Show %s more removed options',
+								hidden,
+								'updatelens'
+							),
+							formatCount( hidden )
+						)
+					}
+					lessLabel={ __(
+						'Show fewer removed options',
+						'updatelens'
+					) }
+				/>
+			) }
+			{ phase.changed.length > 0 && (
+				<DiffSection
+					id="updatelens-options-changed"
+					title={ titles.changed }
+					items={ phase.changed }
+					renderItem={ ( option ) => (
+						<ChangedOptionRow
+							key={ option.name }
+							option={ option }
+						/>
+					) }
+					moreLabel={ ( hidden ) =>
+						sprintf(
+							/* translators: %s: number of hidden rows. */
+							_n(
+								'Show %s more changed option',
+								'Show %s more changed options',
+								hidden,
+								'updatelens'
+							),
+							formatCount( hidden )
+						)
+					}
+					lessLabel={ __(
+						'Show fewer changed options',
+						'updatelens'
+					) }
+				/>
+			) }
 			<p className="text-xs text-muted-foreground">
 				{ __(
 					'UpdateLens detects value changes without storing the option values themselves.',
@@ -74,35 +126,5 @@ export function OptionDiffList( { phase }: { phase: AvailableOptionsPhase } ) {
 				) }
 			</p>
 		</div>
-	);
-}
-
-function Section( {
-	id,
-	title,
-	empty,
-	count,
-	children,
-}: {
-	id: string;
-	title: string;
-	empty: string;
-	count: number;
-	children: ReactNode;
-} ) {
-	const headingId = `updatelens-options-${ id }`;
-	return (
-		<section aria-labelledby={ headingId } className="space-y-2">
-			<h3 id={ headingId } className="text-sm font-semibold">
-				{ title }
-			</h3>
-			{ count === 0 ? (
-				<p className="text-sm text-muted-foreground">{ empty }</p>
-			) : (
-				<ul className="divide-y overflow-hidden rounded-lg border bg-card">
-					{ children }
-				</ul>
-			) }
-		</section>
 	);
 }

@@ -23,8 +23,8 @@ defined( 'ABSPATH' ) || exit;
  * Builds history rows and reports from analysis rows.
  *
  * Reports are provider-aware: each phase holds an `options` and a `cron`
- * object with independent availability. History rows describe the options
- * signal only and never read Cron columns.
+ * object with independent availability. History rows carry per-phase,
+ * per-signal `recorded`/`has_changes` flags computed in SQL, never diff data.
  *
  * Whitelists fields: snapshots, fingerprints, user IDs, stored error
  * messages and raw diff JSON are never part of the output, whatever the row
@@ -113,22 +113,58 @@ final class AnalysisReadModel {
 	}
 
 	/**
-	 * History row (from AnalysisRepository::HISTORY_COLUMNS).
+	 * History row (from AnalysisRepository::history_columns()).
 	 *
-	 * The `has_*` flags say whether a phase diff is stored; they do not decode it.
+	 * Built from flags computed in SQL; no diff is decoded. `has_<phase>` says
+	 * whether a wp_options diff is stored. `phases.<phase>.<signal>` says
+	 * whether a diff is stored (`recorded`) and whether it contains changes
+	 * (`has_changes`, null if not recorded). Only the report decodes diffs,
+	 * so it alone can find a stored diff unreadable.
 	 *
 	 * @param array<string, mixed> $row Analysis row.
 	 * @return array<string, mixed>
 	 */
 	public function history_item( array $row ) {
-		$item = $this->metadata( $row );
+		$item   = $this->metadata( $row );
+		$phases = array();
 
 		foreach ( self::PHASE_COLUMNS as $phase => $column ) {
-			$key                    = 'has_' . $column;
-			$item[ "has_{$phase}" ] = isset( $row[ $key ] ) && 1 === (int) $row[ $key ];
+			$item[ "has_{$phase}" ] = self::flag( $row, 'has_' . $column );
+			$phases[ $phase ]       = array(
+				'options' => self::history_signal( $row, $column ),
+				'cron'    => self::history_signal( $row, CronObservation::PHASES[ $phase ][0] ),
+			);
 		}
+		$item['phases'] = $phases;
 
 		return $item;
+	}
+
+	/**
+	 * Whether one signal's diff of a phase is stored and has changes.
+	 *
+	 * @param array<string, mixed> $row    History row.
+	 * @param string               $column Diff column.
+	 * @return array{recorded: bool, has_changes: bool|null}
+	 */
+	private static function history_signal( array $row, $column ) {
+		$recorded = self::flag( $row, 'has_' . $column );
+
+		return array(
+			'recorded'    => $recorded,
+			'has_changes' => $recorded ? self::flag( $row, 'has_changes_' . $column ) : null,
+		);
+	}
+
+	/**
+	 * A SQL flag ("0"/"1" or NULL) as a boolean.
+	 *
+	 * @param array<string, mixed> $row Row.
+	 * @param string               $key Column alias.
+	 * @return bool
+	 */
+	private static function flag( array $row, $key ) {
+		return isset( $row[ $key ] ) && 1 === (int) $row[ $key ];
 	}
 
 	/**

@@ -5,8 +5,8 @@ import { cn } from '@/lib/utils';
 
 import type { OptionsDiffSummary } from '../types/api';
 import {
-	formatBytes,
 	formatBytesDelta,
+	formatBytesPair,
 	formatCount,
 	formatCountDelta,
 } from '../utils/format';
@@ -19,6 +19,15 @@ import {
  * @param props.summary Phase summary.
  */
 export function PhaseSummary( { summary }: { summary: OptionsDiffSummary } ) {
+	const total = formatBytesPair(
+		summary.before_total_bytes,
+		summary.after_total_bytes
+	);
+	const autoloaded = formatBytesPair(
+		summary.before_autoloaded_bytes,
+		summary.after_autoloaded_bytes
+	);
+
 	return (
 		<div className="space-y-3">
 			<dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -48,8 +57,8 @@ export function PhaseSummary( { summary }: { summary: OptionsDiffSummary } ) {
 				/>
 				<Total
 					label={ __( 'Total option data', 'updatelens' ) }
-					before={ formatBytes( summary.before_total_bytes ) }
-					after={ formatBytes( summary.after_total_bytes ) }
+					before={ total[ 0 ] }
+					after={ total[ 1 ] }
 					delta={ formatBytesDelta( summary.total_bytes_delta ) }
 				/>
 				<Total
@@ -60,8 +69,8 @@ export function PhaseSummary( { summary }: { summary: OptionsDiffSummary } ) {
 				/>
 				<Total
 					label={ __( 'Autoloaded data', 'updatelens' ) }
-					before={ formatBytes( summary.before_autoloaded_bytes ) }
-					after={ formatBytes( summary.after_autoloaded_bytes ) }
+					before={ autoloaded[ 0 ] }
+					after={ autoloaded[ 1 ] }
 					delta={ formatBytesDelta( summary.autoloaded_bytes_delta ) }
 				/>
 			</dl>

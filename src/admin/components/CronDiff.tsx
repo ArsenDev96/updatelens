@@ -1,7 +1,5 @@
-import { __, sprintf } from '@wordpress/i18n';
+import { _n, __, sprintf } from '@wordpress/i18n';
 import type { ReactNode } from 'react';
-
-import { cn } from '@/lib/utils';
 
 import type {
 	AvailableCronPhase,
@@ -18,6 +16,7 @@ import {
 	formatUnixDateTime,
 	unixToIso,
 } from '../utils/format';
+import { DiffSection } from './DiffSection';
 import { Metric, Total } from './PhaseSummary';
 
 /*
@@ -25,6 +24,8 @@ import { Metric, Total } from './PhaseSummary';
  * the API: event arguments are never stored, so they are never shown.
  * Rescheduling is shown with less emphasis than additions, removals and
  * recurrence changes, because normal WP-Cron runs move recurring events.
+ * A one-time event that disappeared is "no longer scheduled": it may have
+ * run or been unscheduled, which UpdateLens cannot tell apart.
  */
 
 /**
@@ -88,88 +89,195 @@ export function CronSummary( { summary }: { summary: CronDiffSummary } ) {
 }
 
 /**
- * Event lists of one Cron phase, then the notes on hidden arguments and
- * one-time events. Every section is always shown; an empty one says so.
+ * Event lists of one Cron phase with changes, then the notes that apply to
+ * them. Empty lists are left out (the summary shows their zero count); long
+ * lists collapse. Removed one-time events are listed as "no longer
+ * scheduled", recurring ones as removed.
  *
  * @param props       Props.
- * @param props.phase Available Cron phase.
+ * @param props.phase Available Cron phase with at least one change.
  */
 export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
+	const removed = phase.removed.filter( ( event ) => event.is_recurring );
+	const gone = phase.removed.filter( ( event ) => ! event.is_recurring );
+	const movedOnce = phase.rescheduled.some(
+		( event ) => ! event.is_recurring
+	);
 	const titles = {
-		/* translators: %d: number of WP-Cron events. */
-		added: sprintf( __( 'Added (%d)', 'updatelens' ), phase.added.length ),
-		/* translators: %d: number of WP-Cron events. */
+		/* translators: %s: number of WP-Cron events. */
+		added: sprintf(
+			__( 'Added (%s)', 'updatelens' ),
+			formatCount( phase.added.length )
+		),
+		/* translators: %s: number of WP-Cron events. */
 		removed: sprintf(
-			__( 'Removed (%d)', 'updatelens' ),
-			phase.removed.length
+			__( 'Removed (%s)', 'updatelens' ),
+			formatCount( removed.length )
 		),
-		/* translators: %d: number of WP-Cron events. */
+		/* translators: %s: number of one-time WP-Cron events that disappeared. */
+		gone: sprintf(
+			__( 'No longer scheduled (%s)', 'updatelens' ),
+			formatCount( gone.length )
+		),
+		/* translators: %s: number of WP-Cron events. */
 		changed: sprintf(
-			__( 'Changed (%d)', 'updatelens' ),
-			phase.changed.length
+			__( 'Changed (%s)', 'updatelens' ),
+			formatCount( phase.changed.length )
 		),
-		/* translators: %d: number of WP-Cron events. */
+		/* translators: %s: number of WP-Cron events. */
 		rescheduled: sprintf(
-			__( 'Rescheduled (%d)', 'updatelens' ),
-			phase.rescheduled.length
+			__( 'Rescheduled (%s)', 'updatelens' ),
+			formatCount( phase.rescheduled.length )
 		),
 	};
+	const key = ( event: { hook: string }, index: number ) =>
+		`${ event.hook }-${ index }`;
 
 	return (
 		<div className="space-y-5">
-			<Section
-				id="added"
-				title={ titles.added }
-				empty={ __( 'No added events.', 'updatelens' ) }
-				count={ phase.added.length }
-			>
-				{ phase.added.map( ( event, index ) => (
-					<AddedEventRow
-						key={ `${ event.hook }-${ index }` }
-						event={ event }
-					/>
-				) ) }
-			</Section>
-			<Section
-				id="removed"
-				title={ titles.removed }
-				empty={ __( 'No removed events.', 'updatelens' ) }
-				count={ phase.removed.length }
-			>
-				{ phase.removed.map( ( event, index ) => (
-					<RemovedEventRow
-						key={ `${ event.hook }-${ index }` }
-						event={ event }
-					/>
-				) ) }
-			</Section>
-			<Section
-				id="changed"
-				title={ titles.changed }
-				empty={ __( 'No changed events.', 'updatelens' ) }
-				count={ phase.changed.length }
-			>
-				{ phase.changed.map( ( event, index ) => (
-					<ChangedEventRow
-						key={ `${ event.hook }-${ index }` }
-						event={ event }
-					/>
-				) ) }
-			</Section>
-			<Section
-				id="rescheduled"
-				title={ titles.rescheduled }
-				empty={ __( 'No rescheduled events.', 'updatelens' ) }
-				count={ phase.rescheduled.length }
-				quiet
-			>
-				{ phase.rescheduled.map( ( event, index ) => (
-					<RescheduledEventRow
-						key={ `${ event.hook }-${ index }` }
-						event={ event }
-					/>
-				) ) }
-			</Section>
+			{ phase.added.length > 0 && (
+				<DiffSection
+					id="updatelens-cron-added"
+					title={ titles.added }
+					items={ phase.added }
+					renderItem={ ( event, index ) => (
+						<AddedEventRow
+							key={ key( event, index ) }
+							event={ event }
+						/>
+					) }
+					moreLabel={ ( hidden ) =>
+						sprintf(
+							/* translators: %s: number of hidden rows. */
+							_n(
+								'Show %s more added event',
+								'Show %s more added events',
+								hidden,
+								'updatelens'
+							),
+							formatCount( hidden )
+						)
+					}
+					lessLabel={ __( 'Show fewer added events', 'updatelens' ) }
+				/>
+			) }
+			{ removed.length > 0 && (
+				<DiffSection
+					id="updatelens-cron-removed"
+					title={ titles.removed }
+					items={ removed }
+					renderItem={ ( event, index ) => (
+						<RemovedEventRow
+							key={ key( event, index ) }
+							event={ event }
+						/>
+					) }
+					moreLabel={ ( hidden ) =>
+						sprintf(
+							/* translators: %s: number of hidden rows. */
+							_n(
+								'Show %s more removed event',
+								'Show %s more removed events',
+								hidden,
+								'updatelens'
+							),
+							formatCount( hidden )
+						)
+					}
+					lessLabel={ __(
+						'Show fewer removed events',
+						'updatelens'
+					) }
+				/>
+			) }
+			{ gone.length > 0 && (
+				<DiffSection
+					id="updatelens-cron-gone"
+					title={ titles.gone }
+					items={ gone }
+					renderItem={ ( event, index ) => (
+						<GoneEventRow
+							key={ key( event, index ) }
+							event={ event }
+						/>
+					) }
+					moreLabel={ ( hidden ) =>
+						sprintf(
+							/* translators: %s: number of hidden rows. */
+							_n(
+								'Show %s more one-time event no longer scheduled',
+								'Show %s more one-time events no longer scheduled',
+								hidden,
+								'updatelens'
+							),
+							formatCount( hidden )
+						)
+					}
+					lessLabel={ __(
+						'Show fewer one-time events no longer scheduled',
+						'updatelens'
+					) }
+				/>
+			) }
+			{ phase.changed.length > 0 && (
+				<DiffSection
+					id="updatelens-cron-changed"
+					title={ titles.changed }
+					items={ phase.changed }
+					renderItem={ ( event, index ) => (
+						<ChangedEventRow
+							key={ key( event, index ) }
+							event={ event }
+						/>
+					) }
+					moreLabel={ ( hidden ) =>
+						sprintf(
+							/* translators: %s: number of hidden rows. */
+							_n(
+								'Show %s more changed event',
+								'Show %s more changed events',
+								hidden,
+								'updatelens'
+							),
+							formatCount( hidden )
+						)
+					}
+					lessLabel={ __(
+						'Show fewer changed events',
+						'updatelens'
+					) }
+				/>
+			) }
+			{ phase.rescheduled.length > 0 && (
+				<DiffSection
+					id="updatelens-cron-rescheduled"
+					title={ titles.rescheduled }
+					items={ phase.rescheduled }
+					renderItem={ ( event, index ) => (
+						<RescheduledEventRow
+							key={ key( event, index ) }
+							event={ event }
+						/>
+					) }
+					moreLabel={ ( hidden ) =>
+						sprintf(
+							/* translators: %s: number of hidden rows. */
+							_n(
+								'Show %s more rescheduled event',
+								'Show %s more rescheduled events',
+								hidden,
+								'updatelens'
+							),
+							formatCount( hidden )
+						)
+					}
+					lessLabel={ __(
+						'Show fewer rescheduled events',
+						'updatelens'
+					) }
+					quiet
+				/>
+			) }
 			<div className="space-y-1 text-xs text-muted-foreground">
 				<p>
 					{ __(
@@ -177,54 +285,24 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 						'updatelens'
 					) }
 				</p>
-				<p>
-					{ __(
-						'UpdateLens observes scheduled state. A moved one-time event may represent a reschedule or a new equivalent event after execution.',
-						'updatelens'
-					) }
-				</p>
+				{ gone.length > 0 && (
+					<p>
+						{ __(
+							'One-time jobs may disappear because they ran or were unscheduled.',
+							'updatelens'
+						) }
+					</p>
+				) }
+				{ movedOnce && (
+					<p>
+						{ __(
+							'UpdateLens observes scheduled state. A moved one-time event may represent a reschedule or a new equivalent event after execution.',
+							'updatelens'
+						) }
+					</p>
+				) }
 			</div>
 		</div>
-	);
-}
-
-function Section( {
-	id,
-	title,
-	empty,
-	count,
-	quiet = false,
-	children,
-}: {
-	id: string;
-	title: string;
-	empty: string;
-	count: number;
-	quiet?: boolean;
-	children: ReactNode;
-} ) {
-	const headingId = `updatelens-cron-${ id }`;
-	return (
-		<section aria-labelledby={ headingId } className="space-y-2">
-			<h3
-				id={ headingId }
-				className={ cn(
-					'text-sm',
-					quiet
-						? 'font-medium text-muted-foreground'
-						: 'font-semibold'
-				) }
-			>
-				{ title }
-			</h3>
-			{ count === 0 ? (
-				<p className="text-sm text-muted-foreground">{ empty }</p>
-			) : (
-				<ul className="divide-y overflow-hidden rounded-lg border bg-card">
-					{ children }
-				</ul>
-			) }
-		</section>
 	);
 }
 
@@ -327,7 +405,7 @@ function AddedEventRow( { event }: { event: CronEventState } ) {
 }
 
 /**
- * An event that disappeared (state before).
+ * A recurring event that disappeared (state before).
  *
  * @param props       Props.
  * @param props.event Event.
@@ -341,6 +419,29 @@ function RemovedEventRow( { event }: { event: CronEventState } ) {
 			</p>
 			<p className="text-sm text-muted-foreground">
 				{ __( 'Was scheduled for', 'updatelens' ) }{ ' ' }
+				<Time timestamp={ event.timestamp } />
+			</p>
+		</li>
+	);
+}
+
+/**
+ * A one-time event that is no longer scheduled (state before). It may have
+ * run or been unscheduled; UpdateLens observes only that it is gone.
+ *
+ * @param props       Props.
+ * @param props.event Event.
+ */
+function GoneEventRow( { event }: { event: CronEventState } ) {
+	return (
+		<li className="space-y-1.5 border-l-2 border-l-slate-300 px-4 py-2.5">
+			<HookName hook={ event.hook } />
+			<p className="text-sm">
+				{ __( 'One-time', 'updatelens' ) } ·{ ' ' }
+				{ __( 'No longer scheduled', 'updatelens' ) }
+			</p>
+			<p className="text-sm text-muted-foreground">
+				{ __( 'Previously scheduled for', 'updatelens' ) }{ ' ' }
 				<Time timestamp={ event.timestamp } />
 			</p>
 		</li>

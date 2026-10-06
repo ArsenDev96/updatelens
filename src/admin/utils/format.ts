@@ -11,12 +11,18 @@ const BYTE_UNITS = [ 'B', 'KB', 'MB', 'GB', 'TB' ];
 export const MINUS = '−';
 
 /**
- * Byte count with binary units (1 KB = 1024 B), at most one decimal.
+ * Byte count with binary units (1 KB = 1024 B), at most one decimal (or
+ * `fractionDigits`).
  *
- * @param bytes  Non-negative byte count.
- * @param locale Locale for the number.
+ * @param bytes          Non-negative byte count.
+ * @param locale         Locale for the number.
+ * @param fractionDigits Maximum decimals above bytes.
  */
-export function formatBytes( bytes: number, locale?: string ): string {
+export function formatBytes(
+	bytes: number,
+	locale?: string,
+	fractionDigits = 1
+): string {
 	let value = Math.abs( bytes );
 	let unit = 0;
 
@@ -35,10 +41,37 @@ export function formatBytes( bytes: number, locale?: string ): string {
 	}
 
 	const number = new Intl.NumberFormat( locale, {
-		maximumFractionDigits: unit === 0 ? 0 : 1,
+		maximumFractionDigits: unit === 0 ? 0 : fractionDigits,
 	} ).format( value );
 
 	return `${ number } ${ BYTE_UNITS[ unit ] }`;
+}
+
+/**
+ * Before and after sizes for "before → after". When different sizes would
+ * look the same at one decimal ("6 KB → 6 KB"), both get two decimals
+ * ("6.02 KB → 6.08 KB"); the exact delta is shown separately.
+ *
+ * @param before Bytes before.
+ * @param after  Bytes after.
+ * @param locale Locale for the numbers.
+ */
+export function formatBytesPair(
+	before: number,
+	after: number,
+	locale?: string
+): [ string, string ] {
+	const pair: [ string, string ] = [
+		formatBytes( before, locale ),
+		formatBytes( after, locale ),
+	];
+	if ( before === after || pair[ 0 ] !== pair[ 1 ] ) {
+		return pair;
+	}
+	return [
+		formatBytes( before, locale, 2 ),
+		formatBytes( after, locale, 2 ),
+	];
 }
 
 /**

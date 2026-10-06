@@ -24,7 +24,14 @@ Invalid values → `400 rest_invalid_param`. A page past the end returns `[]`.
 
 Headers: `X-WP-Total` (number of analyses), `X-WP-TotalPages`.
 
-Body: an array of history items. Phase flags only say whether a `wp_options` diff is stored; diffs are not decoded for the list, and WP-Cron data is never read for it (WP-Cron is reported per analysis only).
+Body: an array of history items. Diffs are never decoded or returned for the list; the flags are computed in SQL:
+
+- `has_<phase>`: whether a `wp_options` diff is stored for the phase.
+- `phases.<phase>.<signal>` (`options`, `cron`):
+  - `recorded`: whether a diff is stored;
+  - `has_changes`: whether it contains any added, removed, changed or rescheduled record (the stored diff does not begin with its codec's empty-diff prefix, `OptionsDiffCodec::EMPTY_PREFIX` / `CronDiffCodec::EMPTY_PREFIX`); `null` if not recorded.
+
+`recorded` without changes is a successful observation with nothing to show, not missing data. Only the report decodes diffs, so only the report can find a stored diff unreadable (`data_corrupt`). No Cron hooks, reasons or arguments are part of the history.
 
 ```json
 [
@@ -46,10 +53,26 @@ Body: an array of history items. Phase flags only say whether a `wp_options` dif
     "error": null,
     "has_during_update": true,
     "has_post_update": true,
-    "has_final": true
+    "has_final": true,
+    "phases": {
+      "during_update": {
+        "options": { "recorded": true, "has_changes": true },
+        "cron": { "recorded": true, "has_changes": false }
+      },
+      "post_update": {
+        "options": { "recorded": true, "has_changes": true },
+        "cron": { "recorded": false, "has_changes": null }
+      },
+      "final": {
+        "options": { "recorded": true, "has_changes": true },
+        "cron": { "recorded": true, "has_changes": true }
+      }
+    }
   }
 ]
 ```
+
+The admin UI counts changes per phase and signal from a report's `summary` fields (`added_count + removed_count + changed_count`, plus `rescheduled_count` for WP-Cron); no extra count fields exist.
 
 ## `GET /updatelens/v1/analyses/{id}`
 

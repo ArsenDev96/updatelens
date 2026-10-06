@@ -93,17 +93,31 @@ describe( 'HistoryPage', () => {
 		expect( first ).toHaveTextContent( 'Completed' );
 		expect( first ).toHaveTextContent( 'View report' );
 		expect(
-			within( first ).getByText( 'Net result' ).parentElement
-		).toHaveTextContent( 'recorded' );
+			within( first )
+				.getAllByRole( 'listitem' )
+				.map( ( item ) => item.textContent )
+		).toEqual( [
+			'During update:Changes observed',
+			'After update:Changes observed',
+			'Net result:Changes observed',
+		] );
+		expect( first ).not.toHaveTextContent( '✓' );
 
 		const expired = links[ 1 ];
 		expect( expired ).toHaveTextContent( 'Second Plugin' );
 		expect(
-			within( expired ).getByText( 'After update' ).parentElement
-		).toHaveTextContent( 'not recorded' );
+			within( expired )
+				.getAllByRole( 'listitem' )
+				.map( ( item ) => item.textContent )
+		).toEqual( [
+			'During update:Changes observed',
+			'After update:Not available',
+			'Net result:Not available',
+		] );
 
 		const failed = links[ 2 ];
 		expect( failed ).toHaveTextContent( 'Failed' );
+		expect( failed ).toHaveTextContent( /Net result:\s*Not available/ );
 		expect( failed ).toHaveTextContent(
 			/1\.0\.0\s*→\s*to\s*–\s*unknown version/
 		);

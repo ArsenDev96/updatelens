@@ -198,7 +198,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	public $fail_reads = false;
 
 	/**
-	 * Page of rows, newest first, projected like HISTORY_COLUMNS (flags as "0"/"1" strings, like MySQL).
+	 * Page of rows, newest first, projected like history_columns() (flags as "0"/"1" strings or NULL, like MySQL).
 	 *
 	 * @param int $limit  Page size.
 	 * @param int $offset Offset.
@@ -216,8 +216,10 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 		$page = array();
 		foreach ( array_slice( $rows, (int) $offset, (int) $limit ) as $row ) {
 			$item = self::project( $row, AnalysisRepository::REPORT_METADATA_COLUMNS );
-			foreach ( array( 'options_during_update_diff', 'options_post_update_diff', 'options_final_diff' ) as $column ) {
-				$item[ 'has_' . $column ] = null === $row[ $column ] ? '0' : '1';
+			foreach ( AnalysisRepository::HISTORY_DIFFS as $column => $empty_prefix ) {
+				$diff                             = isset( $row[ $column ] ) ? $row[ $column ] : null;
+				$item[ 'has_' . $column ]         = null === $diff ? '0' : '1';
+				$item[ 'has_changes_' . $column ] = null === $diff ? null : ( 0 === strpos( $diff, $empty_prefix ) ? '0' : '1' );
 			}
 			$page[] = $item;
 		}

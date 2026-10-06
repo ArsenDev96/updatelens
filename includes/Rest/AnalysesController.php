@@ -309,14 +309,42 @@ final class AnalysesController extends WP_REST_Controller {
 	public function get_public_history_item_schema() {
 		if ( null === $this->history_schema ) {
 			$properties = self::metadata_schema();
+			$signal     = array(
+				'type'       => 'object',
+				'properties' => array(
+					'recorded'    => array(
+						'description' => __( 'Whether a diff is stored for this phase and signal.', 'updatelens' ),
+						'type'        => 'boolean',
+					),
+					'has_changes' => array(
+						'description' => __( 'Whether the stored diff contains any added, removed, changed or rescheduled records; null if not recorded.', 'updatelens' ),
+						'type'        => array( 'boolean', 'null' ),
+					),
+				),
+			);
+			$phases     = array();
 			foreach ( array_keys( ObservationPhase::ASSOCIATION ) as $phase ) {
 				$properties[ "has_{$phase}" ] = array(
-					'description' => __( 'Whether a wp_options diff is stored for this phase (WP-Cron is reported per analysis only).', 'updatelens' ),
+					'description' => __( 'Whether a wp_options diff is stored for this phase.', 'updatelens' ),
 					'type'        => 'boolean',
 					'context'     => array( 'view' ),
 					'readonly'    => true,
 				);
+				$phases[ $phase ]             = array(
+					'type'       => 'object',
+					'properties' => array(
+						'options' => $signal,
+						'cron'    => $signal,
+					),
+				);
 			}
+			$properties['phases'] = array(
+				'description' => __( 'Per phase and signal: whether a diff is recorded and whether it has changes. Diffs are not decoded for the history.', 'updatelens' ),
+				'type'        => 'object',
+				'context'     => array( 'view' ),
+				'readonly'    => true,
+				'properties'  => $phases,
+			);
 
 			$this->history_schema = array(
 				'$schema'    => 'http://json-schema.org/draft-04/schema#',

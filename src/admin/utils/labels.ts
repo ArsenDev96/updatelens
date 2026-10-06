@@ -1,4 +1,4 @@
-import { __, sprintf } from '@wordpress/i18n';
+import { _n, __, sprintf } from '@wordpress/i18n';
 
 import type {
 	AnalysisReport,
@@ -10,7 +10,13 @@ import type {
 	ReportPhase,
 	SettleOutcome,
 } from '../types/api';
-import { formatDuration } from './format';
+import {
+	phaseChangeCounts,
+	reportChangeCounts,
+	type HistoryPhaseState,
+	type PhaseChangeCounts,
+} from './changes';
+import { formatCount, formatDuration } from './format';
 
 /*
  * Human text for the API's codes. Wording is observational: phases say when
@@ -93,25 +99,24 @@ export function phaseNote( phase: PhaseKey ): string {
 }
 
 /**
- * Whether any signal of a phase is available.
- *
- * @param phase Report phase.
- */
-export function isPhaseAvailable( phase: ReportPhase ): boolean {
-	return phase.options.available || phase.cron.available;
-}
-
-/**
- * Phase shown first: Net result, else During update, else After update,
- * counting a phase as available if any signal is. Null if none is.
+ * Phase shown first: the first phase with changes (Net result, After
+ * update, During update), else the first available one (Net result, During
+ * update, After update). Null if no phase is available.
  *
  * @param phases Report phases.
+ * @param counts Change counts of the phases (computed if omitted).
  */
 export function defaultPhase(
-	phases: Record< PhaseKey, ReportPhase >
+	phases: Record< PhaseKey, ReportPhase >,
+	counts: Record< PhaseKey, PhaseChangeCounts > = reportChangeCounts( phases )
 ): PhaseKey | null {
-	const order: PhaseKey[] = [ 'final', 'during_update', 'post_update' ];
-	return order.find( ( key ) => isPhaseAvailable( phases[ key ] ) ) ?? null;
+	const withChanges: PhaseKey[] = [ 'final', 'post_update', 'during_update' ];
+	const available: PhaseKey[] = [ 'final', 'during_update', 'post_update' ];
+	return (
+		withChanges.find( ( key ) => ( counts[ key ].total ?? 0 ) > 0 ) ??
+		available.find( ( key ) => counts[ key ].total !== null ) ??
+		null
+	);
 }
 
 /** Signals in display order. */
@@ -127,14 +132,115 @@ export function providerLabel( provider: Provider ): string {
 }
 
 /**
- * Signal shown first in a phase: Options, unless only WP-Cron is available.
+ * Signal shown first in a phase: Options with changes, WP-Cron with
+ * changes, then whichever is available (Options first).
  *
- * @param phase Report phase.
+ * @param phase  Report phase.
+ * @param counts Change counts of the phase (computed if omitted).
  */
-export function defaultProvider( phase: ReportPhase ): Provider {
-	return ! phase.options.available && phase.cron.available
-		? 'cron'
-		: 'options';
+export function defaultProvider(
+	phase: ReportPhase,
+	counts: PhaseChangeCounts = phaseChangeCounts( phase )
+): Provider {
+	if ( ( counts.options ?? 0 ) > 0 ) {
+		return 'options';
+	}
+	if ( ( counts.cron ?? 0 ) > 0 ) {
+		return 'cron';
+	}
+	return counts.options === null && counts.cron !== null ? 'cron' : 'options';
+}
+
+/**
+ * "1 change", "4 changes" or "no changes", for use inside a phrase
+ * (e.g. an accessible tab name).
+ *
+ * @param count Number of observed records.
+ */
+export function changeCountText( count: number ): string {
+	return count === 0
+		? __( 'no changes', 'updatelens' )
+		: sprintf(
+				/* translators: %s: number of observed changes. */
+				_n( '%s change', '%s changes', count, 'updatelens' ),
+				formatCount( count )
+			);
+}
+
+/**
+ * Compact indicator after a tab label, and the tab's accessible name
+ * ("Net result, 4 changes"). Null counts mean the phase or signal is unavailable.
+ *
+ * @param label Visible tab label.
+ * @param count Change count, or null if unavailable.
+ */
+export function changeIndicator(
+	label: string,
+	count: number | null
+): {
+	text: string;
+	tone: 'changes' | 'none' | 'unavailable';
+	accessibleName: string;
+} {
+	const status =
+		count === null
+			? __( 'not available', 'updatelens' )
+			: changeCountText( count );
+	return {
+		text:
+			count === null
+				? __( 'Not available', 'updatelens' )
+				: formatCount( count ),
+		tone: count === null ? 'unavailable' : count > 0 ? 'changes' : 'none',
+		accessibleName: sprintf(
+			/* translators: 1: tab label, e.g. "Net result". 2: its status, e.g. "4 changes" or "not available". */
+			__( '%1$s, %2$s', 'updatelens' ),
+			label,
+			status
+		),
+	};
+}
+
+/**
+ * History wording for a phase.
+ *
+ * @param state History phase state.
+ */
+export function historyPhaseText( state: HistoryPhaseState ): string {
+	switch ( state ) {
+		case 'changes':
+			return __( 'Changes observed', 'updatelens' );
+		case 'none':
+			return __( 'No changes', 'updatelens' );
+		case 'unavailable':
+			return __( 'Not available', 'updatelens' );
+	}
+}
+
+/**
+ * Compact state of an available signal without changes.
+ *
+ * @param provider Signal.
+ */
+export function noChangesText( provider: Provider ): {
+	title: string;
+	description: string;
+} {
+	return provider === 'options'
+		? {
+				title: __( 'No option changes observed', 'updatelens' ),
+				description: __(
+					'UpdateLens captured this phase successfully, but the tracked option state did not change.',
+					'updatelens'
+				),
+			}
+		: {
+				title: __( 'No WP-Cron changes observed', 'updatelens' ),
+				description: __(
+					'UpdateLens captured this phase successfully, but no scheduled events changed.',
+					'updatelens'
+				),
+			};
 }
 
 /**

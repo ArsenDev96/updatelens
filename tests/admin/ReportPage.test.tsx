@@ -149,12 +149,13 @@ describe( 'ReportPage', () => {
 		expect(
 			within( panel() ).getByRole( 'heading', { name: 'Added (1)' } )
 		).toBeInTheDocument();
+		// Empty lists are left out; the summary shows their zero counts.
 		expect(
-			within( panel() ).getByText( 'No removed options.' )
-		).toBeInTheDocument();
+			within( panel() ).queryByRole( 'heading', { name: /^Removed/ } )
+		).toBeNull();
 		expect(
-			within( panel() ).getByText( 'No changed options.' )
-		).toBeInTheDocument();
+			within( panel() ).queryByRole( 'heading', { name: /^Changed/ } )
+		).toBeNull();
 
 		await user.keyboard( '{ArrowRight}' );
 		expect( tab( /After update/ ) ).toHaveAttribute(
@@ -208,8 +209,10 @@ describe( 'ReportPage', () => {
 			'aria-selected',
 			'true'
 		);
-		expect( tab( /After update/ ) ).toHaveTextContent( '(not available)' );
-		expect( tab( /Net result/ ) ).toHaveTextContent( '(not available)' );
+		expect( tab( /After update/ ) ).toHaveTextContent( 'Not available' );
+		expect( tab( /Net result/ ) ).toHaveAccessibleName(
+			'Net result, not available'
+		);
 
 		await user.click( tab( /Net result/ ) );
 		expect( panel() ).toHaveTextContent( 'Not captured' );
@@ -289,7 +292,7 @@ describe( 'ReportPage', () => {
 		// Options is unreadable here, so the available WP-Cron signal is shown first.
 		await user.click( tab( /After update/ ) );
 		expect( tab( /^WP-Cron/ ) ).toHaveAttribute( 'aria-selected', 'true' );
-		expect( tab( /^Options/ ) ).toHaveTextContent( '(not available)' );
+		expect( tab( /^Options/ ) ).toHaveTextContent( 'Not available' );
 		await user.click( tab( /^Options/ ) );
 		expect( panel() ).toHaveTextContent(
 			"This stored phase couldn't be read safely."
@@ -373,9 +376,8 @@ describe( 'ReportPage', () => {
 		const settings = (
 			await screen.findByText( 'plugin_settings' )
 		).closest( 'li' )!;
-		expect( settings ).toHaveTextContent( 'Value changed' );
 		expect( settings ).toHaveTextContent(
-			/84 B\s*→\s*to\s*115 B\s*\+31 B/
+			/Value changed\s*·\s*84 B\s*→\s*to\s*115 B\s*\(\+31 B\)/
 		);
 		expect( settings ).toHaveTextContent( /yes\s*→\s*to\s*auto-off/ );
 		expect( settings ).toHaveTextContent(
@@ -385,9 +387,11 @@ describe( 'ReportPage', () => {
 		const version = screen
 			.getByText( 'plugin_db_version' )
 			.closest( 'li' )!;
-		expect( version ).toHaveTextContent( 'Value unchanged' );
-		expect( version ).toHaveTextContent( /5 B\s*→\s*to\s*5 B/ );
+		expect( version ).toHaveTextContent( /Value unchanged\s*·\s*5 B/ );
+		expect( version ).not.toHaveTextContent( '→ to 5 B' );
 		expect( version ).not.toHaveTextContent( '+0' );
+		// The raw value changed but the behavior did not.
+		expect( version ).toHaveTextContent( /yes\s*→\s*to\s*on/ );
 		expect( version ).toHaveTextContent( 'On (no effective change)' );
 	} );
 

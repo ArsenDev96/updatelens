@@ -11,6 +11,7 @@ import type {
 	AvailableCronPhase,
 	AvailableOptionsPhase,
 	CronPhase,
+	HistorySignal,
 	OptionsPhase,
 	PhaseKey,
 	ReportPhase,
@@ -539,10 +540,34 @@ export const PRE_CRON: AnalysisReport = {
 	phases: phases( OPTIONS_ALL, cronEverywhere( 'not_captured' ) ),
 };
 
+/**
+ * History flags of one signal, from the report's lists (the API computes
+ * them in SQL; a stored but unreadable diff would still count as recorded).
+ *
+ * @param signal Report signal.
+ */
+function historySignal( signal: OptionsPhase | CronPhase ): HistorySignal {
+	if ( ! signal.available ) {
+		return { recorded: false, has_changes: null };
+	}
+	const lists: unknown[][] = [ signal.added, signal.removed, signal.changed ];
+	if ( 'rescheduled' in signal ) {
+		lists.push( signal.rescheduled );
+	}
+	return {
+		recorded: true,
+		has_changes: lists.some( ( list ) => list.length > 0 ),
+	};
+}
+
 export function historyItem(
 	report: AnalysisReport,
 	overrides: Partial< AnalysisHistoryItem > = {}
 ): AnalysisHistoryItem {
+	const phase = ( key: PhaseKey ) => ( {
+		options: historySignal( report.phases[ key ].options ),
+		cron: historySignal( report.phases[ key ].cron ),
+	} );
 	return {
 		id: report.id,
 		plugin: report.plugin,
@@ -553,6 +578,11 @@ export function historyItem(
 		has_during_update: report.phases.during_update.options.available,
 		has_post_update: report.phases.post_update.options.available,
 		has_final: report.phases.final.options.available,
+		phases: {
+			during_update: phase( 'during_update' ),
+			post_update: phase( 'post_update' ),
+			final: phase( 'final' ),
+		},
 		...overrides,
 	};
 }

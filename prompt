@@ -1,0 +1,78 @@
+I stopped the study partway; 4 of the 11 runs finished. Everything is cleaned up:
+
+- **Background work:** the run queue and its monitor are stopped. Wordfence had only just started, so it produced no result.
+- **Docker:** all my test containers and networks are removed, including a leftover helper from the Wordfence run. Your `api-phpmyadmin-1` and `api-mysqldb-1` are still running and untouched.
+- **Repo:** `main` at 44d4103, working tree clean, nothing committed or pushed. `git status` says "ahead of origin/main by 6 commits"; that was already the case.
+
+The 4 finished runs matched the earlier study. None put a secret, option value or Cron argument in a report. Rank Math and WPForms failed because WordPress.org isn't offering their releases from today yet. All test files are in the scratchpad folder below.
+
+Here's a prompt to paste into a new session:
+
+Written for: a fresh Claude Code session with no memory of this one.
+
+---
+
+**Continue the UpdateLens dogfooding re-run on 44d4103**
+
+The repo is at `D:\updatelens`, branch `main`, HEAD **44d4103**, working tree clean. This is a study only: no production code changes, no commit, no push and no WordPress.org submission. All temporary files stay outside the repo. Follow `CLAUDE.md` and the memory files (`php-checks-via-docker`, `action-scheduler-facts`).
+
+**Goal:** finish the 10-plugin dogfooding study of the packaged release `updatelens-0.2.0-beta.1.zip` (sha256 a7d5ff77…21ee). It runs on disposable Docker stacks with WP 7.1.2, PHP 8.3 and MySQL 8, using official WordPress.org packages, a real native "Update now" and settling via an admin page. Then deliver the 19-item report.
+
+**Scratch folder:** `C:/Users/user/AppData/Local/Temp/claude/d--updatelens/0ad00156-06f2-4360-8657-8c1957de8283/scratchpad/dog2/`
+- Scripts: `stack.sh`, `serial.sh`, `run-plugin.cjs`, `summarize.cjs`, `aggregate.cjs`; `it/updatelens.zip` and `it/state.php`.
+- Configs: `isolated.jsonl`, `mixed.jsonl`, `all.jsonl`, and `rerun.jsonl` (Rank Math 1.0.278→1.0.279, WPForms 2.0.2→2.0.2.1).
+- Results: `out/<label>/result.json` and `out/<label>.log`. The earlier a81a947 study, for comparison, is in `../dog/out/` (`node aggregate.cjs …` there).
+- Run with: `sh serial.sh <file>.jsonl > out/<name>.log 2>&1` in the background. Summarize with `node summarize.cjs <label>`, and run `node aggregate.cjs cf7 woocommerce elementor yoast rankmath wpforms wordfence updraftplus litespeed jetpack mixed` at the end.
+
+**Done (all completed/admin_shutdown, no privacy matches, no page errors, no layout overflow):**
+
+| Plugin | Update | After update / Net result | Report API / UI |
+|---|---|---|---|
+| Contact Form 7 | 6.1.7→6.2 | `wpcf7` changed, −2 B | 4.2 KB, 51 ms, render 236 ms |
+| WooCommerce | 11.1.1→11.1.2 | `woocommerce_version` and `woocommerce_db_version` changed | 4.8 KB, 101 ms, render 484 ms |
+| Elementor | 4.3.3→4.3.4 | +`elementor_log` (2.4 KB, not autoloaded), +`elementor_elementor_updater_completed`, `elementor_install_history` and `elementor_version` changed; autoload +26 B | 5.1 KB, 72 ms, render 294 ms |
+| Yoast | 28.5→28.6 | `wpseo` (+13 B, autoloaded) and `yoast_migrations_free` changed | 4.7 KB, 47 ms, render 184 ms |
+
+- No Cron changes in any phase; During update was empty everywhere.
+- WooCommerce: pending Action Scheduler actions went from 3 to 5 during the update, which the report can't show (evidence for question 17).
+- The Elementor differences from the earlier study (`elementor_connect_site_key` added then; `elementor_log` already existed then) come from the site's history before the update, not from UpdateLens.
+- The 31–75 console errors per run are all `net::ERR_FAILED` from the harness blocking external hosts (`secure.gravatar.com`, `ps.w.org`). They're a test artifact, not a bug.
+- Rank Math's admin pages returned 403 during initialization (not yet compared with the earlier run).
+
+**Substitution:** WordPress.org's update-check API (which "Update now" relies on) still doesn't offer Rank Math 1.0.280 or WPForms 2.0.2.2, both released today (6 Oct 2026), although the plugin information API lists them. The first attempts failed with "no update link"; the evidence is in `out/failed-rankmath*` and `out/failed-wpforms*`. Use the `rerun.jsonl` versions.
+
+**Remaining:**
+1. Re-check the update-check API for each pending plugin. If Rank Math 1.0.280 or WPForms 2.0.2.2 is now offered, edit `rerun.jsonl` accordingly.
+2. Create `rest.jsonl` from `all.jsonl` with the lines for wordfence, updraftplus, litespeed, jetpack and mixed (`grep -E '"(wordfence|updraftplus|litespeed|jetpack|mixed)"' all.jsonl`). Run it, then `rerun.jsonl`, serially. The serial runs take about 40 minutes.
+3. Stress-check the largest report in the UI, expanding collapsed lists. The mixed site is the likely candidate; it needs a kept or re-created stack.
+4. Run `aggregate.cjs`, compare with the earlier study, and tear down every `ul-e*` container, network and helper container.
+5. Deliver the 19 items:
+   1. Test environment
+   2. The ten plugins and versions
+   3. Substitutions
+   4. Methodology
+   5. Comparison table
+   6. Per-plugin findings
+   7. Isolated vs mixed
+   8. Options findings
+   9. Autoload findings
+   10. WP-Cron findings
+   11. After Update noise
+   12. Same-hook ambiguity
+   13. Large-report and performance findings
+   14. Bugs P0–P3
+   15. Q1–Q8
+   16. Ranked recommendation
+   17. Action Scheduler next?
+   18. Private beta?
+   19. `git status`, which must show main, clean, HEAD 44d4103.
+
+   Stop after the study.
+
+**Constraints:**
+- Never touch the containers `api-phpmyadmin-1` and `api-mysqldb-1`.
+- Run at most one or two stacks at a time. Ask before restarting Docker Desktop.
+- Don't connect Jetpack or any external account.
+- Never reset or rewrite commits.
+
+---

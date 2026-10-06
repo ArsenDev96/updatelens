@@ -15,10 +15,10 @@ UpdateLens is a WordPress plugin that shows what changes when **one** plugin upd
 Initial snapshot sources:
 
 - `wp_options` incl. autoload size / autoloaded options — implemented (`Snapshot\OptionsSnapshotProvider`)
-- WP-Cron events — snapshot and diff engine implemented (`Snapshot\CronSnapshotProvider`, `Diff\CronDiffBuilder`); not yet part of analyses, storage, REST or UI
+- WP-Cron events — implemented and observed in every analysis (`Snapshot\CronSnapshotProvider`, `Diff\CronDiffBuilder`, `Update\CronObservation`), stored in the analyses table; not yet exposed via REST or UI
 - Action Scheduler actions — planned
 
-Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the standalone WP-Cron snapshot and diff engines, the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
+Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the WP-Cron snapshot and diff engines (observed and stored with every analysis, not yet in REST/UI), the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
 
 ## Architecture boundaries
 
@@ -32,7 +32,7 @@ Current state: foundation (admin screen + status REST route), the `wp_options` s
   - `Admin/` – wp-admin screens and asset loading
   - `Rest/` – REST controllers
   - `Snapshot/` – capture safe state; `Diff/` – compare snapshots
-  - `Update/` – WordPress updater hooks (`PluginUpdateTracker`) and lifecycle rules (`PluginUpdateAnalyzer`, `UpdateClassifier`)
+  - `Update/` – WordPress updater hooks (`PluginUpdateTracker`) and lifecycle rules (`PluginUpdateAnalyzer`, `CronObservation`, `UpdateClassifier`)
   - `Storage/` – schema (`Schema`, `dbDelta`), SQL (`AnalysisRepository`), JSON persistence formats (`*Codec`)
   - `Report/` – safe read models of stored analyses for REST (`AnalysisReadModel`) and read access with lifecycle maintenance (`AnalysisReports`)
 - The admin app is TypeScript + React + Tailwind + shadcn/ui in `src/admin/`, built by Vite into `assets/admin/dist/`. There is no public/frontend app.
@@ -93,6 +93,18 @@ The plugin must stay distributable on WordPress.org:
 - Deterministic order: snapshots by hook (byte-wise), args fingerprint, timestamp, schedule, interval; diff lists by their array form (hook first). No capture time in snapshots. Different fingerprint contexts → `IncompatibleSnapshotsException`.
 - Cron changes are observations, not causes (same wording rules as options); a rescheduled event is often just a normal cron run.
 
+## WP-Cron in the analysis lifecycle
+
+- **Options and WP-Cron are independent analysis signals.** `wp_options` drives the lifecycle and the global status; Cron (`Update\CronObservation`) is captured at the same moments, right after options, and never changes the status, throws, or blocks the update.
+- **A Cron failure never invalidates an options analysis.** Capture errors, malformed state, codec errors, incompatible contexts and Cron storage failures only make the affected Cron phases unavailable. Options incompatibility/failure keeps its global behavior.
+- **Malformed Cron state disables Cron** for the phases that need that snapshot (`malformed_cron_state`); never skip records instead.
+- **Cron phase availability is independent.** during = BEFORE+IMMEDIATE, post = IMMEDIATE+SETTLED, final = BEFORE+SETTLED; a missing snapshot affects only its dependents (malformed IMMEDIATE → during/post unavailable, final still computed). A fingerprint-context mismatch affects only the pair compared.
+- `cron_*_reason` holds an `Update\CronPhaseReason` code (fixed codes, never messages). **Every Cron phase of a terminal analysis has exactly one of a diff or a reason**; in an open analysis a phase with neither is pending. The first cause wins: later lifecycle events never overwrite a resolved phase. Ending states map to `update_failed`, `analysis_abandoned`, `analysis_ended` (options failed/incompatible) or `settle_expired`; analyses from before schema 3 are `not_captured`.
+- Cron columns are written in the same statement as the options transition. If it fails, it is retried once without Cron payload (`CronObservation::without_payload()` → `storage_failed`), so Cron storage can never hold the options analysis back.
+- A failed update captures no IMMEDIATE Cron state; an expired settle window takes no late Cron snapshot.
+- **The backend preserves every observed Cron change**, including normal and core rescheduling (e.g. `wp_version_check` moving in the post-update phase): no ignore lists, no ownership filtering. De-emphasis belongs to presentation.
+- **Raw Cron arguments are never stored, logged or exposed.** Stored Cron snapshots keep `args_fingerprint` (internal); stored Cron diffs contain no fingerprints. Cron is not in the Reports API yet: report queries select no `cron_*` column.
+
 ## Update lifecycle invariants
 
 - **UpdateLens observes the WordPress updater; it never owns it.** No custom updater, and never alter packages, files, activation state, update metadata, credentials or responses. Upgrader filters return their input unchanged.
@@ -101,7 +113,8 @@ The plugin must stay distributable on WordPress.org:
 - Flow: `upgrader_pre_download` → BEFORE (`captured`); `upgrader_install_package_result` + `upgrader_process_complete` → IMMEDIATE + during-update diff (`awaiting_settle`) or `failed`; `shutdown` of a **later** wp-admin page request within the settle window → SETTLED + post-update and final diffs (`completed`). States: `Update\AnalysisStatus`; settle outcomes: `Update\SettleOutcome`.
 - **The update request's own shutdown never settles** (the analyzer remembers the analyses it created in this request). Ajax, REST, cron, CLI and frontend requests never settle. A request that activates/deactivates the analysed plugin does not settle it.
 - Before any other update starts, analyses awaiting settle from earlier requests are settled first (or expired, if past their deadline), so another update's changes never appear in their phases. Another update in the same request abandons that request's analysis.
-- **BEFORE and IMMEDIATE snapshots are temporary**: cleared on every final state. Final records keep metadata, status/error, settle outcome and the phase diffs — never option values or snapshots.
+- **BEFORE and IMMEDIATE snapshots are temporary** (`options_*_snapshot`, `cron_*_snapshot`): cleared on every final state, in the same write. Final records keep metadata, status/error, settle outcome, the phase diffs and Cron phase reasons — never option values, Cron arguments or snapshots.
+- Columns are prefixed by signal (`options_*`, `cron_*`); the generic v1/v2 names are renamed by `Schema::RENAMES`.
 - Persist snapshots/diffs only as versioned JSON via `Storage\*Codec` (never PHP `serialize()`); decoding validates everything. Stored errors use fixed messages and sanitized codes — never WordPress error messages (paths, URLs).
 - Every non-final analysis has a non-NULL `active_plugin` (unique), so there is at most one open analysis per plugin while history is kept. Transitions are compare-and-set on `status`.
 - Timestamps are UTC (`gmdate()`). Stale `captured` analyses (> `PluginUpdateAnalyzer::STALE_AFTER_SECONDS`) are abandoned on a later admin page request; no cron.
@@ -121,7 +134,7 @@ The plugin must stay distributable on WordPress.org:
 
 - **REST reports expose safe read models, never database rows.** Controllers call `Report\AnalysisReports`; only `Report\AnalysisReadModel` turns rows into API arrays, by whitelisting fields. Controllers never write SQL.
 - **Snapshot and fingerprint internals are never API fields**: no snapshots, fingerprints, fingerprint contexts, option values, raw diff JSON, user data or stored error messages. Errors expose a sanitized `code` only.
-- **Stored diffs are decoded only through `Storage\OptionsDiffCodec::decode()`**, which validates everything; never `json_decode()` stored data elsewhere. An unreadable diff becomes an unavailable phase (`data_corrupt`), never an error with the stored data.
+- **Stored diffs are decoded only through `Storage\OptionsDiffCodec::decode()` / `Storage\CronDiffCodec::decode()`**, which validates everything; never `json_decode()` stored data elsewhere. An unreadable diff becomes an unavailable phase (`data_corrupt`), never an error with the stored data.
 - **Report reads expire overdue analyses first** (`PluginUpdateAnalyzer::expire_overdue()`, same inclusive deadline rule, no late snapshot). Apart from that and `Schema::repair()`, report endpoints are read-only.
 - History lists read metadata and `IS NOT NULL` phase flags only, ordered by primary key; full diffs are decoded only for a single report.
 - **API timestamps are UTC ISO 8601** (`2026-10-05T17:46:23Z`) or `null`; never convert to site-local time in PHP. Counts, sizes and deltas are JSON integers; flags are booleans.

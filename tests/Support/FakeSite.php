@@ -8,14 +8,16 @@
 namespace UpdateLens\Tests\Support;
 
 use UpdateLens\Snapshot\AutoloadPolicy;
+use UpdateLens\Snapshot\CronArgsHasher;
+use UpdateLens\Snapshot\CronSnapshotBuilder;
 use UpdateLens\Snapshot\OptionNoiseFilter;
 use UpdateLens\Snapshot\OptionsSnapshotBuilder;
 use UpdateLens\Snapshot\OptionValueHasher;
 use UpdateLens\Update\PluginUpdateAnalyzer;
 
 /**
- * A fake `wp_options` table, salt and clock shared by several "requests"
- * (PluginUpdateAnalyzer instances) over one InMemoryAnalysisRepository.
+ * A fake `wp_options` table, `cron` option, salt and clock shared by several
+ * "requests" (PluginUpdateAnalyzer instances) over one InMemoryAnalysisRepository.
  */
 final class FakeSite {
 
@@ -34,11 +36,32 @@ final class FakeSite {
 	public $options;
 
 	/**
+	 * Fake `cron` option value (see CronFixture::cron()).
+	 *
+	 * @var mixed
+	 */
+	public $cron = array( 'version' => 2 );
+
+	/**
 	 * Site secret used for fingerprints (change to simulate rotated salts).
 	 *
 	 * @var string
 	 */
 	public $salt = 'site-salt';
+
+	/**
+	 * Secret used for Cron argument fingerprints; null means $salt.
+	 *
+	 * @var string|null
+	 */
+	public $cron_salt = null;
+
+	/**
+	 * Number of Cron snapshots attempted.
+	 *
+	 * @var int
+	 */
+	public $cron_captures = 0;
 
 	/**
 	 * Current Unix time.
@@ -93,9 +116,16 @@ final class FakeSite {
 			return $builder->build( $rows );
 		};
 
+		$capture_cron = function () {
+			++$this->cron_captures;
+
+			return ( new CronSnapshotBuilder( new CronArgsHasher( null === $this->cron_salt ? $this->salt : $this->cron_salt ) ) )->build( $this->cron );
+		};
+
 		return new PluginUpdateAnalyzer(
 			$this->repository,
 			$capture,
+			$capture_cron,
 			function () {
 				return $this->time;
 			}

@@ -73,10 +73,11 @@ includes/                PHP, PSR-4 namespace UpdateLens\
   Core/                  Plugin (hook wiring), Activator, Deactivator
   Admin/AdminPage.php    Tools → UpdateLens screen; enqueues the admin app
   Rest/                  REST controllers (namespace updatelens/v1)
-  Snapshot/              wp_options snapshot (safe metadata only: fingerprint, size, autoload);
-                         WP-Cron snapshot engine (hook, timing, recurrence, args fingerprint; not yet used in analyses)
+  Snapshot/              wp_options and WP-Cron snapshots (safe metadata only: fingerprints, sizes, autoload;
+                         hooks, timing, recurrence — never option values or Cron arguments)
   Diff/                  wp_options and WP-Cron diffs between two snapshots (no values, arguments or fingerprints)
-  Update/                Plugin update analysis lifecycle (WordPress updater hooks + rules)
+  Update/                Plugin update analysis lifecycle (WordPress updater hooks + rules); WP-Cron is observed
+                         and stored alongside wp_options as an independent signal, not yet shown in reports
   Storage/               Analyses table, SQL and JSON persistence formats
   Report/                Safe read models for the report REST endpoints
 libs/assets.php          Vendored Vite ↔ WordPress asset loader (kucrut/vite-for-wp)

@@ -36,12 +36,12 @@ class AnalysisRepository {
 	 * Columns of a history row: report metadata plus whether each phase diff is
 	 * stored (NULL check only; the diff JSON is not read).
 	 */
-	const HISTORY_COLUMNS = self::REPORT_METADATA_COLUMNS . ', during_update_diff IS NOT NULL AS has_during_update_diff, post_update_diff IS NOT NULL AS has_post_update_diff, final_diff IS NOT NULL AS has_final_diff';
+	const HISTORY_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff IS NOT NULL AS has_options_during_update_diff, options_post_update_diff IS NOT NULL AS has_options_post_update_diff, options_final_diff IS NOT NULL AS has_options_final_diff';
 
 	/**
 	 * Columns of a full report: report metadata plus the phase diffs.
 	 */
-	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', during_update_diff, post_update_diff, final_diff';
+	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff';
 
 	/**
 	 * Database.

@@ -21,27 +21,71 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	 * Columns of a row, with defaults.
 	 */
 	const COLUMNS = array(
-		'id'                 => null,
-		'plugin_file'        => '',
-		'plugin_name'        => '',
-		'version_before'     => '',
-		'version_after'      => null,
-		'user_id'            => 0,
-		'status'             => '',
-		'active_plugin'      => null,
-		'settle_outcome'     => null,
-		'started_at'         => '',
-		'updated_at'         => '',
-		'settle_deadline'    => null,
-		'completed_at'       => null,
-		'before_snapshot'    => null,
-		'immediate_snapshot' => null,
-		'during_update_diff' => null,
-		'post_update_diff'   => null,
-		'final_diff'         => null,
-		'error_code'         => null,
-		'error_message'      => null,
+		'id'                         => null,
+		'plugin_file'                => '',
+		'plugin_name'                => '',
+		'version_before'             => '',
+		'version_after'              => null,
+		'user_id'                    => 0,
+		'status'                     => '',
+		'active_plugin'              => null,
+		'settle_outcome'             => null,
+		'started_at'                 => '',
+		'updated_at'                 => '',
+		'settle_deadline'            => null,
+		'completed_at'               => null,
+		'options_before_snapshot'    => null,
+		'options_immediate_snapshot' => null,
+		'options_during_update_diff' => null,
+		'options_post_update_diff'   => null,
+		'options_final_diff'         => null,
+		'cron_before_snapshot'       => null,
+		'cron_immediate_snapshot'    => null,
+		'cron_during_update_diff'    => null,
+		'cron_post_update_diff'      => null,
+		'cron_final_diff'            => null,
+		'cron_during_update_reason'  => null,
+		'cron_post_update_reason'    => null,
+		'cron_final_reason'          => null,
+		'error_code'                 => null,
+		'error_message'              => null,
 	);
+
+	/**
+	 * Cron columns holding snapshot or diff JSON.
+	 */
+	const CRON_PAYLOAD_COLUMNS = array( 'cron_before_snapshot', 'cron_immediate_snapshot', 'cron_during_update_diff', 'cron_post_update_diff', 'cron_final_diff' );
+
+	/**
+	 * When true, a write that stores any Cron snapshot or diff throws (e.g. a payload too large for the database).
+	 *
+	 * @var bool
+	 */
+	public $fail_cron_writes = false;
+
+	/**
+	 * Number of writes attempted (create + transition).
+	 *
+	 * @var int
+	 */
+	public $writes = 0;
+
+	/**
+	 * Throw if a write is set to fail.
+	 *
+	 * @param array $values Column values written.
+	 * @return void
+	 * @throws RuntimeException If the write fails.
+	 */
+	private function write( array $values ) {
+		++$this->writes;
+		if ( $this->fail_writes ) {
+			throw new RuntimeException( 'write failed' );
+		}
+		if ( $this->fail_cron_writes && array_filter( array_intersect_key( $values, array_flip( self::CRON_PAYLOAD_COLUMNS ) ), 'is_string' ) ) {
+			throw new RuntimeException( 'cron write failed' );
+		}
+	}
 
 	/**
 	 * Rows by ID.
@@ -71,9 +115,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	 * @throws RuntimeException On failure or a second open analysis for a plugin.
 	 */
 	public function create( array $row ) {
-		if ( $this->fail_writes ) {
-			throw new RuntimeException( 'write failed' );
-		}
+		$this->write( $row );
 		if ( isset( $row['active_plugin'] ) && null !== $this->find_open_for_plugin( $row['active_plugin'] ) ) {
 			throw new RuntimeException( 'duplicate active_plugin' );
 		}
@@ -94,9 +136,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	 * @throws RuntimeException On failure.
 	 */
 	public function transition( $id, $from_status, array $changes ) {
-		if ( $this->fail_writes ) {
-			throw new RuntimeException( 'write failed' );
-		}
+		$this->write( $changes );
 		if ( ! isset( $this->rows[ $id ] ) || $this->rows[ $id ]['status'] !== $from_status ) {
 			return false;
 		}
@@ -176,7 +216,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 		$page = array();
 		foreach ( array_slice( $rows, (int) $offset, (int) $limit ) as $row ) {
 			$item = self::project( $row, AnalysisRepository::REPORT_METADATA_COLUMNS );
-			foreach ( array( 'during_update_diff', 'post_update_diff', 'final_diff' ) as $column ) {
+			foreach ( array( 'options_during_update_diff', 'options_post_update_diff', 'options_final_diff' ) as $column ) {
 				$item[ 'has_' . $column ] = null === $row[ $column ] ? '0' : '1';
 			}
 			$page[] = $item;

@@ -14,6 +14,7 @@ use UpdateLens\Snapshot\OptionNoiseFilter;
 use UpdateLens\Snapshot\OptionsSnapshotBuilder;
 use UpdateLens\Snapshot\OptionValueHasher;
 use UpdateLens\Storage\OptionsSnapshotCodec;
+use UpdateLens\Tests\Support\CronFixture;
 use UpdateLens\Tests\Support\InMemoryAnalysisRepository;
 use UpdateLens\Update\AnalysisStatus;
 use UpdateLens\Update\PluginUpdateAnalyzer;
@@ -132,6 +133,9 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 			$this->repository,
 			$capture,
 			function () {
+				return CronFixture::snapshot( array( 'version' => 2 ), $this->salt );
+			},
+			function () {
 				return $this->time;
 			}
 		);
@@ -223,7 +227,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( '2027-01-15 08:00:00', $row['started_at'], 'UTC DATETIME.' );
 		$this->assertSame( self::PLUGIN, $row['active_plugin'] );
 		$this->assertNull( $row['settle_outcome'] );
-		$before = ( new OptionsSnapshotCodec() )->decode( $row['before_snapshot'] );
+		$before = ( new OptionsSnapshotCodec() )->decode( $row['options_before_snapshot'] );
 		$this->assertSame( array( 'acme_db_version', 'acme_legacy', 'acme_settings', 'siteurl' ), array_keys( $before->get_records() ) );
 
 		// During the update request the old code reacts to its own update.
@@ -235,17 +239,17 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( AnalysisStatus::AWAITING_SETTLE, $row['status'] );
 		$this->assertSame( '1.1.0', $row['version_after'] );
 		$this->assertSame( '2027-01-15 08:05:05', $row['settle_deadline'], 'Update finish + SETTLE_WINDOW_SECONDS.' );
-		$this->assertNotNull( $row['before_snapshot'] );
-		$this->assertNotNull( $row['immediate_snapshot'] );
-		$this->assertNull( $row['post_update_diff'] );
-		$this->assertNull( $row['final_diff'] );
+		$this->assertNotNull( $row['options_before_snapshot'] );
+		$this->assertNotNull( $row['options_immediate_snapshot'] );
+		$this->assertNull( $row['options_post_update_diff'] );
+		$this->assertNull( $row['options_final_diff'] );
 		$this->assertSame(
 			array(
 				'added'   => array( 'acme_pending_migration' ),
 				'removed' => array(),
 				'changed' => array(),
 			),
-			self::names( $this->diff( $row, 'during_update_diff' ) )
+			self::names( $this->diff( $row, 'options_during_update_diff' ) )
 		);
 
 		// The update request's own shutdown must not settle.
@@ -267,8 +271,8 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$row = $this->only_row();
 		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'] );
 		$this->assertSame( SettleOutcome::ADMIN_SHUTDOWN, $row['settle_outcome'] );
-		$this->assertNull( $row['before_snapshot'], 'Temporary snapshots cleared.' );
-		$this->assertNull( $row['immediate_snapshot'] );
+		$this->assertNull( $row['options_before_snapshot'], 'Temporary snapshots cleared.' );
+		$this->assertNull( $row['options_immediate_snapshot'] );
 		$this->assertNull( $row['active_plugin'] );
 		$this->assertSame( '2027-01-15 08:01:05', $row['completed_at'] );
 		$this->assertNull( $row['error_code'] );
@@ -279,9 +283,9 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 				'removed' => array( 'acme_legacy', 'acme_pending_migration' ),
 				'changed' => array( 'acme_db_version', 'acme_settings' ),
 			),
-			self::names( $this->diff( $row, 'post_update_diff' ) )
+			self::names( $this->diff( $row, 'options_post_update_diff' ) )
 		);
-		$final = $this->diff( $row, 'final_diff' );
+		$final = $this->diff( $row, 'options_final_diff' );
 		$this->assertSame(
 			array(
 				'added'   => array( 'acme_feature' ),
@@ -293,7 +297,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertTrue( $final['changed'][0]['value_changed'] );
 		$this->assertSame( 0, $final['changed'][0]['size_delta'] );
 		$this->assertTrue( $final['changed'][1]['autoload_behavior_changed'] );
-		$this->assertNotNull( $row['during_update_diff'], 'During-update diff kept.' );
+		$this->assertNotNull( $row['options_during_update_diff'], 'During-update diff kept.' );
 
 		// Final: further admin requests change nothing.
 		$this->request()->request_ending( true );
@@ -329,7 +333,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 				'removed' => array(),
 				'changed' => array( 'a' ),
 			),
-			self::names( $this->diff( $row, 'during_update_diff' ) )
+			self::names( $this->diff( $row, 'options_during_update_diff' ) )
 		);
 		$this->assertSame(
 			array(
@@ -337,7 +341,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 				'removed' => array(),
 				'changed' => array( 'a' ),
 			),
-			self::names( $this->diff( $row, 'post_update_diff' ) )
+			self::names( $this->diff( $row, 'options_post_update_diff' ) )
 		);
 		$this->assertSame(
 			array(
@@ -345,7 +349,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 				'removed' => array(),
 				'changed' => array( 'a' ),
 			),
-			self::names( $this->diff( $row, 'final_diff' ) )
+			self::names( $this->diff( $row, 'options_final_diff' ) )
 		);
 	}
 
@@ -361,10 +365,10 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->request()->request_ending( true );
 
 		$row  = $this->only_row();
-		$post = $this->diff( $row, 'post_update_diff' );
+		$post = $this->diff( $row, 'options_post_update_diff' );
 		$this->assertSame( array(), array_merge( $post['added'], $post['removed'], $post['changed'] ) );
 		$this->assertSame( 0, $post['summary']['changed_count'] );
-		$this->assertSame( array( 'acme_db_version' ), self::names( $this->diff( $row, 'final_diff' ) )['changed'] );
+		$this->assertSame( array( 'acme_db_version' ), self::names( $this->diff( $row, 'options_final_diff' ) )['changed'] );
 		$this->assertSame( SettleOutcome::ADMIN_SHUTDOWN, $row['settle_outcome'] );
 	}
 
@@ -398,7 +402,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$row = $this->only_row();
 		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'] );
 		$this->assertSame( $eligible ? SettleOutcome::ADMIN_SHUTDOWN : SettleOutcome::EXPIRED, $row['settle_outcome'] );
-		$this->assertSame( $eligible, null !== $row['final_diff'] );
+		$this->assertSame( $eligible, null !== $row['options_final_diff'] );
 	}
 
 	/**
@@ -420,10 +424,10 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$row = $this->repository->rows[2];
 		$this->assertSame( $eligible ? AnalysisStatus::AWAITING_SETTLE : AnalysisStatus::COMPLETED, $row['status'] );
 		$this->assertSame( $eligible ? null : SettleOutcome::EXPIRED, $row['settle_outcome'] );
-		$this->assertNotNull( $row['during_update_diff'] );
-		$this->assertNull( $row['post_update_diff'] );
-		$this->assertNull( $row['final_diff'] );
-		$this->assertSame( $eligible, null !== $row['immediate_snapshot'] );
+		$this->assertNotNull( $row['options_during_update_diff'] );
+		$this->assertNull( $row['options_post_update_diff'] );
+		$this->assertNull( $row['options_final_diff'] );
+		$this->assertSame( $eligible, null !== $row['options_immediate_snapshot'] );
 		$this->assertSame( AnalysisStatus::CAPTURED, $this->repository->rows[1]['status'] );
 		$this->assertSame( $captures, $this->captures, 'No snapshot taken.' );
 	}
@@ -448,13 +452,13 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$row = $this->only_row();
 		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'], 'Not failed, incompatible or abandoned.' );
 		$this->assertSame( SettleOutcome::EXPIRED, $row['settle_outcome'] );
-		$this->assertSame( array( 'acme_pending_migration' ), self::names( $this->diff( $row, 'during_update_diff' ) )['added'] );
+		$this->assertSame( array( 'acme_pending_migration' ), self::names( $this->diff( $row, 'options_during_update_diff' ) )['added'] );
 		$this->assertSame( '1.0.0', $row['version_before'] );
 		$this->assertSame( '1.1.0', $row['version_after'] );
-		$this->assertNull( $row['post_update_diff'] );
-		$this->assertNull( $row['final_diff'] );
-		$this->assertNull( $row['before_snapshot'] );
-		$this->assertNull( $row['immediate_snapshot'] );
+		$this->assertNull( $row['options_post_update_diff'] );
+		$this->assertNull( $row['options_final_diff'] );
+		$this->assertNull( $row['options_before_snapshot'] );
+		$this->assertNull( $row['options_immediate_snapshot'] );
 		$this->assertNull( $row['active_plugin'] );
 		$this->assertNull( $row['error_code'] );
 		$this->assertNotNull( $row['completed_at'] );
@@ -478,8 +482,8 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$row = $this->only_row();
 		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'] );
 		$this->assertSame( SettleOutcome::NEXT_UPDATE, $row['settle_outcome'] );
-		$this->assertSame( array( 'acme_db_version' ), self::names( $this->diff( $row, 'post_update_diff' ) )['changed'] );
-		$this->assertNotContains( 'other_plugin_option', self::names( $this->diff( $row, 'final_diff' ) )['added'], 'The other update is not included.' );
+		$this->assertSame( array( 'acme_db_version' ), self::names( $this->diff( $row, 'options_post_update_diff' ) )['changed'] );
+		$this->assertNotContains( 'other_plugin_option', self::names( $this->diff( $row, 'options_final_diff' ) )['added'], 'The other update is not included.' );
 	}
 
 	/**
@@ -495,8 +499,8 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$first = $this->repository->rows[1];
 		$this->assertSame( AnalysisStatus::COMPLETED, $first['status'] );
 		$this->assertSame( SettleOutcome::EXPIRED, $first['settle_outcome'] );
-		$this->assertNull( $first['post_update_diff'] );
-		$this->assertNull( $first['final_diff'] );
+		$this->assertNull( $first['options_post_update_diff'] );
+		$this->assertNull( $first['options_final_diff'] );
 		$this->assertSame( AnalysisStatus::CAPTURED, $this->repository->rows[2]['status'] );
 	}
 
@@ -603,7 +607,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( 'download_failed', $row['error_code'] );
 		$this->assertSame( 'The WordPress update did not succeed.', $row['error_message'] );
 		$this->assertSame( SettleOutcome::NOT_APPLICABLE, $row['settle_outcome'] );
-		foreach ( array( 'during_update_diff', 'post_update_diff', 'final_diff', 'before_snapshot', 'immediate_snapshot', 'active_plugin', 'settle_deadline' ) as $column ) {
+		foreach ( array( 'options_during_update_diff', 'options_post_update_diff', 'options_final_diff', 'options_before_snapshot', 'options_immediate_snapshot', 'active_plugin', 'settle_deadline' ) as $column ) {
 			$this->assertNull( $row[ $column ], $column );
 		}
 		$this->assertNotNull( $row['completed_at'] );
@@ -638,7 +642,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( AnalysisStatus::FAILED, $row['status'] );
 		$this->assertSame( PluginUpdateAnalyzer::ERROR_UPDATE_NOT_COMPLETED, $row['error_code'] );
 		$this->assertSame( SettleOutcome::NOT_APPLICABLE, $row['settle_outcome'] );
-		$this->assertNull( $row['before_snapshot'] );
+		$this->assertNull( $row['options_before_snapshot'] );
 	}
 
 	/**
@@ -654,9 +658,9 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( AnalysisStatus::INCOMPATIBLE, $row['status'] );
 		$this->assertSame( PluginUpdateAnalyzer::ERROR_CONTEXT_CHANGED, $row['error_code'] );
 		$this->assertSame( SettleOutcome::NOT_APPLICABLE, $row['settle_outcome'] );
-		$this->assertNull( $row['during_update_diff'] );
-		$this->assertNull( $row['before_snapshot'] );
-		$this->assertNull( $row['immediate_snapshot'] );
+		$this->assertNull( $row['options_during_update_diff'] );
+		$this->assertNull( $row['options_before_snapshot'] );
+		$this->assertNull( $row['options_immediate_snapshot'] );
 	}
 
 	/**
@@ -672,11 +676,11 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( AnalysisStatus::INCOMPATIBLE, $row['status'] );
 		$this->assertSame( PluginUpdateAnalyzer::ERROR_CONTEXT_CHANGED, $row['error_code'] );
 		$this->assertSame( SettleOutcome::ADMIN_SHUTDOWN, $row['settle_outcome'], 'Settled snapshot taken but not comparable.' );
-		$this->assertNotNull( $row['during_update_diff'] );
-		$this->assertNull( $row['post_update_diff'] );
-		$this->assertNull( $row['final_diff'] );
-		$this->assertNull( $row['before_snapshot'] );
-		$this->assertNull( $row['immediate_snapshot'] );
+		$this->assertNotNull( $row['options_during_update_diff'] );
+		$this->assertNull( $row['options_post_update_diff'] );
+		$this->assertNull( $row['options_final_diff'] );
+		$this->assertNull( $row['options_before_snapshot'] );
+		$this->assertNull( $row['options_immediate_snapshot'] );
 	}
 
 	/**
@@ -686,17 +690,17 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->update();
 
 		// Re-encode the stored IMMEDIATE snapshot under another context.
-		$stored                        = json_decode( $this->repository->rows[1]['immediate_snapshot'], true );
+		$stored                        = json_decode( $this->repository->rows[1]['options_immediate_snapshot'], true );
 		$stored['fingerprint_context'] = 'hmac-sha256-v1:' . str_repeat( 'f', 64 );
-		$this->repository->rows[1]['immediate_snapshot'] = json_encode( $stored ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Test fixture.
+		$this->repository->rows[1]['options_immediate_snapshot'] = json_encode( $stored ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Test fixture.
 
 		$this->request()->request_ending( true );
 
 		$row = $this->only_row();
 		$this->assertSame( AnalysisStatus::INCOMPATIBLE, $row['status'] );
-		$this->assertNull( $row['post_update_diff'] );
-		$this->assertNull( $row['final_diff'] );
-		$this->assertNull( $row['immediate_snapshot'] );
+		$this->assertNull( $row['options_post_update_diff'] );
+		$this->assertNull( $row['options_final_diff'] );
+		$this->assertNull( $row['options_immediate_snapshot'] );
 	}
 
 	/**
@@ -718,7 +722,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( AnalysisStatus::ABANDONED, $row['status'] );
 		$this->assertSame( PluginUpdateAnalyzer::ERROR_STALE, $row['error_code'] );
 		$this->assertSame( SettleOutcome::NOT_APPLICABLE, $row['settle_outcome'] );
-		$this->assertNull( $row['before_snapshot'] );
+		$this->assertNull( $row['options_before_snapshot'] );
 		$this->assertNull( $row['active_plugin'] );
 	}
 
@@ -761,9 +765,9 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( AnalysisStatus::ABANDONED, $row['status'] );
 		$this->assertSame( PluginUpdateAnalyzer::ERROR_ANOTHER_UPDATE_STARTED, $row['error_code'] );
 		$this->assertSame( SettleOutcome::NOT_APPLICABLE, $row['settle_outcome'] );
-		$this->assertNotNull( $row['during_update_diff'] );
-		$this->assertNull( $row['before_snapshot'] );
-		$this->assertNull( $row['immediate_snapshot'] );
+		$this->assertNotNull( $row['options_during_update_diff'] );
+		$this->assertNull( $row['options_before_snapshot'] );
+		$this->assertNull( $row['options_immediate_snapshot'] );
 	}
 
 	/**
@@ -783,13 +787,13 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 	public function test_corrupt_before_snapshot() {
 		$request = $this->request();
 		$this->start( $request );
-		$this->repository->rows[1]['before_snapshot'] = '{"schema":1,';
+		$this->repository->rows[1]['options_before_snapshot'] = '{"schema":1,';
 		$request->update_finished( self::PLUGIN, null, '1.1.0' );
 
 		$row = $this->only_row();
 		$this->assertSame( AnalysisStatus::FAILED, $row['status'] );
 		$this->assertSame( PluginUpdateAnalyzer::ERROR_SNAPSHOT_CORRUPT, $row['error_code'] );
-		$this->assertNull( $row['during_update_diff'] );
+		$this->assertNull( $row['options_during_update_diff'] );
 	}
 
 	/**
@@ -797,7 +801,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 	 */
 	public function test_missing_immediate_snapshot() {
 		$this->update();
-		$this->repository->rows[1]['immediate_snapshot'] = null;
+		$this->repository->rows[1]['options_immediate_snapshot'] = null;
 
 		$this->request()->request_ending( true );
 
@@ -805,9 +809,9 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		$this->assertSame( AnalysisStatus::FAILED, $row['status'] );
 		$this->assertSame( PluginUpdateAnalyzer::ERROR_SNAPSHOT_CORRUPT, $row['error_code'] );
 		$this->assertSame( SettleOutcome::ADMIN_SHUTDOWN, $row['settle_outcome'] );
-		$this->assertNotNull( $row['during_update_diff'] );
-		$this->assertNull( $row['post_update_diff'] );
-		$this->assertNull( $row['before_snapshot'] );
+		$this->assertNotNull( $row['options_during_update_diff'] );
+		$this->assertNull( $row['options_post_update_diff'] );
+		$this->assertNull( $row['options_before_snapshot'] );
 	}
 
 	/**
@@ -872,7 +876,7 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 		}
 
 		$row = $this->repository->rows[1];
-		foreach ( array( 'during_update_diff', 'post_update_diff', 'final_diff' ) as $column ) {
+		foreach ( array( 'options_during_update_diff', 'options_post_update_diff', 'options_final_diff' ) as $column ) {
 			$this->assertStringNotContainsString( 'fingerprint', $row[ $column ], $column );
 		}
 	}

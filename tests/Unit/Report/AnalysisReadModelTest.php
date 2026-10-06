@@ -25,29 +25,29 @@ final class AnalysisReadModelTest extends TestCase {
 	private static function row( array $overrides = array() ) {
 		return array_merge(
 			array(
-				'id'                     => '42',
-				'plugin_file'            => 'acme/acme.php',
-				'plugin_name'            => 'Acme',
-				'version_before'         => '1.0.0',
-				'version_after'          => '1.1.0',
-				'user_id'                => '7',
-				'status'                 => 'completed',
-				'active_plugin'          => null,
-				'settle_outcome'         => 'expired',
-				'started_at'             => '2026-10-05 17:46:18',
-				'updated_at'             => '2026-10-05 17:51:21',
-				'settle_deadline'        => '2026-10-05 17:51:20',
-				'completed_at'           => '2026-10-05 17:51:21',
-				'before_snapshot'        => '{"schema":1,"fingerprint_context":"hmac-sha256-v1:x"}',
-				'immediate_snapshot'     => '{"schema":1}',
-				'during_update_diff'     => null,
-				'post_update_diff'       => null,
-				'final_diff'             => null,
-				'error_code'             => null,
-				'error_message'          => 'Stored message',
-				'has_during_update_diff' => '0',
-				'has_post_update_diff'   => '0',
-				'has_final_diff'         => '0',
+				'id'                             => '42',
+				'plugin_file'                    => 'acme/acme.php',
+				'plugin_name'                    => 'Acme',
+				'version_before'                 => '1.0.0',
+				'version_after'                  => '1.1.0',
+				'user_id'                        => '7',
+				'status'                         => 'completed',
+				'active_plugin'                  => null,
+				'settle_outcome'                 => 'expired',
+				'started_at'                     => '2026-10-05 17:46:18',
+				'updated_at'                     => '2026-10-05 17:51:21',
+				'settle_deadline'                => '2026-10-05 17:51:20',
+				'completed_at'                   => '2026-10-05 17:51:21',
+				'options_before_snapshot'        => '{"schema":1,"fingerprint_context":"hmac-sha256-v1:x"}',
+				'options_immediate_snapshot'     => '{"schema":1}',
+				'options_during_update_diff'     => null,
+				'options_post_update_diff'       => null,
+				'options_final_diff'             => null,
+				'error_code'                     => null,
+				'error_message'                  => 'Stored message',
+				'has_options_during_update_diff' => '0',
+				'has_options_post_update_diff'   => '0',
+				'has_options_final_diff'         => '0',
 			),
 			$overrides
 		);
@@ -57,7 +57,7 @@ final class AnalysisReadModelTest extends TestCase {
 	 * Only whitelisted fields, with JSON types; database strings become ints/bools.
 	 */
 	public function test_history_item_fields_and_types() {
-		$item = ( new AnalysisReadModel() )->history_item( self::row( array( 'has_during_update_diff' => '1' ) ) );
+		$item = ( new AnalysisReadModel() )->history_item( self::row( array( 'has_options_during_update_diff' => '1' ) ) );
 
 		$this->assertSame(
 			array(
@@ -91,8 +91,8 @@ final class AnalysisReadModelTest extends TestCase {
 		$item = ( new AnalysisReadModel() )->history_item(
 			self::row(
 				array(
-					'has_during_update_diff' => 1,
-					'has_post_update_diff'   => 0,
+					'has_options_during_update_diff' => 1,
+					'has_options_post_update_diff'   => 0,
 				)
 			)
 		);
@@ -334,7 +334,7 @@ final class AnalysisReadModelTest extends TestCase {
 	 * @param string $json Stored JSON.
 	 */
 	public function test_corrupt_diff( $json ) {
-		$report = ( new AnalysisReadModel() )->report( self::row( array( 'during_update_diff' => $json ) ) );
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'options_during_update_diff' => $json ) ) );
 
 		$this->assertSame(
 			array(

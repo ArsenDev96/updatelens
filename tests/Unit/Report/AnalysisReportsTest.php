@@ -12,6 +12,7 @@ use RuntimeException;
 use UpdateLens\Report\AnalysisReports;
 use UpdateLens\Report\UnavailableReason;
 use UpdateLens\Storage\OptionsDiffCodec;
+use UpdateLens\Tests\Support\CronFixture;
 use UpdateLens\Tests\Support\FakeSite;
 use UpdateLens\Update\AnalysisStatus;
 use UpdateLens\Update\PluginUpdateAnalyzer;
@@ -338,8 +339,8 @@ final class AnalysisReportsTest extends TestCase {
 		);
 		$this->assertSame( '2027-01-15T08:05:01Z', $report['timestamps']['completed_at'] );
 		$this->assertSame( $captures, $this->site->captures );
-		$this->assertNull( $this->site->repository->rows[1]['before_snapshot'] );
-		$this->assertNull( $this->site->repository->rows[1]['immediate_snapshot'] );
+		$this->assertNull( $this->site->repository->rows[1]['options_before_snapshot'] );
+		$this->assertNull( $this->site->repository->rows[1]['options_immediate_snapshot'] );
 	}
 
 	/**
@@ -359,9 +360,9 @@ final class AnalysisReportsTest extends TestCase {
 		$this->assertSame( array( 'during_update', 'post_update', 'final' ), array_keys( $report['phases'] ) );
 
 		$associations = array(
-			'during_update' => array( 'update_request', 'during_update_diff' ),
-			'post_update'   => array( 'observed_after_update', 'post_update_diff' ),
-			'final'         => array( 'net_across_phases', 'final_diff' ),
+			'during_update' => array( 'update_request', 'options_during_update_diff' ),
+			'post_update'   => array( 'observed_after_update', 'options_post_update_diff' ),
+			'final'         => array( 'net_across_phases', 'options_final_diff' ),
 		);
 		foreach ( $associations as $phase => list( $association, $column ) ) {
 			$diff = $codec->decode( $row[ $column ] );
@@ -527,7 +528,7 @@ final class AnalysisReportsTest extends TestCase {
 	 */
 	public function test_corrupt_stored_diff() {
 		$this->completed_update();
-		$this->site->repository->rows[1]['post_update_diff'] = '{"schema":1,"added":"' . self::FAKE_SECRET . '"';
+		$this->site->repository->rows[1]['options_post_update_diff'] = '{"schema":1,"added":"' . self::FAKE_SECRET . '"';
 
 		$report = $this->reports()->report( 1 );
 
@@ -637,7 +638,7 @@ final class AnalysisReportsTest extends TestCase {
 
 		$forbidden = array( self::FAKE_SECRET, 'api_key', 'token=', 'fingerprint', 'hmac-sha256', 'snapshot', 'user_id', 'error_message', '"schema"', 'site-salt' );
 		foreach ( $this->site->repository->rows as $row ) {
-			foreach ( array( 'before_snapshot', 'immediate_snapshot' ) as $column ) {
+			foreach ( array( 'options_before_snapshot', 'options_immediate_snapshot' ) as $column ) {
 				if ( null !== $row[ $column ] ) {
 					$snapshot = json_decode( $row[ $column ], true );
 					foreach ( $snapshot['options'] as $option ) {
@@ -645,7 +646,7 @@ final class AnalysisReportsTest extends TestCase {
 					}
 				}
 			}
-			foreach ( array( 'during_update_diff', 'post_update_diff', 'final_diff' ) as $column ) {
+			foreach ( array( 'options_during_update_diff', 'options_post_update_diff', 'options_final_diff' ) as $column ) {
 				if ( null !== $row[ $column ] ) {
 					$forbidden[] = $row[ $column ];
 				}
@@ -657,6 +658,35 @@ final class AnalysisReportsTest extends TestCase {
 				foreach ( $forbidden as $needle ) {
 					$this->assertStringNotContainsString( $needle, $serialized );
 				}
+			}
+		}
+	}
+
+	/**
+	 * Stored WP-Cron data is not part of the reports yet: the API contract is unchanged.
+	 */
+	public function test_cron_data_is_not_exposed() {
+		$this->site->cron = CronFixture::cron( array( CronFixture::recurring( self::T0 + 600, 'acme_cleanup', 'daily', array( 'token' => self::FAKE_SECRET ) ) ) );
+		$this->site->update( 'a/a.php' );
+		$this->site->cron  = CronFixture::cron( array( CronFixture::recurring( self::T0 + 4200, 'acme_cleanup', 'daily', array( 'token' => self::FAKE_SECRET ) ) ) );
+		$this->site->time += 60;
+		$this->site->admin_page();
+		$this->site->update( 'b/b.php' ); // Awaiting, with Cron snapshots stored.
+
+		$row = $this->site->repository->rows[1];
+		$this->assertNotNull( $row['cron_post_update_diff'], 'The fixture stores Cron data.' );
+
+		$reports = $this->reports();
+		$history = $reports->history( 1, 20 );
+		$report  = $reports->report( 1 );
+
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'phases', 'error' ), array_keys( $report ) );
+		foreach ( $report['phases'] as $phase ) {
+			$this->assertNotContains( 'cron', array_keys( $phase ) );
+		}
+		foreach ( array( self::json( $history ), self::json( $report ), self::json( $reports->report( 2 ) ) ) as $output ) {
+			foreach ( array( 'cron', 'acme_cleanup', 'args_fingerprint', 'fingerprint_context', 'rescheduled', self::FAKE_SECRET ) as $needle ) {
+				$this->assertStringNotContainsString( $needle, $output );
 			}
 		}
 	}

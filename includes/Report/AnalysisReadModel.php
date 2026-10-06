@@ -61,9 +61,9 @@ final class AnalysisReadModel {
 	 * Diff column per phase, in report order.
 	 */
 	const PHASE_COLUMNS = array(
-		ObservationPhase::DURING_UPDATE => 'during_update_diff',
-		ObservationPhase::POST_UPDATE   => 'post_update_diff',
-		ObservationPhase::FINAL         => 'final_diff',
+		ObservationPhase::DURING_UPDATE => 'options_during_update_diff',
+		ObservationPhase::POST_UPDATE   => 'options_post_update_diff',
+		ObservationPhase::FINAL         => 'options_final_diff',
 	);
 
 	/**

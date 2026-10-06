@@ -9,6 +9,7 @@ namespace UpdateLens\Storage;
 
 use UpdateLens\Core\Plugin;
 use UpdateLens\Update\AnalysisStatus;
+use UpdateLens\Update\CronPhaseReason;
 use UpdateLens\Update\SettleOutcome;
 
 defined( 'ABSPATH' ) || exit;
@@ -23,8 +24,22 @@ final class Schema {
 	 *
 	 * 2: phase diffs (during_update_diff, post_update_diff, final_diff),
 	 *    immediate_snapshot, settle_deadline, settle_outcome.
+	 * 3: options columns prefixed `options_`; WP-Cron snapshot, diff and
+	 *    reason columns.
 	 */
-	const VERSION = 2;
+	const VERSION = 3;
+
+	/**
+	 * Column renames: current name => [ definition, earlier names, newest first ].
+	 */
+	const RENAMES = array(
+		'options_before_snapshot'    => array( 'longtext DEFAULT NULL', 'before_snapshot' ),
+		'options_immediate_snapshot' => array( 'longtext DEFAULT NULL', 'immediate_snapshot' ),
+		'options_during_update_diff' => array( 'longtext DEFAULT NULL', 'during_update_diff', 'immediate_diff' ),
+		'options_post_update_diff'   => array( 'longtext DEFAULT NULL', 'post_update_diff' ),
+		'options_final_diff'         => array( 'longtext DEFAULT NULL', 'final_diff', 'settled_diff' ),
+		'settle_outcome'             => array( 'varchar(20) DEFAULT NULL', 'settle_trigger' ),
+	);
 
 	/**
 	 * Option holding the installed schema version.
@@ -77,7 +92,8 @@ final class Schema {
 	 * Create or update the tables, then record the schema version.
 	 *
 	 * The dbDelta() function adds columns and indexes but cannot rename; renames from older
-	 * versions run first.
+	 * versions run first. If they fail, the version is not recorded, so the
+	 * upgrade is retried instead of dbDelta() adding empty columns next to the old ones.
 	 *
 	 * @return bool Whether the analyses table exists afterwards.
 	 */
@@ -88,9 +104,10 @@ final class Schema {
 
 		$table     = $wpdb->prefix . self::ANALYSES_TABLE;
 		$installed = (int) get_option( self::VERSION_OPTION );
+		$upgrading = $installed > 0 && $installed < self::VERSION && self::table_exists( $table );
 
-		if ( 1 === $installed && self::table_exists( $table ) ) {
-			self::rename_v1_columns( $table );
+		if ( $upgrading && ! self::rename_columns( $table ) ) {
+			return false;
 		}
 
 		dbDelta( self::analyses_table_sql( $table, $wpdb->get_charset_collate() ) );
@@ -110,6 +127,23 @@ final class Schema {
 					AnalysisStatus::FAILED,
 					AnalysisStatus::INCOMPATIBLE,
 					AnalysisStatus::ABANDONED
+				)
+			);
+		}
+
+		if ( $upgrading && $installed < 3 ) {
+			// Finished analyses from before WP-Cron observation never captured Cron.
+			// Open ones resolve the same way when they end (no Cron BEFORE snapshot).
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One-time schema upgrade.
+			$wpdb->query(
+				$wpdb->prepare(
+					'UPDATE %i SET cron_during_update_reason = %s, cron_post_update_reason = %s, cron_final_reason = %s WHERE status NOT IN (%s, %s)',
+					$table,
+					CronPhaseReason::NOT_CAPTURED,
+					CronPhaseReason::NOT_CAPTURED,
+					CronPhaseReason::NOT_CAPTURED,
+					AnalysisStatus::CAPTURED,
+					AnalysisStatus::AWAITING_SETTLE
 				)
 			);
 		}
@@ -138,8 +172,10 @@ final class Schema {
 	 *
 	 * `active_plugin` holds the plugin file only while an analysis is not in a
 	 * terminal state; its unique key allows one open analysis per plugin while
-	 * keeping any number of finished ones. `before_snapshot` and
-	 * `immediate_snapshot` are temporary and cleared on every final state.
+	 * keeping any number of finished ones. Options and WP-Cron are independent
+	 * signals with their own columns. The `*_before_snapshot` and
+	 * `*_immediate_snapshot` columns are temporary and cleared on every final
+	 * state; `cron_*_reason` holds the CronPhaseReason of an unavailable Cron phase.
 	 *
 	 * @param string $table           Full table name.
 	 * @param string $charset_collate Charset/collation clause.
@@ -160,11 +196,19 @@ final class Schema {
   updated_at datetime NOT NULL,
   settle_deadline datetime DEFAULT NULL,
   completed_at datetime DEFAULT NULL,
-  before_snapshot longtext DEFAULT NULL,
-  immediate_snapshot longtext DEFAULT NULL,
-  during_update_diff longtext DEFAULT NULL,
-  post_update_diff longtext DEFAULT NULL,
-  final_diff longtext DEFAULT NULL,
+  options_before_snapshot longtext DEFAULT NULL,
+  options_immediate_snapshot longtext DEFAULT NULL,
+  options_during_update_diff longtext DEFAULT NULL,
+  options_post_update_diff longtext DEFAULT NULL,
+  options_final_diff longtext DEFAULT NULL,
+  cron_before_snapshot longtext DEFAULT NULL,
+  cron_immediate_snapshot longtext DEFAULT NULL,
+  cron_during_update_diff longtext DEFAULT NULL,
+  cron_post_update_diff longtext DEFAULT NULL,
+  cron_final_diff longtext DEFAULT NULL,
+  cron_during_update_reason varchar(40) DEFAULT NULL,
+  cron_post_update_reason varchar(40) DEFAULT NULL,
+  cron_final_reason varchar(40) DEFAULT NULL,
   error_code varchar(64) DEFAULT NULL,
   error_message text DEFAULT NULL,
   PRIMARY KEY  (id),
@@ -175,30 +219,61 @@ final class Schema {
 	}
 
 	/**
-	 * Rename v1 columns to their v2 names, keeping their data.
+	 * Rename columns from earlier versions to their current names, keeping their data.
 	 *
-	 * Version 1 `settled_diff` was BEFORE → SETTLED, i.e. the version 2 final diff.
+	 * All renames run in one ALTER TABLE statement. Version 1 `settled_diff`
+	 * was BEFORE → SETTLED, i.e. today's final diff; version 1 and 2 phase
+	 * columns held the options signal.
 	 *
 	 * @param string $table Full table name.
-	 * @return void
+	 * @return bool Whether the renames succeeded (true if none were needed).
 	 */
-	private static function rename_v1_columns( $table ) {
+	private static function rename_columns( $table ) {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema inspection.
 		$columns = (array) $wpdb->get_col( $wpdb->prepare( 'DESCRIBE %i', $table ) );
+		if ( '' !== $wpdb->last_error ) {
+			return false;
+		}
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- One-time schema upgrade.
-		if ( in_array( 'immediate_diff', $columns, true ) && ! in_array( 'during_update_diff', $columns, true ) ) {
-			$wpdb->query( $wpdb->prepare( 'ALTER TABLE %i CHANGE COLUMN immediate_diff during_update_diff longtext DEFAULT NULL', $table ) );
+		$clauses = array();
+		foreach ( self::renames( $columns ) as $rename ) {
+			$clauses[] = $wpdb->prepare( 'CHANGE COLUMN %i %i ', $rename[0], $rename[1] ) . $rename[2];
 		}
-		if ( in_array( 'settled_diff', $columns, true ) && ! in_array( 'final_diff', $columns, true ) ) {
-			$wpdb->query( $wpdb->prepare( 'ALTER TABLE %i CHANGE COLUMN settled_diff final_diff longtext DEFAULT NULL', $table ) );
+		if ( ! $clauses ) {
+			return true;
 		}
-		if ( in_array( 'settle_trigger', $columns, true ) && ! in_array( 'settle_outcome', $columns, true ) ) {
-			$wpdb->query( $wpdb->prepare( 'ALTER TABLE %i CHANGE COLUMN settle_trigger settle_outcome varchar(20) DEFAULT NULL', $table ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.NotPrepared -- One-time schema upgrade; clauses prepared above, definitions are class constants.
+		return false !== $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i ', $table ) . implode( ', ', $clauses ) );
+	}
+
+	/**
+	 * Renames needed for an existing column list.
+	 *
+	 * A column is renamed from the newest earlier name that exists, and only if
+	 * its current name does not exist yet (so a repeated upgrade is a no-op).
+	 *
+	 * @param string[] $columns Existing column names.
+	 * @return array<int, array{string, string, string}> [ from, to, definition ] per rename.
+	 */
+	public static function renames( array $columns ) {
+		$renames = array();
+		foreach ( self::RENAMES as $to => $rename ) {
+			$definition = array_shift( $rename );
+			if ( in_array( $to, $columns, true ) ) {
+				continue;
+			}
+			foreach ( $rename as $from ) {
+				if ( in_array( $from, $columns, true ) ) {
+					$renames[] = array( $from, $to, $definition );
+					break;
+				}
+			}
 		}
-		// phpcs:enable
+
+		return $renames;
 	}
 
 	/**

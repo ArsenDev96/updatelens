@@ -10,6 +10,7 @@ namespace UpdateLens\Tests\Unit\Storage;
 use PHPUnit\Framework\TestCase;
 use UpdateLens\Storage\AnalysisRepository;
 use UpdateLens\Storage\Schema;
+use UpdateLens\Update\CronObservation;
 
 /**
  * Table definition used by dbDelta().
@@ -28,10 +29,10 @@ final class SchemaTest extends TestCase {
 	}
 
 	/**
-	 * Version 2 columns, without obsolete v1 names.
+	 * Version 3 columns: provider-prefixed, without obsolete v1/v2 names.
 	 */
 	public function test_columns() {
-		$this->assertSame( 2, Schema::VERSION );
+		$this->assertSame( 3, Schema::VERSION );
 		$this->assertSame(
 			array(
 				'id',
@@ -47,11 +48,19 @@ final class SchemaTest extends TestCase {
 				'updated_at',
 				'settle_deadline',
 				'completed_at',
-				'before_snapshot',
-				'immediate_snapshot',
-				'during_update_diff',
-				'post_update_diff',
-				'final_diff',
+				'options_before_snapshot',
+				'options_immediate_snapshot',
+				'options_during_update_diff',
+				'options_post_update_diff',
+				'options_final_diff',
+				'cron_before_snapshot',
+				'cron_immediate_snapshot',
+				'cron_during_update_diff',
+				'cron_post_update_diff',
+				'cron_final_diff',
+				'cron_during_update_reason',
+				'cron_post_update_reason',
+				'cron_final_reason',
 				'error_code',
 				'error_message',
 			),
@@ -80,7 +89,7 @@ final class SchemaTest extends TestCase {
 
 		$this->assertSame( array(), array_diff( $report, $this->columns() ) );
 		foreach ( array( AnalysisRepository::REPORT_COLUMNS, AnalysisRepository::HISTORY_COLUMNS ) as $columns ) {
-			foreach ( array( 'before_snapshot', 'immediate_snapshot', 'user_id', 'error_message', 'active_plugin' ) as $internal ) {
+			foreach ( array( '_snapshot', 'cron_', 'fingerprint', 'user_id', 'error_message', 'active_plugin' ) as $internal ) {
 				$this->assertStringNotContainsString( $internal, $columns );
 			}
 		}
@@ -98,6 +107,71 @@ final class SchemaTest extends TestCase {
 			} else {
 				$this->assertContains( $column, $this->columns() );
 			}
+		}
+	}
+
+	/**
+	 * The Cron columns the lifecycle writes exist in the table.
+	 */
+	public function test_cron_observation_columns_exist() {
+		$columns = array( CronObservation::BEFORE_SNAPSHOT, CronObservation::IMMEDIATE_SNAPSHOT );
+		foreach ( CronObservation::PHASES as $phase_columns ) {
+			$columns = array_merge( $columns, $phase_columns );
+		}
+
+		$this->assertSame( array(), array_diff( $columns, $this->columns() ) );
+	}
+
+	/**
+	 * Upgrading from version 2 renames the generic options columns.
+	 */
+	public function test_renames_from_version_2() {
+		$v2 = array( 'id', 'status', 'settle_outcome', 'before_snapshot', 'immediate_snapshot', 'during_update_diff', 'post_update_diff', 'final_diff', 'error_code' );
+
+		$this->assertSame(
+			array(
+				array( 'before_snapshot', 'options_before_snapshot', 'longtext DEFAULT NULL' ),
+				array( 'immediate_snapshot', 'options_immediate_snapshot', 'longtext DEFAULT NULL' ),
+				array( 'during_update_diff', 'options_during_update_diff', 'longtext DEFAULT NULL' ),
+				array( 'post_update_diff', 'options_post_update_diff', 'longtext DEFAULT NULL' ),
+				array( 'final_diff', 'options_final_diff', 'longtext DEFAULT NULL' ),
+			),
+			Schema::renames( $v2 )
+		);
+	}
+
+	/**
+	 * Upgrading from version 1 renames straight to the version 3 names.
+	 */
+	public function test_renames_from_version_1() {
+		$v1 = array( 'id', 'status', 'settle_trigger', 'before_snapshot', 'immediate_diff', 'settled_diff', 'error_code' );
+
+		$this->assertSame(
+			array(
+				array( 'before_snapshot', 'options_before_snapshot', 'longtext DEFAULT NULL' ),
+				array( 'immediate_diff', 'options_during_update_diff', 'longtext DEFAULT NULL' ),
+				array( 'settled_diff', 'options_final_diff', 'longtext DEFAULT NULL' ),
+				array( 'settle_trigger', 'settle_outcome', 'varchar(20) DEFAULT NULL' ),
+			),
+			Schema::renames( $v1 )
+		);
+	}
+
+	/**
+	 * A current table (or a repeated upgrade) needs no renames.
+	 */
+	public function test_no_renames_for_current_table() {
+		$this->assertSame( array(), Schema::renames( $this->columns() ) );
+	}
+
+	/**
+	 * Every rename target is a current column with the definition the table uses.
+	 */
+	public function test_rename_definitions_match_table() {
+		$sql = Schema::analyses_table_sql( 'wp_updatelens_analyses', '' );
+
+		foreach ( Schema::RENAMES as $to => $rename ) {
+			$this->assertStringContainsString( "  {$to} {$rename[0]},", $sql );
 		}
 	}
 

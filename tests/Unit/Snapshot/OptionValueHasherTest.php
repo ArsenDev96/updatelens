@@ -59,6 +59,21 @@ final class OptionValueHasherTest extends TestCase {
 	}
 
 	/**
+	 * Known answer: fingerprints and context stay byte-identical to the v1 scheme,
+	 * so snapshots stored before the shared KeyedHasher remain comparable.
+	 */
+	public function test_fingerprint_and_context_known_answer() {
+		$hasher = new OptionValueHasher( self::SECRET );
+		$key    = hash_hmac( 'sha256', 'updatelens:option-value:v1', self::SECRET, true );
+
+		$this->assertSame( hash_hmac( 'sha256', 'value', $key ), $hasher->fingerprint( 'value' ) );
+		$this->assertSame(
+			'hmac-sha256-v1:' . hash_hmac( 'sha256', 'updatelens:fingerprint-context:v1', $key ),
+			$hasher->get_context()
+		);
+	}
+
+	/**
 	 * Fingerprints are 64-character lowercase hex.
 	 */
 	public function test_fingerprint_format() {

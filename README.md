@@ -73,8 +73,9 @@ includes/                PHP, PSR-4 namespace UpdateLens\
   Core/                  Plugin (hook wiring), Activator, Deactivator
   Admin/AdminPage.php    Tools → UpdateLens screen; enqueues the admin app
   Rest/                  REST controllers (namespace updatelens/v1)
-  Snapshot/              wp_options snapshot (safe metadata only: fingerprint, size, autoload)
-  Diff/                  wp_options diff between two snapshots (no values or fingerprints)
+  Snapshot/              wp_options snapshot (safe metadata only: fingerprint, size, autoload);
+                         WP-Cron snapshot engine (hook, timing, recurrence, args fingerprint; not yet used in analyses)
+  Diff/                  wp_options and WP-Cron diffs between two snapshots (no values, arguments or fingerprints)
   Update/                Plugin update analysis lifecycle (WordPress updater hooks + rules)
   Storage/               Analyses table, SQL and JSON persistence formats
   Report/                Safe read models for the report REST endpoints

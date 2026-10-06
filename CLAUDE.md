@@ -15,10 +15,10 @@ UpdateLens is a WordPress plugin that shows what changes when **one** plugin upd
 Initial snapshot sources:
 
 - `wp_options` incl. autoload size / autoloaded options — implemented (`Snapshot\OptionsSnapshotProvider`)
-- WP-Cron events — planned
+- WP-Cron events — snapshot and diff engine implemented (`Snapshot\CronSnapshotProvider`, `Diff\CronDiffBuilder`); not yet part of analyses, storage, REST or UI
 - Action Scheduler actions — planned
 
-Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
+Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the standalone WP-Cron snapshot and diff engines, the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
 
 ## Architecture boundaries
 
@@ -62,6 +62,7 @@ The plugin must stay distributable on WordPress.org:
 
 - **Raw `option_value` strings never leave `Snapshot\OptionsSnapshotBuilder`.** They are never persisted, logged, returned from REST or held in snapshot objects. Snapshots keep only name, keyed fingerprint, byte size and autoload state; tests assert a fake secret appears in no serialized form.
 - **Option values are compared by fingerprint**: HMAC-SHA256 (`Snapshot\OptionValueHasher`) keyed from `wp_salt( 'auth' )`. Never use an unkeyed hash. Fingerprints are only comparable within one site and one set of salts. Don't expose fingerprints via REST unless a task asks for it.
+- Every fingerprint domain derives its own key through `Snapshot\KeyedHasher` with its own label (`updatelens:option-value:v1`, `updatelens:cron-args:v1`), so identical bytes never fingerprint alike across domains. Never reuse a label for another domain.
 - Read the stored strings via `$wpdb` (no `get_option()`, no unserializing); size is `strlen()` bytes. Snapshot code is read-only.
 - Autoload state: keep the raw column value and normalize via `Snapshot\AutoloadPolicy` (core's `wp_autoload_values_to_autoload()` on 6.6+, `yes` only before). Don't hardcode `yes`/`no`.
 - Snapshot content must be deterministic: sorted byte-wise by name, no timestamps inside the compared data.
@@ -79,6 +80,18 @@ The plugin must stay distributable on WordPress.org:
 - Value changes are detected by fingerprint, never inferred from size. An option appears only if value, size, raw autoload or effective autoload differs.
 - All deltas are signed `after - before`, in raw bytes/counts. Aggregate deltas come from the two snapshot summaries, not from summing changed records.
 - Diff results are deterministic: added/removed/changed sorted byte-wise by name, no timestamps or random ids.
+
+## WP-Cron snapshot and diff invariants
+
+- **Cron is its own snapshot source**, separate from `wp_options` (which keeps excluding `cron`): `Snapshot\CronSnapshotProvider` → `CronSnapshotBuilder` (pure) → `CronSnapshot`; `Diff\CronDiffBuilder` → `CronDiff`.
+- **Raw cron arguments never leave `Snapshot\CronSnapshotBuilder`**: never persisted, logged, returned from REST or held in snapshot/diff objects. Only the keyed `args_fingerprint` (`Snapshot\CronArgsHasher`: HMAC of `serialize( $args )`, the canonical form of core's `md5( serialize( $args ) )` event key, so order, keys and types count) is kept. Core's unkeyed md5 key is never stored. Tests assert a fake secret appears in no serialized form.
+- **Snapshotting never mutates WP-Cron.** Read with `get_option( 'cron' )`; never `_get_cron_array()` (it rewrites a version-less option) and never any schedule/unschedule/clear function.
+- Event records: `hook`, `timestamp` (int), `schedule` (string|null), `interval` (int|null: null for one-time events or when not stored), `is_recurring`, `args_fingerprint`. The `version` marker is not an event.
+- **Logical identity = hook + args fingerprint.** Timestamp and recurrence (schedule + interval) are attributes. Several instances per identity are real state (`wp_schedule_event()` has no duplicate check): snapshots keep a sorted list, never a map that could overwrite.
+- Matching within one identity, in timestamp order: same timestamp + recurrence → unchanged; same recurrence → **`rescheduled`, never removed + added** (otherwise every normal cron run is noise); other recurrence (`daily` → `hourly`, one-time ↔ recurring, interval) → `changed`; leftovers → added/removed. Different arguments are a different identity → removed + added; never guess they belong together.
+- **Malformed cron state fails the whole snapshot** (`Snapshot\MalformedCronStateException`: fixed message, fixed reason code, never data) instead of skipping entries, which would show up as false additions/removals. What core accepts is not malformed: non-array option (= no events), unregistered schedule names, recurring events without interval, empty or numeric hook names. Arrays without the `version` 2 marker are `unsupported_format`. Hook names must be valid UTF-8.
+- Deterministic order: snapshots by hook (byte-wise), args fingerprint, timestamp, schedule, interval; diff lists by their array form (hook first). No capture time in snapshots. Different fingerprint contexts → `IncompatibleSnapshotsException`.
+- Cron changes are observations, not causes (same wording rules as options); a rescheduled event is often just a normal cron run.
 
 ## Update lifecycle invariants
 

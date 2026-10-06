@@ -22,11 +22,6 @@ defined( 'ABSPATH' ) || exit;
 final class OptionValueHasher {
 
 	/**
-	 * HMAC algorithm.
-	 */
-	const ALGORITHM = 'sha256';
-
-	/**
 	 * Domain-separation label for deriving the fingerprint key from the site secret.
 	 *
 	 * Changing it changes every fingerprint.
@@ -40,16 +35,11 @@ final class OptionValueHasher {
 	const SCHEME = 'hmac-sha256-v1';
 
 	/**
-	 * Label for the fingerprint-context identifier.
-	 */
-	const CONTEXT_LABEL = 'updatelens:fingerprint-context:v1';
-
-	/**
-	 * Fingerprint key derived from the site secret (binary).
+	 * Keyed HMAC for the option-value domain.
 	 *
-	 * @var string
+	 * @var KeyedHasher
 	 */
-	private $key;
+	private $hasher;
 
 	/**
 	 * Constructor.
@@ -58,11 +48,7 @@ final class OptionValueHasher {
 	 * @throws InvalidArgumentException If the secret is empty.
 	 */
 	public function __construct( $secret ) {
-		if ( ! is_string( $secret ) || '' === $secret ) {
-			throw new InvalidArgumentException( 'OptionValueHasher requires a non-empty secret.' );
-		}
-
-		$this->key = hash_hmac( self::ALGORITHM, self::KEY_CONTEXT, $secret, true );
+		$this->hasher = new KeyedHasher( $secret, self::KEY_CONTEXT, self::SCHEME );
 	}
 
 	/**
@@ -83,7 +69,7 @@ final class OptionValueHasher {
 	 * @return string 64-character lowercase hex HMAC.
 	 */
 	public function fingerprint( $raw_value ) {
-		return hash_hmac( self::ALGORITHM, (string) $raw_value, $this->key );
+		return $this->hasher->hash( $raw_value );
 	}
 
 	/**
@@ -91,13 +77,12 @@ final class OptionValueHasher {
 	 *
 	 * Equal for the same scheme and site secret, different when the WordPress
 	 * salts or the scheme change. Fingerprints are only comparable between
-	 * snapshots with the same context. An HMAC of a fixed label, so it reveals
-	 * nothing about the key and is safe to persist.
+	 * snapshots with the same context. Safe to persist.
 	 *
 	 * @return string `<scheme>:<64 hex>`, e.g. `hmac-sha256-v1:3f…`.
 	 */
 	public function get_context() {
-		return self::SCHEME . ':' . hash_hmac( self::ALGORITHM, self::CONTEXT_LABEL, $this->key );
+		return $this->hasher->get_context();
 	}
 
 	/**
@@ -106,6 +91,6 @@ final class OptionValueHasher {
 	 * @return array
 	 */
 	public function __debugInfo() {
-		return array( 'algorithm' => self::ALGORITHM );
+		return $this->hasher->__debugInfo();
 	}
 }

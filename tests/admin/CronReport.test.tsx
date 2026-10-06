@@ -64,7 +64,11 @@ describe( 'WP-Cron in reports', () => {
 			within( signals )
 				.getAllByRole( 'tab' )
 				.map( ( t ) => t.getAttribute( 'aria-label' ) )
-		).toEqual( [ 'Options, 6 changes', 'WP-Cron, 5 changes' ] );
+		).toEqual( [
+			'Options, 6 changes',
+			'WP-Cron, 5 changes',
+			'Action Scheduler, not available',
+		] );
 		expect( tab( /^Options/ ) ).toHaveAttribute( 'aria-selected', 'true' );
 		expect( signalPanel() ).toHaveTextContent( 'ulfx_a_feature_flags' );
 
@@ -78,6 +82,8 @@ describe( 'WP-Cron in reports', () => {
 		expect( tab( /^Options/ ) ).toHaveFocus();
 		expect( tab( /^WP-Cron/ ) ).toHaveAttribute( 'tabindex', '-1' );
 		await user.keyboard( '{End}' );
+		expect( tab( /^Action Scheduler/ ) ).toHaveFocus();
+		await user.keyboard( '{ArrowLeft}' );
 		expect( tab( /^WP-Cron/ ) ).toHaveFocus();
 		// Phase tabs are unaffected by signal keys.
 		expect( tab( /Net result/ ) ).toHaveAttribute(

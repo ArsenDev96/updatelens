@@ -255,21 +255,27 @@ final class AnalysesController extends WP_REST_Controller {
 			UnavailableReason::NOT_RECORDED,
 		);
 
-		$options = self::provider_schema(
+		$options          = self::provider_schema(
 			__( 'Observed wp_options changes.', 'updatelens' ),
 			$common_reasons,
 			array( 'added', 'removed', 'changed' )
 		);
-		$cron    = self::provider_schema(
+		$cron             = self::provider_schema(
 			__( 'Observed WP-Cron changes. Arguments are never included.', 'updatelens' ),
 			array_values( array_unique( array_merge( $common_reasons, AnalysisReadModel::CRON_REASONS, array( AnalysisReadModel::UNKNOWN ) ) ) ),
 			array( 'added', 'removed', 'rescheduled', 'changed' )
 		);
-		$phase   = array(
+		$action_scheduler = self::provider_schema(
+			__( 'Observed changes of active (pending or in-progress) Action Scheduler actions. Arguments are never included.', 'updatelens' ),
+			array_values( array_unique( array_merge( $common_reasons, AnalysisReadModel::ACTION_SCHEDULER_REASONS, array( AnalysisReadModel::UNKNOWN ) ) ) ),
+			array( 'added', 'removed', 'rescheduled', 'changed' )
+		);
+		$phase            = array(
 			'type'       => 'object',
 			'properties' => array(
-				'options' => $options,
-				'cron'    => $cron,
+				'options'          => $options,
+				'cron'             => $cron,
+				'action_scheduler' => $action_scheduler,
 			),
 		);
 
@@ -333,8 +339,9 @@ final class AnalysesController extends WP_REST_Controller {
 				$phases[ $phase ]             = array(
 					'type'       => 'object',
 					'properties' => array(
-						'options' => $signal,
-						'cron'    => $signal,
+						'options'          => $signal,
+						'cron'             => $signal,
+						'action_scheduler' => $signal,
 					),
 				);
 			}

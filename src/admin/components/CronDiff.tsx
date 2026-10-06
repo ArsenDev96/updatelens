@@ -13,9 +13,8 @@ import {
 	formatCountDelta,
 	formatDuration,
 	formatDurationDelta,
-	formatUnixDateTime,
-	unixToIso,
 } from '../utils/format';
+import { Details, HookName, Time, To } from './DiffRow';
 import { DiffSection } from './DiffSection';
 import { Metric, Total } from './PhaseSummary';
 
@@ -312,32 +311,6 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 	);
 }
 
-function HookName( { hook }: { hook: string } ) {
-	return (
-		<code className="m-0 block select-text break-all bg-transparent p-0 font-mono text-[13px] text-foreground">
-			{ hook }
-		</code>
-	);
-}
-
-function Time( { timestamp }: { timestamp: number } ) {
-	return (
-		<time dateTime={ unixToIso( timestamp ) }>
-			{ formatUnixDateTime( timestamp ) }
-		</time>
-	);
-}
-
-function To() {
-	return (
-		<>
-			{ ' ' }
-			<span aria-hidden="true">→</span>
-			<span className="sr-only">{ __( 'to', 'updatelens' ) }</span>{ ' ' }
-		</>
-	);
-}
-
 /**
  * "Recurring · daily" or "One-time".
  *
@@ -358,25 +331,6 @@ function intervalText( interval: number | null ): string {
 	return interval === null
 		? __( 'Not stored', 'updatelens' )
 		: formatDuration( interval );
-}
-
-/**
- * Definition list of a Cron row.
- *
- * @param props      Props.
- * @param props.rows Label and content pairs.
- */
-function Details( { rows }: { rows: Array< [ string, ReactNode ] > } ) {
-	return (
-		<dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_minmax(0,1fr)]">
-			{ rows.map( ( [ label, content ] ) => (
-				<div key={ label } className="contents">
-					<dt className="text-muted-foreground">{ label }</dt>
-					<dd className="min-w-0 break-words">{ content }</dd>
-				</div>
-			) ) }
-		</dl>
-	);
 }
 
 /**

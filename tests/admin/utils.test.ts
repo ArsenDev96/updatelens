@@ -34,6 +34,7 @@ import {
 	COMPLETED,
 	CORRUPT_POST,
 	CRON_ONLY,
+	asUnavailable,
 	cronUnavailable,
 	EXPIRED,
 	FAILED,
@@ -225,12 +226,20 @@ describe( 'defaultPhase', () => {
 				during_update: {
 					options: unavailable( 'update_request', 'data_corrupt' ),
 					cron: cronUnavailable( 'update_request', 'data_corrupt' ),
+					action_scheduler: asUnavailable(
+						'update_request',
+						'not_installed'
+					),
 				},
 				final: {
 					options: unavailable( 'net_across_phases', 'data_corrupt' ),
 					cron: cronUnavailable(
 						'net_across_phases',
 						'data_corrupt'
+					),
+					action_scheduler: asUnavailable(
+						'net_across_phases',
+						'not_installed'
 					),
 				},
 			} )

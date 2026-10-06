@@ -62,36 +62,42 @@ describe( 'change counts', () => {
 		expect( phaseChangeCounts( COMPLETED.phases.final ) ).toEqual( {
 			options: 6,
 			cron: 5,
+			action_scheduler: null,
 			total: 11,
 		} );
 		// Options only.
 		expect( phaseChangeCounts( ELEMENTOR.phases.final ) ).toEqual( {
 			options: 5,
 			cron: 0,
+			action_scheduler: null,
 			total: 5,
 		} );
 		// Cron only.
 		expect( phaseChangeCounts( CRON_CHANGES_ONLY.phases.final ) ).toEqual( {
 			options: 0,
 			cron: 1,
+			action_scheduler: null,
 			total: 1,
 		} );
 		// Captured without changes.
 		expect( phaseChangeCounts( RANK_MATH.phases.final ) ).toEqual( {
 			options: 0,
 			cron: 0,
+			action_scheduler: null,
 			total: 0,
 		} );
 		// One signal unavailable: the phase still counts the other.
 		expect( phaseChangeCounts( MALFORMED_CRON.phases.final ) ).toEqual( {
 			options: 6,
 			cron: null,
+			action_scheduler: null,
 			total: 6,
 		} );
 		// Both unavailable.
 		expect( phaseChangeCounts( FAILED.phases.final ) ).toEqual( {
 			options: null,
 			cron: null,
+			action_scheduler: null,
 			total: null,
 		} );
 	} );
@@ -141,6 +147,7 @@ describe( 'default signal', () => {
 	): ReportPhase => ( {
 		options: options.options,
 		cron: cron.cron,
+		action_scheduler: options.action_scheduler,
 	} );
 
 	it( 'prefers Options when both have changes', () => {
@@ -203,8 +210,11 @@ describe( 'history phase state', () => {
 		recorded,
 		has_changes,
 	} );
-	const state = ( options: HistoryPhase[ 'options' ], cron = options ) =>
-		historyPhaseState( { options, cron } );
+	const state = (
+		options: HistoryPhase[ 'options' ],
+		cron = options,
+		action_scheduler = signal( false, null )
+	) => historyPhaseState( { options, cron, action_scheduler } );
 
 	it( 'separates recorded-with-changes from recorded-without', () => {
 		expect( state( signal( true, true ), signal( true, false ) ) ).toBe(

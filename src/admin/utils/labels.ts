@@ -1,6 +1,8 @@
 import { _n, __, sprintf } from '@wordpress/i18n';
 
 import type {
+	ActionSchedulerUnavailableReason,
+	ActionScheduleType,
 	AnalysisReport,
 	AnalysisStatus,
 	CronUnavailableReason,
@@ -120,7 +122,14 @@ export function defaultPhase(
 }
 
 /** Signals in display order. */
-export const PROVIDERS: Provider[] = [ 'options', 'cron' ];
+export const PROVIDERS: Provider[] = [ 'options', 'cron', 'action_scheduler' ];
+
+/** Signals in order of preference for the default tab. */
+const DEFAULT_PROVIDER_ORDER: Provider[] = [
+	'options',
+	'action_scheduler',
+	'cron',
+];
 
 export function providerLabel( provider: Provider ): string {
 	switch ( provider ) {
@@ -128,12 +137,15 @@ export function providerLabel( provider: Provider ): string {
 			return __( 'Options', 'updatelens' );
 		case 'cron':
 			return __( 'WP-Cron', 'updatelens' );
+		case 'action_scheduler':
+			return __( 'Action Scheduler', 'updatelens' );
 	}
 }
 
 /**
- * Signal shown first in a phase: Options with changes, WP-Cron with
- * changes, then whichever is available (Options first).
+ * Signal shown first in a phase: the first with changes, then the first
+ * available, each in the order Options, Action Scheduler, WP-Cron; Options
+ * if none is available.
  *
  * @param phase  Report phase.
  * @param counts Change counts of the phase (computed if omitted).
@@ -142,13 +154,15 @@ export function defaultProvider(
 	phase: ReportPhase,
 	counts: PhaseChangeCounts = phaseChangeCounts( phase )
 ): Provider {
-	if ( ( counts.options ?? 0 ) > 0 ) {
-		return 'options';
-	}
-	if ( ( counts.cron ?? 0 ) > 0 ) {
-		return 'cron';
-	}
-	return counts.options === null && counts.cron !== null ? 'cron' : 'options';
+	return (
+		DEFAULT_PROVIDER_ORDER.find(
+			( provider ) => ( counts[ provider ] ?? 0 ) > 0
+		) ??
+		DEFAULT_PROVIDER_ORDER.find(
+			( provider ) => counts[ provider ] !== null
+		) ??
+		'options'
+	);
 }
 
 /**
@@ -226,21 +240,35 @@ export function noChangesText( provider: Provider ): {
 	title: string;
 	description: string;
 } {
-	return provider === 'options'
-		? {
+	switch ( provider ) {
+		case 'options':
+			return {
 				title: __( 'No option changes observed', 'updatelens' ),
 				description: __(
 					'UpdateLens captured this phase successfully, but the tracked option state did not change.',
 					'updatelens'
 				),
-			}
-		: {
+			};
+		case 'cron':
+			return {
 				title: __( 'No WP-Cron changes observed', 'updatelens' ),
 				description: __(
 					'UpdateLens captured this phase successfully, but no scheduled events changed.',
 					'updatelens'
 				),
 			};
+		case 'action_scheduler':
+			return {
+				title: __(
+					'No Action Scheduler changes observed',
+					'updatelens'
+				),
+				description: __(
+					'UpdateLens captured this phase successfully, but no active scheduled actions changed.',
+					'updatelens'
+				),
+			};
+	}
 }
 
 /**
@@ -468,6 +496,205 @@ export function cronUnavailableReasonText(
 					'updatelens'
 				),
 			};
+	}
+}
+
+/**
+ * Why an Action Scheduler phase is unavailable, in plain text. A site
+ * without Action Scheduler (`not_installed`) is a normal state, never
+ * worded as an error.
+ *
+ * @param reason        API reason.
+ * @param windowSeconds Observation window length from the API.
+ */
+export function actionSchedulerUnavailableReasonText(
+	reason: ActionSchedulerUnavailableReason | string,
+	windowSeconds: number
+): { title: string; description: string } {
+	const unavailable = __(
+		'Action Scheduler analysis unavailable',
+		'updatelens'
+	);
+	const unsupported = __( 'Action Scheduler not supported', 'updatelens' );
+
+	switch ( reason ) {
+		case 'not_installed':
+			return {
+				title: __( 'Action Scheduler not detected', 'updatelens' ),
+				description: __(
+					'Action Scheduler was not active for this phase.',
+					'updatelens'
+				),
+			};
+		case 'unsupported_store':
+			return {
+				title: unsupported,
+				description: __(
+					'Action Scheduler uses a storage configuration UpdateLens does not currently support.',
+					'updatelens'
+				),
+			};
+		case 'unsupported_schema':
+			return {
+				title: unsupported,
+				description: __(
+					'This Action Scheduler database schema is not supported by this UpdateLens version.',
+					'updatelens'
+				),
+			};
+		case 'unsupported_schedule':
+			return {
+				title: unavailable,
+				description: __(
+					'An Action Scheduler schedule type could not be normalized safely.',
+					'updatelens'
+				),
+			};
+		case 'malformed_action_scheduler_state':
+			return {
+				title: unavailable,
+				description: __(
+					'Action Scheduler contained data UpdateLens could not safely normalize.',
+					'updatelens'
+				),
+			};
+		case 'snapshot_unavailable':
+			return {
+				title: unavailable,
+				description: __(
+					'Action Scheduler state could not be captured for this phase.',
+					'updatelens'
+				),
+			};
+		case 'fingerprint_context_changed':
+			return {
+				title: __( 'Comparison stopped', 'updatelens' ),
+				description: __(
+					"Action Scheduler comparison stopped because the site's fingerprint context changed.",
+					'updatelens'
+				),
+			};
+		case 'settle_expired':
+			return {
+				title: __( 'Not captured', 'updatelens' ),
+				description: sprintf(
+					/* translators: %s: observation window length, e.g. "5 minutes". */
+					__(
+						'Post-update Action Scheduler state was not captured within %s of the update.',
+						'updatelens'
+					),
+					windowText( windowSeconds )
+				),
+			};
+		case 'storage_failed':
+			return {
+				title: unavailable,
+				description: __(
+					'Action Scheduler analysis could not be stored safely for this phase.',
+					'updatelens'
+				),
+			};
+		case 'not_captured':
+			return {
+				title: __( 'Not captured', 'updatelens' ),
+				description: __(
+					'Action Scheduler was not captured for this phase.',
+					'updatelens'
+				),
+			};
+		case 'analysis_failed':
+			return {
+				title: unavailable,
+				description: __(
+					"UpdateLens couldn't compare the Action Scheduler state for this phase.",
+					'updatelens'
+				),
+			};
+		case 'update_failed':
+			return {
+				title: __( 'Not available', 'updatelens' ),
+				description: __(
+					'Action Scheduler analysis is unavailable because the plugin update failed.',
+					'updatelens'
+				),
+			};
+		case 'analysis_abandoned':
+			return {
+				title: __( 'Not available', 'updatelens' ),
+				description: __(
+					"Action Scheduler analysis is unavailable because the analysis didn't finish.",
+					'updatelens'
+				),
+			};
+		case 'analysis_ended':
+			return {
+				title: __( 'Not available', 'updatelens' ),
+				description: __(
+					'Action Scheduler was not observed for this phase because the analysis stopped early.',
+					'updatelens'
+				),
+			};
+		case 'update_in_progress':
+			return {
+				title: __( 'Not available yet', 'updatelens' ),
+				description: __(
+					"The plugin update hasn't reported back yet.",
+					'updatelens'
+				),
+			};
+		case 'awaiting_settle':
+			return {
+				title: __( 'Not captured yet', 'updatelens' ),
+				description: __(
+					'Waiting for the first eligible admin request after the update.',
+					'updatelens'
+				),
+			};
+		case 'data_corrupt':
+			return {
+				title: __( 'Unreadable', 'updatelens' ),
+				description: __(
+					"This stored Action Scheduler phase couldn't be read safely.",
+					'updatelens'
+				),
+			};
+		default:
+			return {
+				title: __( 'Not available', 'updatelens' ),
+				description: __(
+					'No Action Scheduler data was recorded for this phase.',
+					'updatelens'
+				),
+			};
+	}
+}
+
+/**
+ * Note shown above Action Scheduler changes: the signal is active state,
+ * not execution history, and other plugins queue actions too.
+ */
+export function actionSchedulerPhaseNote(): string {
+	return __(
+		'Changes to active (pending or in-progress) Action Scheduler actions observed during this phase. This is scheduled state, not execution history. Other plugins may also queue, run or reschedule actions during the observation window.',
+		'updatelens'
+	);
+}
+
+/**
+ * Name of a normalized Action Scheduler schedule type.
+ *
+ * @param type Schedule type.
+ */
+export function actionScheduleTypeLabel( type: ActionScheduleType ): string {
+	switch ( type ) {
+		case 'single':
+			return __( 'One-time', 'updatelens' );
+		case 'async':
+			return __( 'Async', 'updatelens' );
+		case 'interval':
+			return __( 'Interval', 'updatelens' );
+		case 'cron':
+			return __( 'Cron schedule', 'updatelens' );
 	}
 }
 

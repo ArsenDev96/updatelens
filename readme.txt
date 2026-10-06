@@ -7,13 +7,13 @@ Stable tag: 0.2.0-beta.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Observe what changes around WordPress plugin updates: options, autoload data and WP-Cron events.
+Observe what changes around WordPress plugin updates: options, autoload data, WP-Cron events and Action Scheduler actions.
 
 == Description ==
 
 UpdateLens observes what changes around a WordPress plugin update. This is Private Beta 1.
 
-When you update a single plugin from wp-admin, UpdateLens records which options (names, sizes and autoload state) and which WP-Cron events (hooks, times and schedules) changed:
+When you update a single plugin from wp-admin, UpdateLens records which options (names, sizes and autoload state), which WP-Cron events (hooks, times and schedules) and, on sites that use Action Scheduler, which pending or in-progress Action Scheduler actions (hooks, groups, times and schedules) changed:
 
 * During update: inside WordPress's plugin-update request.
 * After update: until the next wp-admin page you open, within 5 minutes. Other site activity can also appear here.
@@ -23,11 +23,11 @@ Tools → UpdateLens lists the analyzed updates and shows a report for each one.
 
 Analyzed in this beta: manual single-plugin updates from wp-admin (Update now, or Dashboard → Updates with one plugin selected). Not analyzed in this beta: bulk updates of several plugins, automatic/background updates, WP-CLI updates, updates by uploading a ZIP, themes, core, translations, Multisite and UpdateLens itself.
 
-Known limitations: only options and WP-Cron are analyzed (Action Scheduler jobs are not yet analyzed); WP-Cron arguments are hidden, so events with the same hook can look alike; a one-time WP-Cron event that is no longer scheduled may have run or been unscheduled.
+Known limitations: only options, WP-Cron and Action Scheduler are analyzed; WP-Cron and Action Scheduler arguments are hidden, so events or actions with the same hook can look alike; a one-time WP-Cron event that is no longer scheduled may have run or been unscheduled; Action Scheduler is compared as active (pending or in-progress) state, not execution history, so an action that is no longer active may have run or been canceled, and an action queued and completed between two observations is not seen.
 
 == Privacy ==
 
-UpdateLens never stores raw option values or WP-Cron arguments. It compares them through keyed fingerprints (HMAC-SHA256, keyed from the site's salts) that are never shown in reports and are deleted with the temporary snapshots when an analysis finishes.
+UpdateLens never stores raw option values, WP-Cron arguments or Action Scheduler arguments. It compares them through keyed fingerprints (HMAC-SHA256, keyed from the site's salts) that are never shown in reports and are deleted with the temporary snapshots when an analysis finishes.
 
 UpdateLens makes no external HTTP requests and has no telemetry. Its data stays in its own database table, `{prefix}updatelens_analyses`, and the `updatelens_db_version` option.
 

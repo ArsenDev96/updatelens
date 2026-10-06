@@ -8,6 +8,7 @@
 namespace UpdateLens\Tests\Unit\Storage;
 
 use PHPUnit\Framework\TestCase;
+use UpdateLens\Storage\ActionSchedulerDiffCodec;
 use UpdateLens\Storage\AnalysisRepository;
 use UpdateLens\Storage\Schema;
 use UpdateLens\Update\ActionSchedulerObservation;
@@ -103,7 +104,7 @@ final class SchemaTest extends TestCase {
 				$this->assertStringNotContainsString( $internal, $columns );
 			}
 		}
-		$this->assertStringNotContainsString( '_reason', AnalysisRepository::history_columns(), 'History reads no Cron reasons.' );
+		$this->assertStringNotContainsString( '_reason', AnalysisRepository::history_columns(), 'History reads no Cron or Action Scheduler reasons.' );
 	}
 
 	/**
@@ -167,13 +168,27 @@ final class SchemaTest extends TestCase {
 	}
 
 	/**
-	 * Action Scheduler is not exposed yet: report and history queries never read its columns.
+	 * Reports read the Action Scheduler phase diffs and reasons; History only
+	 * flags of its diffs (with the codec's own empty prefix); nothing reads
+	 * its snapshots.
 	 */
-	public function test_reports_do_not_read_action_scheduler_columns() {
-		foreach ( array( AnalysisRepository::REPORT_COLUMNS, AnalysisRepository::history_columns(), AnalysisRepository::OPEN_COLUMNS ) as $columns ) {
-			$this->assertStringNotContainsString( 'action_scheduler', $columns );
+	public function test_report_queries_read_action_scheduler_diffs_only() {
+		$report   = array_map( 'trim', explode( ',', AnalysisRepository::REPORT_COLUMNS ) );
+		$expected = array();
+		foreach ( ActionSchedulerObservation::PHASES as $phase_columns ) {
+			$expected = array_merge( $expected, $phase_columns );
 		}
-		$this->assertSame( array(), preg_grep( '/^action_scheduler_/', array_keys( AnalysisRepository::HISTORY_DIFFS ) ) );
+
+		$this->assertEqualsCanonicalizing( $expected, array_values( preg_grep( '/^action_scheduler_/', $report ) ) );
+		$this->assertSame(
+			array_fill_keys( array_column( ActionSchedulerObservation::PHASES, 0 ), ActionSchedulerDiffCodec::EMPTY_PREFIX ),
+			array_intersect_key( AnalysisRepository::HISTORY_DIFFS, array_flip( preg_grep( '/^action_scheduler_/', array_keys( AnalysisRepository::HISTORY_DIFFS ) ) ) )
+		);
+		$this->assertStringNotContainsString( 'action_scheduler', AnalysisRepository::OPEN_COLUMNS );
+		foreach ( array( AnalysisRepository::REPORT_COLUMNS, AnalysisRepository::history_columns() ) as $columns ) {
+			$this->assertStringNotContainsString( ActionSchedulerObservation::BEFORE_SNAPSHOT, $columns );
+			$this->assertStringNotContainsString( ActionSchedulerObservation::IMMEDIATE_SNAPSHOT, $columns );
+		}
 	}
 
 	/**

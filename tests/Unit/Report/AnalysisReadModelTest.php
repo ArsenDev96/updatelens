@@ -9,11 +9,15 @@ namespace UpdateLens\Tests\Unit\Report;
 
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
+use UpdateLens\Diff\ActionSchedulerDiffBuilder;
 use UpdateLens\Diff\CronDiffBuilder;
 use UpdateLens\Report\AnalysisReadModel;
 use UpdateLens\Report\UnavailableReason;
+use UpdateLens\Storage\ActionSchedulerDiffCodec;
 use UpdateLens\Storage\CronDiffCodec;
+use UpdateLens\Tests\Support\ActionSchedulerFixture;
 use UpdateLens\Tests\Support\CronFixture;
+use UpdateLens\Update\ActionSchedulerPhaseReason;
 use UpdateLens\Update\CronPhaseReason;
 
 /**
@@ -114,6 +118,54 @@ final class AnalysisReadModelTest extends TestCase {
 	}
 
 	/**
+	 * Obviously fake credential used in Action Scheduler argument fixtures.
+	 */
+	const AS_SECRET = 'sk_test_UPDATE_LENS_ACTION_SCHEDULER_REPORT_SECRET';
+
+	/**
+	 * Action Scheduler part of every phase.
+	 *
+	 * @param array $report Report.
+	 * @return array<string, array>
+	 */
+	private static function action_scheduler( array $report ) {
+		return array_column( $report['phases'], 'action_scheduler' );
+	}
+
+	/**
+	 * Stored Action Scheduler diff JSON for a fixture with secret arguments:
+	 * one of each category, an in-progress action and a cron schedule.
+	 *
+	 * @return string
+	 */
+	private static function action_scheduler_diff_json() {
+		$args              = array(
+			'order' => 1234,
+			'token' => self::AS_SECRET,
+		);
+		$t                 = 1767225600;
+		$running           = ActionSchedulerFixture::async( 'wc_run_on_admin_updated', $t + 30, array( 'hook' => 'https://hooks.example.test/' . self::AS_SECRET ), 'woocommerce-remote-inbox-engine' );
+		$running['status'] = 'in-progress';
+		$before            = ActionSchedulerFixture::snapshot(
+			array(
+				ActionSchedulerFixture::recurring( 'action_scheduler/migration_hook', $t + 60, 60, array(), 'action-scheduler-migration' ),
+				ActionSchedulerFixture::single( 'wpforms_admin_notifications_update', $t + 10, $args, 'wpforms' ),
+				ActionSchedulerFixture::recurring( 'acme_sync', $t + 900, 86400, $args, 'acme' ),
+			)
+		);
+		$after             = ActionSchedulerFixture::snapshot(
+			array(
+				ActionSchedulerFixture::recurring( 'action_scheduler/migration_hook', $t + 144, 60, array(), 'action-scheduler-migration' ),
+				ActionSchedulerFixture::cron( 'acme_sync', $t + 900, '0 */6 * * *', $args, 'acme' ),
+				ActionSchedulerFixture::recurring( 'fetch_patterns', $t + 86400, 86400, array(), 'woocommerce' ),
+				$running,
+			)
+		);
+
+		return ( new ActionSchedulerDiffCodec() )->encode( ( new ActionSchedulerDiffBuilder() )->build( $before, $after ) );
+	}
+
+	/**
 	 * Only whitelisted fields, with JSON types; database strings become ints/bools.
 	 */
 	public function test_history_item_fields_and_types() {
@@ -152,19 +204,22 @@ final class AnalysisReadModelTest extends TestCase {
 				'has_final'         => false,
 				'phases'            => array(
 					'during_update' => array(
-						'options' => array(
+						'options'          => array(
 							'recorded'    => true,
 							'has_changes' => true,
 						),
-						'cron'    => $none,
+						'cron'             => $none,
+						'action_scheduler' => $none,
 					),
 					'post_update'   => array(
-						'options' => $none,
-						'cron'    => $none,
+						'options'          => $none,
+						'cron'             => $none,
+						'action_scheduler' => $none,
 					),
 					'final'         => array(
-						'options' => $none,
-						'cron'    => $none,
+						'options'          => $none,
+						'cron'             => $none,
+						'action_scheduler' => $none,
 					),
 				),
 			),
@@ -246,7 +301,7 @@ final class AnalysisReadModelTest extends TestCase {
 		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'error' ), array_keys( $report ) );
 		$this->assertSame( 300, $report['observation_window_seconds'] );
 		foreach ( $report['phases'] as $phase ) {
-			$this->assertSame( array( 'options', 'cron' ), array_keys( $phase ) );
+			$this->assertSame( array( 'options', 'cron', 'action_scheduler' ), array_keys( $phase ) );
 		}
 		$json = (string) json_encode( $report ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
 		foreach ( array( 'snapshot', 'fingerprint', 'hmac', 'user_id', 'Stored message', 'active_plugin', 'updated_at', '"schema"' ) as $needle ) {
@@ -587,6 +642,225 @@ final class AnalysisReadModelTest extends TestCase {
 		);
 
 		$this->assertStringNotContainsString( self::FAKE_SECRET, (string) json_encode( $report ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+	}
+
+	/**
+	 * An available Action Scheduler phase is the decoded diff: hooks, groups,
+	 * statuses, times and normalized schedules; no arguments, fingerprints,
+	 * context or IDs.
+	 */
+	public function test_action_scheduler_available_phase() {
+		$json   = self::action_scheduler_diff_json();
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'action_scheduler_post_update_diff' => $json ) ) );
+		$diff   = ( new ActionSchedulerDiffCodec() )->decode( $json );
+		$phase  = $report['phases']['post_update']['action_scheduler'];
+
+		$this->assertSame(
+			array(
+				'available'   => true,
+				'association' => 'observed_after_update',
+				'summary'     => $diff['summary'],
+				'added'       => $diff['added'],
+				'removed'     => $diff['removed'],
+				'rescheduled' => $diff['rescheduled'],
+				'changed'     => $diff['changed'],
+			),
+			$phase
+		);
+		$this->assertSame( array( 'fetch_patterns', 'wc_run_on_admin_updated' ), array_column( $phase['added'], 'hook' ) );
+		$this->assertSame( array( 'wpforms_admin_notifications_update' ), array_column( $phase['removed'], 'hook' ) );
+		$this->assertSame( array( 'action_scheduler/migration_hook' ), array_column( $phase['rescheduled'], 'hook' ) );
+		$this->assertSame( 84, $phase['rescheduled'][0]['timestamp_delta'] );
+		$this->assertSame( array( 'hook', 'group', 'status', 'timestamp', 'schedule_type', 'interval', 'cron_expression', 'is_recurring' ), array_keys( $phase['added'][0] ) );
+		$this->assertSame( 'in-progress', $phase['added'][1]['status'] );
+		$this->assertSame( 'async', $phase['added'][1]['schedule_type'] );
+		$this->assertSame( 'woocommerce-remote-inbox-engine', $phase['added'][1]['group'] );
+		$this->assertSame( array( 'interval', 'cron', 86400, null, null, '0 */6 * * *' ), array( $phase['changed'][0]['before_schedule_type'], $phase['changed'][0]['after_schedule_type'], $phase['changed'][0]['before_interval'], $phase['changed'][0]['after_interval'], $phase['changed'][0]['before_cron_expression'], $phase['changed'][0]['after_cron_expression'] ) );
+		$this->assertSame( ActionSchedulerDiffCodec::SUMMARY_KEYS, array_keys( $phase['summary'] ) );
+		$this->assertSame( 3, $phase['summary']['before_action_count'] );
+		$this->assertSame( 4, $phase['summary']['after_action_count'] );
+		$this->assertSame( UnavailableReason::SETTLE_EXPIRED, $report['phases']['post_update']['options']['reason'], 'Options are unaffected.' );
+		$this->assertSame( UnavailableReason::NOT_RECORDED, $report['phases']['post_update']['cron']['reason'], 'Cron is unaffected.' );
+
+		$output = (string) json_encode( $report ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+		foreach ( array( self::AS_SECRET, 'hooks.example.test', 'token', '1234', 'fingerprint', 'as-args-hmac', '"schema"', 'action_id', 'claim', 'O:', 'ActionScheduler_' ) as $needle ) {
+			$this->assertStringNotContainsString( $needle, $output );
+		}
+	}
+
+	/**
+	 * Stored Action Scheduler reasons are passed through; unknown values become `unknown`.
+	 *
+	 * @return array
+	 */
+	public function provide_action_scheduler_reasons() {
+		$cases = array();
+		foreach ( AnalysisReadModel::ACTION_SCHEDULER_REASONS as $reason ) {
+			$cases[ $reason ] = array( $reason, $reason );
+		}
+		$cases['unknown value']  = array( 'Unsupported store: <b>My_Store</b>', 'unknown' );
+		$cases['Cron-only code'] = array( 'malformed_cron_state', 'unknown' );
+
+		return $cases;
+	}
+
+	/**
+	 * Action Scheduler reasons.
+	 *
+	 * @dataProvider provide_action_scheduler_reasons
+	 * @param string $stored   Stored reason.
+	 * @param string $expected API reason.
+	 */
+	public function test_action_scheduler_stored_reasons( $stored, $expected ) {
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'action_scheduler_during_update_reason' => $stored ) ) );
+
+		$this->assertSame(
+			array(
+				'available'   => false,
+				'association' => 'update_request',
+				'reason'      => $expected,
+			),
+			$report['phases']['during_update']['action_scheduler']
+		);
+		$this->assertSame( 'not_recorded', $report['phases']['during_update']['cron']['reason'], 'Cron is unaffected.' );
+	}
+
+	/**
+	 * The pass-through list is exactly ActionSchedulerPhaseReason::ALL.
+	 */
+	public function test_action_scheduler_reason_list_is_complete() {
+		$this->assertSame( ActionSchedulerPhaseReason::ALL, AnalysisReadModel::ACTION_SCHEDULER_REASONS );
+	}
+
+	/**
+	 * Action Scheduler phases without diff or reason are pending (explained by the status) or not recorded.
+	 *
+	 * @dataProvider provide_pending_cron
+	 * @param string   $status  Stored status.
+	 * @param string[] $reasons Expected reasons per phase.
+	 */
+	public function test_action_scheduler_without_data( $status, array $reasons ) {
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'status' => $status ) ) );
+
+		$this->assertSame( $reasons, array_column( self::action_scheduler( $report ), 'reason' ) );
+	}
+
+	/**
+	 * A diff wins over a stored reason (cannot happen in the lifecycle, but the diff is the data).
+	 */
+	public function test_action_scheduler_diff_wins_over_reason() {
+		$report = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'action_scheduler_final_diff'   => self::action_scheduler_diff_json(),
+					'action_scheduler_final_reason' => 'not_installed',
+				)
+			)
+		);
+
+		$this->assertTrue( $report['phases']['final']['action_scheduler']['available'] );
+	}
+
+	/**
+	 * A corrupt Action Scheduler diff only makes that Action Scheduler phase unavailable.
+	 */
+	public function test_corrupt_action_scheduler_diff_is_isolated() {
+		$json   = self::action_scheduler_diff_json();
+		$report = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'options_final_diff'                  => null,
+					'cron_final_diff'                     => self::cron_diff_json(),
+					'action_scheduler_during_update_diff' => $json,
+					'action_scheduler_post_update_diff'   => $json,
+					'action_scheduler_final_diff'         => str_replace( '"hook":"fetch_patterns"', '"hook":"' . self::AS_SECRET . '","args":"x"', $json ),
+				)
+			)
+		);
+
+		$this->assertTrue( $report['phases']['during_update']['action_scheduler']['available'] );
+		$this->assertTrue( $report['phases']['post_update']['action_scheduler']['available'] );
+		$this->assertSame(
+			array(
+				'available'   => false,
+				'association' => 'net_across_phases',
+				'reason'      => UnavailableReason::DATA_CORRUPT,
+			),
+			$report['phases']['final']['action_scheduler']
+		);
+		$this->assertTrue( $report['phases']['final']['cron']['available'], 'Cron is unaffected.' );
+		$this->assertSame( UnavailableReason::SETTLE_EXPIRED, $report['phases']['final']['options']['reason'], 'Options are unaffected.' );
+		$this->assertStringNotContainsString( self::AS_SECRET, (string) json_encode( $report ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+	}
+
+	/**
+	 * A diff stored by another signal's codec is not accepted as an Action Scheduler diff.
+	 */
+	public function test_cron_diff_is_not_an_action_scheduler_diff() {
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'action_scheduler_final_diff' => self::cron_diff_json() ) ) );
+
+		$this->assertSame( UnavailableReason::DATA_CORRUPT, $report['phases']['final']['action_scheduler']['reason'] );
+	}
+
+	/**
+	 * Action Scheduler snapshot columns never reach a report or history row, whatever the row contains.
+	 */
+	public function test_action_scheduler_snapshots_are_never_exposed() {
+		$row = self::row(
+			array(
+				'action_scheduler_before_snapshot'    => '{"schema":1,"fingerprint_context":"as-args-hmac-sha256-v1:' . self::AS_SECRET . '"}',
+				'action_scheduler_immediate_snapshot' => self::AS_SECRET,
+			)
+		);
+
+		foreach ( array( ( new AnalysisReadModel() )->report( $row ), ( new AnalysisReadModel() )->history_item( $row ) ) as $output ) {
+			$this->assertStringNotContainsString( self::AS_SECRET, (string) json_encode( $output ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+		}
+	}
+
+	/**
+	 * History flags of the Action Scheduler signal are independent of the other signals.
+	 */
+	public function test_history_action_scheduler_flags() {
+		$item = ( new AnalysisReadModel() )->history_item(
+			self::row(
+				array(
+					'has_options_post_update_diff'         => '1',
+					'has_changes_options_post_update_diff' => '0',
+					'has_cron_post_update_diff'            => '1',
+					'has_changes_cron_post_update_diff'    => '0',
+					'has_action_scheduler_post_update_diff' => '1',
+					'has_changes_action_scheduler_post_update_diff' => '1',
+					'has_action_scheduler_final_diff'      => '0',
+					'has_changes_action_scheduler_final_diff' => '1',
+					'has_action_scheduler_during_update_diff' => '1',
+					'has_changes_action_scheduler_during_update_diff' => '0',
+				)
+			)
+		);
+
+		$this->assertSame(
+			array(
+				'recorded'    => true,
+				'has_changes' => true,
+			),
+			$item['phases']['post_update']['action_scheduler']
+		);
+		$this->assertFalse( $item['phases']['post_update']['cron']['has_changes'] );
+		$this->assertSame(
+			array(
+				'recorded'    => false,
+				'has_changes' => null,
+			),
+			$item['phases']['final']['action_scheduler']
+		);
+		$this->assertSame(
+			array(
+				'recorded'    => true,
+				'has_changes' => false,
+			),
+			$item['phases']['during_update']['action_scheduler']
+		);
 	}
 
 	/**

@@ -96,6 +96,7 @@ describe( 'report clarity', () => {
 			expect( tabNames( 'Observed signals' ) ).toEqual( [
 				'Options, 6 changes',
 				'WP-Cron, 5 changes',
+				'Action Scheduler, not available',
 			] );
 			// The visible indicator is compact: just the number.
 			expect( tab( /^Net result/ ) ).toHaveTextContent(
@@ -114,6 +115,7 @@ describe( 'report clarity', () => {
 			expect( tabNames( 'Observed signals' ) ).toEqual( [
 				'Options, 5 changes',
 				'WP-Cron, no changes',
+				'Action Scheduler, not available',
 			] );
 			expect( tab( /^During update/ ) ).toHaveTextContent(
 				/^During update0$/
@@ -126,6 +128,7 @@ describe( 'report clarity', () => {
 			expect( tabNames( 'Observed signals' ) ).toEqual( [
 				'Options, no changes',
 				'WP-Cron, 1 change',
+				'Action Scheduler, not available',
 			] );
 			expect( tab( /^WP-Cron/ ) ).toHaveAttribute(
 				'aria-selected',

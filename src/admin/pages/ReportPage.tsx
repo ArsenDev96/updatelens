@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 import { getAnalysis } from '../api/analyses';
+import { ActionSchedulerChanges } from '../components/ActionSchedulerDiff';
 import { CronDiffList, CronSummary } from '../components/CronDiff';
 import { LoadError } from '../components/LoadError';
 import { OptionDiffList } from '../components/OptionDiffList';
@@ -22,6 +23,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { useRequest } from '../hooks/use-request';
 import type {
+	ActionSchedulerPhase,
 	AnalysisReport,
 	CronPhase,
 	OptionsPhase,
@@ -30,6 +32,7 @@ import type {
 	ReportPhase,
 } from '../types/api';
 import {
+	actionSchedulerChangeCount,
 	cronChangeCount,
 	optionsChangeCount,
 	reportChangeCounts,
@@ -37,6 +40,7 @@ import {
 } from '../utils/changes';
 import { formatDateTime } from '../utils/format';
 import {
+	actionSchedulerUnavailableReasonText,
 	cronPhaseNote,
 	cronUnavailableReasonText,
 	defaultPhase,
@@ -270,27 +274,36 @@ function PhasePanel( {
 			<p className="text-sm text-muted-foreground">
 				{ phaseNote( phase ) }
 			</p>
-			{ counts.options === 0 && counts.cron === 0 && (
-				<p className="text-sm font-medium">
-					{ __(
-						'No tracked changes observed during this phase.',
-						'updatelens'
-					) }
-				</p>
-			) }
+			{ counts.options === 0 &&
+				counts.cron === 0 &&
+				( counts.action_scheduler ?? 0 ) === 0 && (
+					<p className="text-sm font-medium">
+						{ __(
+							'No tracked changes observed during this phase.',
+							'updatelens'
+						) }
+					</p>
+				) }
 			<ProviderTabs
 				counts={ counts }
 				selected={ provider }
 				onSelect={ onProvider }
 			>
-				{ provider === 'options' ? (
+				{ provider === 'options' && (
 					<OptionsPanel
 						data={ data.options }
 						windowSeconds={ windowSeconds }
 					/>
-				) : (
+				) }
+				{ provider === 'cron' && (
 					<CronPanel
 						data={ data.cron }
+						windowSeconds={ windowSeconds }
+					/>
+				) }
+				{ provider === 'action_scheduler' && (
+					<ActionSchedulerPanel
+						data={ data.action_scheduler }
 						windowSeconds={ windowSeconds }
 					/>
 				) }
@@ -348,6 +361,29 @@ function CronPanel( {
 			<CronDiffList phase={ data } />
 		</div>
 	);
+}
+
+function ActionSchedulerPanel( {
+	data,
+	windowSeconds,
+}: {
+	data: ActionSchedulerPhase;
+	windowSeconds: number;
+} ) {
+	if ( ! data.available ) {
+		return (
+			<UnavailablePhase
+				text={ actionSchedulerUnavailableReasonText(
+					data.reason,
+					windowSeconds
+				) }
+			/>
+		);
+	}
+	if ( actionSchedulerChangeCount( data ) === 0 ) {
+		return <NoChanges text={ noChangesText( 'action_scheduler' ) } />;
+	}
+	return <ActionSchedulerChanges phase={ data } />;
 }
 
 /**
@@ -417,6 +453,18 @@ function TechnicalDetails( { report }: { report: AnalysisReport } ) {
 					phaseLabel( phase )
 				),
 				cron.available ? null : cron.reason,
+				null,
+			];
+		} ),
+		...PHASE_KEYS.map( ( phase ): [ string, string | null, null ] => {
+			const actionScheduler = report.phases[ phase ].action_scheduler;
+			return [
+				sprintf(
+					/* translators: %s: observation phase, e.g. "Net result". */
+					__( 'Action Scheduler reason (%s)', 'updatelens' ),
+					phaseLabel( phase )
+				),
+				actionScheduler.available ? null : actionScheduler.reason,
 				null,
 			];
 		} ),

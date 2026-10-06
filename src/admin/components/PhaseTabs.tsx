@@ -61,8 +61,8 @@ export function PhaseTabs( {
 }
 
 /**
- * Second-level tabs for the signals of one phase (Options, WP-Cron), each
- * with its own change count or availability.
+ * Second-level tabs for the signals of one phase (Options, WP-Cron, Action
+ * Scheduler), each with its own change count or availability.
  *
  * @param props          Props.
  * @param props.counts   Change counts of the phase.

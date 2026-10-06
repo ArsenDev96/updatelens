@@ -37,19 +37,23 @@ class AnalysisRepository {
 	 * begins a diff without changes.
 	 */
 	const HISTORY_DIFFS = array(
-		'options_during_update_diff' => OptionsDiffCodec::EMPTY_PREFIX,
-		'options_post_update_diff'   => OptionsDiffCodec::EMPTY_PREFIX,
-		'options_final_diff'         => OptionsDiffCodec::EMPTY_PREFIX,
-		'cron_during_update_diff'    => CronDiffCodec::EMPTY_PREFIX,
-		'cron_post_update_diff'      => CronDiffCodec::EMPTY_PREFIX,
-		'cron_final_diff'            => CronDiffCodec::EMPTY_PREFIX,
+		'options_during_update_diff'          => OptionsDiffCodec::EMPTY_PREFIX,
+		'options_post_update_diff'            => OptionsDiffCodec::EMPTY_PREFIX,
+		'options_final_diff'                  => OptionsDiffCodec::EMPTY_PREFIX,
+		'cron_during_update_diff'             => CronDiffCodec::EMPTY_PREFIX,
+		'cron_post_update_diff'               => CronDiffCodec::EMPTY_PREFIX,
+		'cron_final_diff'                     => CronDiffCodec::EMPTY_PREFIX,
+		'action_scheduler_during_update_diff' => ActionSchedulerDiffCodec::EMPTY_PREFIX,
+		'action_scheduler_post_update_diff'   => ActionSchedulerDiffCodec::EMPTY_PREFIX,
+		'action_scheduler_final_diff'         => ActionSchedulerDiffCodec::EMPTY_PREFIX,
 	);
 
 	/**
-	 * Columns of a full report: report metadata plus the options and Cron
-	 * phase diffs and Cron phase reasons. Never snapshots.
+	 * Columns of a full report: report metadata plus the options, Cron and
+	 * Action Scheduler phase diffs and the Cron and Action Scheduler phase
+	 * reasons. Never snapshots.
 	 */
-	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff, cron_during_update_diff, cron_post_update_diff, cron_final_diff, cron_during_update_reason, cron_post_update_reason, cron_final_reason';
+	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff, cron_during_update_diff, cron_post_update_diff, cron_final_diff, cron_during_update_reason, cron_post_update_reason, cron_final_reason, action_scheduler_during_update_diff, action_scheduler_post_update_diff, action_scheduler_final_diff, action_scheduler_during_update_reason, action_scheduler_post_update_reason, action_scheduler_final_reason';
 
 	/**
 	 * Columns of a history row: report metadata plus, per phase diff, whether

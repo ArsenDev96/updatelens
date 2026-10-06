@@ -8,8 +8,11 @@
 namespace UpdateLens\Report;
 
 use Throwable;
+use UpdateLens\Storage\ActionSchedulerDiffCodec;
 use UpdateLens\Storage\CronDiffCodec;
 use UpdateLens\Storage\OptionsDiffCodec;
+use UpdateLens\Update\ActionSchedulerObservation;
+use UpdateLens\Update\ActionSchedulerPhaseReason;
 use UpdateLens\Update\AnalysisStatus;
 use UpdateLens\Update\CronObservation;
 use UpdateLens\Update\CronPhaseReason;
@@ -22,8 +25,8 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Builds history rows and reports from analysis rows.
  *
- * Reports are provider-aware: each phase holds an `options` and a `cron`
- * object with independent availability. History rows carry per-phase,
+ * Reports are provider-aware: each phase holds an `options`, a `cron` and an
+ * `action_scheduler` object with independent availability. History rows carry per-phase,
  * per-signal `recorded`/`has_changes` flags computed in SQL, never diff data.
  *
  * Whitelists fields: snapshots, fingerprints, user IDs, stored error
@@ -82,6 +85,27 @@ final class AnalysisReadModel {
 	);
 
 	/**
+	 * Stored Action Scheduler phase reasons passed through to the API
+	 * (ActionSchedulerPhaseReason). Any other stored value becomes `unknown`.
+	 */
+	const ACTION_SCHEDULER_REASONS = array(
+		ActionSchedulerPhaseReason::NOT_INSTALLED,
+		ActionSchedulerPhaseReason::UNSUPPORTED_STORE,
+		ActionSchedulerPhaseReason::UNSUPPORTED_SCHEMA,
+		ActionSchedulerPhaseReason::UNSUPPORTED_SCHEDULE,
+		ActionSchedulerPhaseReason::MALFORMED_STATE,
+		ActionSchedulerPhaseReason::SNAPSHOT_UNAVAILABLE,
+		ActionSchedulerPhaseReason::FINGERPRINT_CONTEXT_CHANGED,
+		ActionSchedulerPhaseReason::NOT_CAPTURED,
+		ActionSchedulerPhaseReason::STORAGE_FAILED,
+		ActionSchedulerPhaseReason::ANALYSIS_FAILED,
+		ActionSchedulerPhaseReason::SETTLE_EXPIRED,
+		ActionSchedulerPhaseReason::UPDATE_FAILED,
+		ActionSchedulerPhaseReason::ANALYSIS_ABANDONED,
+		ActionSchedulerPhaseReason::ANALYSIS_ENDED,
+	);
+
+	/**
 	 * Options diff column per phase, in report order.
 	 */
 	const PHASE_COLUMNS = array(
@@ -105,11 +129,19 @@ final class AnalysisReadModel {
 	private $cron_diff_codec;
 
 	/**
+	 * Action Scheduler diff decoding.
+	 *
+	 * @var ActionSchedulerDiffCodec
+	 */
+	private $action_scheduler_diff_codec;
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
-		$this->diff_codec      = new OptionsDiffCodec();
-		$this->cron_diff_codec = new CronDiffCodec();
+		$this->diff_codec                  = new OptionsDiffCodec();
+		$this->cron_diff_codec             = new CronDiffCodec();
+		$this->action_scheduler_diff_codec = new ActionSchedulerDiffCodec();
 	}
 
 	/**
@@ -131,8 +163,9 @@ final class AnalysisReadModel {
 		foreach ( self::PHASE_COLUMNS as $phase => $column ) {
 			$item[ "has_{$phase}" ] = self::flag( $row, 'has_' . $column );
 			$phases[ $phase ]       = array(
-				'options' => self::history_signal( $row, $column ),
-				'cron'    => self::history_signal( $row, CronObservation::PHASES[ $phase ][0] ),
+				'options'          => self::history_signal( $row, $column ),
+				'cron'             => self::history_signal( $row, CronObservation::PHASES[ $phase ][0] ),
+				'action_scheduler' => self::history_signal( $row, ActionSchedulerObservation::PHASES[ $phase ][0] ),
 			);
 		}
 		$item['phases'] = $phases;
@@ -178,11 +211,25 @@ final class AnalysisReadModel {
 		$phases   = array();
 
 		foreach ( self::PHASE_COLUMNS as $phase => $column ) {
-			list( $cron_diff, $cron_reason ) = CronObservation::PHASES[ $phase ];
+			list( $cron_diff, $cron_reason )                         = CronObservation::PHASES[ $phase ];
+			list( $action_scheduler_diff, $action_scheduler_reason ) = ActionSchedulerObservation::PHASES[ $phase ];
 
 			$phases[ $phase ] = array(
-				'options' => $this->phase( $phase, isset( $row[ $column ] ) ? $row[ $column ] : null, $metadata ),
-				'cron'    => $this->cron_phase( $phase, self::field( $row, $cron_diff ), self::field( $row, $cron_reason ), $metadata ),
+				'options'          => $this->phase( $phase, isset( $row[ $column ] ) ? $row[ $column ] : null, $metadata ),
+				'cron'             => $this->signal_phase(
+					$phase,
+					self::field( $row, $cron_diff ),
+					self::stored_reason( self::field( $row, $cron_reason ), self::CRON_REASONS ),
+					$metadata,
+					array( $this->cron_diff_codec, 'decode' )
+				),
+				'action_scheduler' => $this->signal_phase(
+					$phase,
+					self::field( $row, $action_scheduler_diff ),
+					self::stored_reason( self::field( $row, $action_scheduler_reason ), self::ACTION_SCHEDULER_REASONS ),
+					$metadata,
+					array( $this->action_scheduler_diff_codec, 'decode' )
+				),
 			);
 		}
 
@@ -258,23 +305,26 @@ final class AnalysisReadModel {
 	}
 
 	/**
-	 * One Cron phase: the decoded Cron diff, or why there is none.
+	 * One WP-Cron or Action Scheduler phase: the decoded diff, or why there is none.
 	 *
-	 * A stored reason is passed through (whitelisted); without diff and
-	 * reason the phase is still pending, which the status explains.
+	 * Both signals store the same lists (added, removed, rescheduled,
+	 * changed), each decoded only by its own codec. A stored reason is passed
+	 * through (whitelisted by stored_reason()); without diff and reason the
+	 * phase is still pending, which the status explains.
 	 *
 	 * @param string               $phase    ObservationPhase constant.
-	 * @param mixed                $json     Stored Cron diff JSON or null.
-	 * @param mixed                $reason   Stored CronPhaseReason or null.
+	 * @param mixed                $json     Stored diff JSON or null.
+	 * @param string|null          $reason   Whitelisted stored reason, or null if none is stored.
 	 * @param array<string, mixed> $metadata Output of metadata().
+	 * @param callable             $decode   The signal's codec decode().
 	 * @return array<string, mixed>
 	 */
-	private function cron_phase( $phase, $json, $reason, array $metadata ) {
+	private function signal_phase( $phase, $json, $reason, array $metadata, callable $decode ) {
 		$association = ObservationPhase::ASSOCIATION[ $phase ];
 
 		if ( null !== $json ) {
 			try {
-				$diff = $this->cron_diff_codec->decode( $json );
+				$diff = $decode( $json );
 			} catch ( Throwable $e ) {
 				return self::unavailable( $association, UnavailableReason::DATA_CORRUPT );
 			}
@@ -290,8 +340,8 @@ final class AnalysisReadModel {
 			);
 		}
 
-		if ( null !== $reason && '' !== $reason ) {
-			return self::unavailable( $association, self::known( $reason, self::CRON_REASONS ) );
+		if ( null !== $reason ) {
+			return self::unavailable( $association, $reason );
 		}
 
 		if ( AnalysisStatus::CAPTURED === $metadata['status'] ) {
@@ -368,6 +418,18 @@ final class AnalysisReadModel {
 	 */
 	private static function known( $value, array $known ) {
 		return is_string( $value ) && in_array( $value, $known, true ) ? $value : self::UNKNOWN;
+	}
+
+	/**
+	 * A stored phase reason if it is a known one, `unknown` for any other
+	 * stored value, or null if none is stored.
+	 *
+	 * @param mixed    $value Stored reason.
+	 * @param string[] $known Known reasons.
+	 * @return string|null
+	 */
+	private static function stored_reason( $value, array $known ) {
+		return null === $value || '' === $value ? null : self::known( $value, $known );
 	}
 
 	/**

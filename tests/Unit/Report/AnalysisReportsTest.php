@@ -11,7 +11,10 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use UpdateLens\Report\AnalysisReports;
 use UpdateLens\Report\UnavailableReason;
+use UpdateLens\Snapshot\ActionSchedulerUnavailableException;
+use UpdateLens\Snapshot\MalformedActionSchedulerStateException;
 use UpdateLens\Storage\OptionsDiffCodec;
+use UpdateLens\Tests\Support\ActionSchedulerFixture;
 use UpdateLens\Tests\Support\CronFixture;
 use UpdateLens\Tests\Support\FakeSite;
 use UpdateLens\Update\AnalysisStatus;
@@ -230,13 +233,17 @@ final class AnalysisReportsTest extends TestCase {
 				'phases'            => array_fill_keys(
 					array( 'during_update', 'post_update', 'final' ),
 					array(
-						'options' => array(
+						'options'          => array(
 							'recorded'    => true,
 							'has_changes' => true,
 						),
-						'cron'    => array(
+						'cron'             => array(
 							'recorded'    => true,
 							'has_changes' => false,
+						),
+						'action_scheduler' => array(
+							'recorded'    => false,
+							'has_changes' => null,
 						),
 					)
 				),
@@ -807,8 +814,9 @@ final class AnalysisReportsTest extends TestCase {
 			array_fill_keys(
 				array( 'during_update', 'post_update', 'final' ),
 				array(
-					'options' => true,
-					'cron'    => true,
+					'options'          => true,
+					'cron'             => true,
+					'action_scheduler' => 'not_installed',
 				)
 			),
 			self::availability( $report )
@@ -865,16 +873,19 @@ final class AnalysisReportsTest extends TestCase {
 		$this->assertSame(
 			array(
 				'during_update' => array(
-					'options' => true,
-					'cron'    => true,
+					'options'          => true,
+					'cron'             => true,
+					'action_scheduler' => 'not_installed',
 				),
 				'post_update'   => array(
-					'options' => true,
-					'cron'    => 'snapshot_unavailable',
+					'options'          => true,
+					'cron'             => 'snapshot_unavailable',
+					'action_scheduler' => 'not_installed',
 				),
 				'final'         => array(
-					'options' => true,
-					'cron'    => true,
+					'options'          => true,
+					'cron'             => true,
+					'action_scheduler' => 'not_installed',
 				),
 			),
 			self::availability( $report )
@@ -911,16 +922,19 @@ final class AnalysisReportsTest extends TestCase {
 		$this->assertSame(
 			array(
 				'during_update' => array(
-					'options' => true,
-					'cron'    => true,
+					'options'          => true,
+					'cron'             => true,
+					'action_scheduler' => 'not_installed',
 				),
 				'post_update'   => array(
-					'options' => 'settle_expired',
-					'cron'    => 'settle_expired',
+					'options'          => 'settle_expired',
+					'cron'             => 'settle_expired',
+					'action_scheduler' => 'not_installed',
 				),
 				'final'         => array(
-					'options' => 'settle_expired',
-					'cron'    => 'settle_expired',
+					'options'          => 'settle_expired',
+					'cron'             => 'settle_expired',
+					'action_scheduler' => 'not_installed',
 				),
 			),
 			self::availability( $report )
@@ -1048,15 +1062,16 @@ final class AnalysisReportsTest extends TestCase {
 		$quiet = $reports->history( 1, 20 )['items'][1];
 		$this->assertSame( 'quiet/quiet.php', $quiet['plugin']['file'] );
 		foreach ( $quiet['phases'] as $signals ) {
-			foreach ( $signals as $flags ) {
+			foreach ( array( 'options', 'cron' ) as $signal ) {
 				$this->assertSame(
 					array(
 						'recorded'    => true,
 						'has_changes' => false,
 					),
-					$flags
+					$signals[ $signal ]
 				);
 			}
+			$this->assertFalse( $signals['action_scheduler']['recorded'], 'No Action Scheduler on this site: not recorded, not "no changes".' );
 		}
 	}
 
@@ -1088,6 +1103,426 @@ final class AnalysisReportsTest extends TestCase {
 			$forbidden[] = $event['args_fingerprint'];
 		}
 		$forbidden[] = $snapshot['fingerprint_context'];
+
+		foreach ( $outputs as $output ) {
+			foreach ( array( self::json( $output ), serialize( $output ), var_export( $output, true ) ) as $serialized ) { // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize, WordPress.PHP.DevelopmentFunctions.error_log_var_export -- Privacy assertion.
+				foreach ( $forbidden as $needle ) {
+					$this->assertStringNotContainsString( $needle, $serialized );
+				}
+			}
+		}
+	}
+
+	/**
+	 * Obviously fake credential stored in real Action Scheduler arguments.
+	 */
+	const AS_SECRET = 'sk_test_UPDATE_LENS_ACTION_SCHEDULER_REPORT_SECRET';
+
+	/**
+	 * Secret arguments, as a plugin would pass an order or webhook token.
+	 *
+	 * @return array
+	 */
+	private static function as_args() {
+		return array(
+			'token'   => self::AS_SECRET,
+			'webhook' => 'https://hooks.example.test/' . self::AS_SECRET,
+		);
+	}
+
+	/**
+	 * Queue before the update (shaped like the WooCommerce 11.1.1 → 11.1.2 study).
+	 *
+	 * @return array
+	 */
+	private static function as_before() {
+		return array(
+			ActionSchedulerFixture::recurring( 'action_scheduler/migration_hook', self::T0 + 60, 60, array(), 'action-scheduler-migration' ),
+			ActionSchedulerFixture::single( 'wpforms_admin_notifications_update', self::T0 + 30, self::as_args(), 'wpforms' ),
+			ActionSchedulerFixture::recurring( 'wpforms_email_summaries_fetch_info_blocks', self::T0 + 3600, 604800, self::as_args(), 'wpforms' ),
+		);
+	}
+
+	/**
+	 * Right after the update request: WooCommerce queued its pattern fetch.
+	 *
+	 * @return array
+	 */
+	private static function as_immediate() {
+		$rows   = self::as_before();
+		$rows[] = ActionSchedulerFixture::recurring( 'fetch_patterns', self::T0 + 5, 86400, array(), 'woocommerce' );
+
+		return $rows;
+	}
+
+	/**
+	 * At settle: migration and pattern fetch moved, the WPForms job left the
+	 * active queue, a recurring job became a cron schedule, an async job runs.
+	 *
+	 * @return array
+	 */
+	private static function as_settled() {
+		$running           = ActionSchedulerFixture::async( 'woocommerce_run_on_woocommerce_admin_updated', self::T0 + 12, self::as_args(), 'woocommerce-remote-inbox-engine' );
+		$running['status'] = 'in-progress';
+
+		return array(
+			ActionSchedulerFixture::recurring( 'action_scheduler/migration_hook', self::T0 + 144, 60, array(), 'action-scheduler-migration' ),
+			ActionSchedulerFixture::cron( 'wpforms_email_summaries_fetch_info_blocks', self::T0 + 3600, '0 */6 * * *', self::as_args(), 'wpforms' ),
+			ActionSchedulerFixture::recurring( 'fetch_patterns', self::T0 + 86419, 86400, array(), 'woocommerce' ),
+			$running,
+		);
+	}
+
+	/**
+	 * An update with the given Action Scheduler states (rows, null = not
+	 * installed, or a Throwable from the provider); a null settled state
+	 * with $settle false leaves it awaiting.
+	 *
+	 * @param mixed $before    State before.
+	 * @param mixed $immediate State after the update request.
+	 * @param mixed $settled   State at the next admin page.
+	 * @param bool  $settle    Whether a later admin page settles it.
+	 * @return void
+	 */
+	private function as_update( $before, $immediate, $settled, $settle = true ) {
+		$this->site->action_scheduler = $before;
+		$request                      = $this->site->request();
+		$this->site->start( $request, 'acme/acme.php' );
+		$this->site->options['acme_needs_migration'] = array( '1', 'off' );
+		$this->site->action_scheduler                = $immediate;
+		$this->site->time                           += 5;
+		$request->update_finished( 'acme/acme.php', null, '1.1.0' );
+		$request->request_ending( true );
+
+		if ( $settle ) {
+			$this->site->action_scheduler = $settled;
+			$this->site->time            += 10;
+			$this->site->admin_page();
+		}
+	}
+
+	/**
+	 * Hooks per list of an Action Scheduler phase.
+	 *
+	 * @param array $phase Available Action Scheduler phase.
+	 * @return array
+	 */
+	private static function as_hooks( array $phase ) {
+		return array(
+			'added'       => array_column( $phase['added'], 'hook' ),
+			'removed'     => array_column( $phase['removed'], 'hook' ),
+			'rescheduled' => array_column( $phase['rescheduled'], 'hook' ),
+			'changed'     => array_column( $phase['changed'], 'hook' ),
+		);
+	}
+
+	/**
+	 * Full success: all three signals available in all phases; every category
+	 * appears, cross-plugin work included; Options and Cron unchanged.
+	 */
+	public function test_action_scheduler_full_report() {
+		$this->as_update( self::as_before(), self::as_immediate(), self::as_settled() );
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame(
+			array_fill_keys(
+				array( 'during_update', 'post_update', 'final' ),
+				array(
+					'options'          => true,
+					'cron'             => true,
+					'action_scheduler' => true,
+				)
+			),
+			self::availability( $report )
+		);
+
+		$during = $report['phases']['during_update']['action_scheduler'];
+		$this->assertSame( 'update_request', $during['association'] );
+		$this->assertSame(
+			array(
+				'added'       => array( 'fetch_patterns' ),
+				'removed'     => array(),
+				'rescheduled' => array(),
+				'changed'     => array(),
+			),
+			self::as_hooks( $during )
+		);
+		$this->assertSame(
+			array(
+				'hook'            => 'fetch_patterns',
+				'group'           => 'woocommerce',
+				'status'          => 'pending',
+				'timestamp'       => self::T0 + 5,
+				'schedule_type'   => 'interval',
+				'interval'        => 86400,
+				'cron_expression' => null,
+				'is_recurring'    => true,
+			),
+			$during['added'][0]
+		);
+
+		$post = $report['phases']['post_update']['action_scheduler'];
+		$this->assertSame(
+			array(
+				'added'       => array( 'woocommerce_run_on_woocommerce_admin_updated' ),
+				'removed'     => array( 'wpforms_admin_notifications_update' ),
+				'rescheduled' => array( 'action_scheduler/migration_hook', 'fetch_patterns' ),
+				'changed'     => array( 'wpforms_email_summaries_fetch_info_blocks' ),
+			),
+			self::as_hooks( $post )
+		);
+		$this->assertSame( array( 84, 86414 ), array_column( $post['rescheduled'], 'timestamp_delta' ) );
+		$this->assertSame( 'in-progress', $post['added'][0]['status'] );
+		$this->assertSame( 'async', $post['added'][0]['schedule_type'] );
+		$this->assertSame( '0 */6 * * *', $post['changed'][0]['after_cron_expression'] );
+
+		$final = $report['phases']['final']['action_scheduler'];
+		$this->assertSame(
+			array(
+				'added'       => array( 'fetch_patterns', 'woocommerce_run_on_woocommerce_admin_updated' ),
+				'removed'     => array( 'wpforms_admin_notifications_update' ),
+				'rescheduled' => array( 'action_scheduler/migration_hook' ),
+				'changed'     => array( 'wpforms_email_summaries_fetch_info_blocks' ),
+			),
+			self::as_hooks( $final )
+		);
+		$this->assertSame( 1, $final['summary']['action_count_delta'] );
+		foreach ( $final['summary'] as $key => $value ) {
+			$this->assertIsInt( $value, $key );
+		}
+	}
+
+	/**
+	 * Partial availability: Action Scheduler appeared after BEFORE. During and
+	 * Net are not_installed, After is available; no invented additions.
+	 */
+	public function test_action_scheduler_partial_availability() {
+		$this->as_update( null, self::as_immediate(), self::as_settled() );
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame(
+			array( 'not_installed', true, 'not_installed' ),
+			array_values( array_column( self::availability( $report ), 'action_scheduler' ) )
+		);
+		$this->assertSame( 4, $report['phases']['post_update']['action_scheduler']['summary']['before_action_count'] );
+		foreach ( $report['phases'] as $phase ) {
+			$this->assertTrue( $phase['options']['available'] );
+			$this->assertTrue( $phase['cron']['available'] );
+		}
+	}
+
+	/**
+	 * Not installed anywhere: a normal state, the analysis is complete.
+	 */
+	public function test_action_scheduler_not_installed() {
+		$this->as_update( null, null, null );
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame( 'completed', $report['status'] );
+		$this->assertNull( $report['error'] );
+		foreach ( $report['phases'] as $phase ) {
+			$this->assertSame( 'not_installed', $phase['action_scheduler']['reason'] );
+			$this->assertTrue( $phase['options']['available'] );
+		}
+	}
+
+	/**
+	 * Provider states: each stays distinct and never affects Options or Cron.
+	 *
+	 * @return array
+	 */
+	public function provide_action_scheduler_states() {
+		return array(
+			'unsupported store'    => array( ActionSchedulerUnavailableException::unsupported_store(), 'unsupported_store' ),
+			'unsupported schema'   => array( ActionSchedulerUnavailableException::unsupported_schema(), 'unsupported_schema' ),
+			'read failed'          => array( ActionSchedulerUnavailableException::read_failed(), 'snapshot_unavailable' ),
+			'malformed'            => array( MalformedActionSchedulerStateException::invalid_schedule(), 'malformed_action_scheduler_state' ),
+			'unsupported schedule' => array( MalformedActionSchedulerStateException::unsupported_schedule(), 'unsupported_schedule' ),
+		);
+	}
+
+	/**
+	 * Provider states in reports.
+	 *
+	 * @dataProvider provide_action_scheduler_states
+	 * @param \Throwable $state  Provider failure at every capture.
+	 * @param string     $reason Expected reason.
+	 */
+	public function test_action_scheduler_provider_states( $state, $reason ) {
+		$this->as_update( $state, $state, $state );
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame( 'completed', $report['status'] );
+		foreach ( $report['phases'] as $phase ) {
+			$this->assertSame( $reason, $phase['action_scheduler']['reason'] );
+			$this->assertTrue( $phase['options']['available'] );
+			$this->assertTrue( $phase['cron']['available'] );
+		}
+	}
+
+	/**
+	 * Expired settle window: during available, after/net settle_expired; awaiting before that.
+	 */
+	public function test_expired_and_awaiting_action_scheduler_report() {
+		$this->as_update( self::as_before(), self::as_immediate(), null, false );
+
+		$awaiting = $this->reports()->report( 1 );
+		$this->assertSame( array( true, 'awaiting_settle', 'awaiting_settle' ), array_values( array_column( self::availability( $awaiting ), 'action_scheduler' ) ) );
+
+		$this->site->time += PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS + 1;
+		$expired           = $this->reports()->report( 1 );
+		$this->assertSame( 'expired', $expired['settle_outcome'] );
+		$this->assertSame( array( true, 'settle_expired', 'settle_expired' ), array_values( array_column( self::availability( $expired ), 'action_scheduler' ) ) );
+		$this->assertSame( array( 'fetch_patterns' ), array_column( $expired['phases']['during_update']['action_scheduler']['added'], 'hook' ) );
+	}
+
+	/**
+	 * Failed update and in-progress analyses.
+	 */
+	public function test_failed_and_in_progress_action_scheduler_report() {
+		$this->site->action_scheduler = self::as_before();
+		$request                      = $this->site->request();
+		$this->site->start( $request, 'a/a.php' );
+		$this->assertSame( array( 'update_in_progress', 'update_in_progress', 'update_in_progress' ), array_values( array_column( self::availability( $this->reports()->report( 1 ) ), 'action_scheduler' ) ) );
+
+		$request->update_finished( 'a/a.php', 'download_failed', null );
+		$request->request_ending( true );
+		$this->assertSame( array( 'update_failed', 'update_failed', 'update_failed' ), array_values( array_column( self::availability( $this->reports()->report( 1 ) ), 'action_scheduler' ) ) );
+	}
+
+	/**
+	 * Reports from before Action Scheduler observation (schema 4 migration):
+	 * Options and Cron render; Action Scheduler is not_captured, never zero changes.
+	 */
+	public function test_pre_action_scheduler_reports() {
+		$this->as_update( self::as_before(), self::as_immediate(), self::as_settled() );
+		foreach ( array( 'during_update', 'post_update', 'final' ) as $phase ) {
+			$this->site->repository->rows[1][ "action_scheduler_{$phase}_diff" ]   = null;
+			$this->site->repository->rows[1][ "action_scheduler_{$phase}_reason" ] = 'not_captured';
+		}
+
+		$reports = $this->reports();
+		$report  = $reports->report( 1 );
+		foreach ( $report['phases'] as $phase ) {
+			$this->assertTrue( $phase['options']['available'] );
+			$this->assertTrue( $phase['cron']['available'] );
+			$this->assertSame( 'not_captured', $phase['action_scheduler']['reason'] );
+		}
+		foreach ( $reports->history( 1, 20 )['items'][0]['phases'] as $phase ) {
+			$this->assertSame(
+				array(
+					'recorded'    => false,
+					'has_changes' => null,
+				),
+				$phase['action_scheduler']
+			);
+		}
+	}
+
+	/**
+	 * A corrupt stored Action Scheduler diff makes only that phase unavailable; the report still reads.
+	 */
+	public function test_corrupt_stored_action_scheduler_diff() {
+		$this->as_update( self::as_before(), self::as_immediate(), self::as_settled() );
+		$this->site->repository->rows[1]['action_scheduler_post_update_diff'] = '{"schema":1,"added":"' . self::AS_SECRET . '"';
+
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame( array( true, 'data_corrupt', true ), array_values( array_column( self::availability( $report ), 'action_scheduler' ) ) );
+		$this->assertTrue( $report['phases']['post_update']['options']['available'] );
+		$this->assertTrue( $report['phases']['post_update']['cron']['available'] );
+		$this->assertStringNotContainsString( self::AS_SECRET, self::json( $report ) );
+		$this->assertTrue( $this->reports()->history( 1, 20 )['items'][0]['phases']['post_update']['action_scheduler']['recorded'], 'History does not decode diffs.' );
+	}
+
+	/**
+	 * History carries Action Scheduler flags; a phase whose only changes are
+	 * Action Scheduler changes has changes for that signal alone.
+	 */
+	public function test_history_action_scheduler_flags() {
+		// Options and Cron unchanged after the update request; only Action Scheduler moves.
+		$this->site->action_scheduler = self::as_before();
+		$request                      = $this->site->request();
+		$this->site->start( $request, 'quiet/quiet.php' );
+		$this->site->action_scheduler = self::as_immediate();
+		$this->site->time            += 5;
+		$request->update_finished( 'quiet/quiet.php', null, '1.0.1' );
+		$request->request_ending( true );
+		$this->site->action_scheduler = self::as_immediate();
+		$this->site->time            += 10;
+		$this->site->admin_page();
+
+		$item = $this->reports()->history( 1, 20 )['items'][0];
+
+		$this->assertSame(
+			array(
+				'options'          => array(
+					'recorded'    => true,
+					'has_changes' => false,
+				),
+				'cron'             => array(
+					'recorded'    => true,
+					'has_changes' => false,
+				),
+				'action_scheduler' => array(
+					'recorded'    => true,
+					'has_changes' => true,
+				),
+			),
+			$item['phases']['during_update']
+		);
+		$this->assertFalse( $item['phases']['post_update']['action_scheduler']['has_changes'] );
+		$this->assertTrue( $item['phases']['final']['action_scheduler']['has_changes'] );
+		foreach ( array( 'fetch_patterns', 'woocommerce', self::AS_SECRET, 'reason' ) as $needle ) {
+			$this->assertStringNotContainsString( $needle, self::json( $item ) );
+		}
+	}
+
+	/**
+	 * History flags agree with decoded Action Scheduler reports across states.
+	 */
+	public function test_action_scheduler_history_flags_match_reports() {
+		$this->as_update( self::as_before(), self::as_immediate(), self::as_settled() );
+		$this->as_update( null, self::as_immediate(), self::as_immediate() );
+		$this->as_update( self::as_before(), self::as_before(), self::as_before() );
+
+		$reports = $this->reports();
+		foreach ( $reports->history( 1, 20 )['items'] as $item ) {
+			$report = $reports->report( $item['id'] );
+			foreach ( $item['phases'] as $phase => $signals ) {
+				$data  = $report['phases'][ $phase ]['action_scheduler'];
+				$flags = $signals['action_scheduler'];
+				$this->assertSame( $data['available'], $flags['recorded'] );
+				if ( $data['available'] ) {
+					$records = count( $data['added'] ) + count( $data['removed'] ) + count( $data['changed'] ) + count( $data['rescheduled'] );
+					$this->assertSame( $records > 0, $flags['has_changes'], "#{$item['id']} {$phase}" );
+				} else {
+					$this->assertNull( $flags['has_changes'] );
+				}
+			}
+		}
+	}
+
+	/**
+	 * No Action Scheduler argument, fingerprint, context, snapshot or ID reaches history or reports.
+	 */
+	public function test_action_scheduler_privacy() {
+		$this->as_update( self::as_before(), self::as_immediate(), self::as_settled() );
+		$this->as_update( self::as_settled(), self::as_settled(), null, false ); // Awaiting, with a stored BEFORE snapshot.
+		$stored = $this->site->repository->rows[2]['action_scheduler_before_snapshot'];
+		$this->assertNotNull( $stored );
+		$this->assertStringNotContainsString( self::AS_SECRET, $stored );
+
+		$reports = $this->reports();
+		$outputs = array( $reports->history( 1, 20 ), $reports->report( 1 ), $reports->report( 2 ) );
+
+		$forbidden = array( self::AS_SECRET, 'hooks.example.test', 'token', 'webhook', 'args', 'fingerprint', 'as-args-hmac', 'snapshot', '"schema"', 'action_id', 'claim', 'O:', 'ActionScheduler_' );
+		$snapshot  = json_decode( $stored, true );
+		foreach ( $snapshot['actions'] as $action ) {
+			$forbidden[] = $action['args_fingerprint'];
+		}
+		$forbidden[] = $snapshot['fingerprint_context'];
+		$forbidden[] = substr( $snapshot['fingerprint_context'], strpos( $snapshot['fingerprint_context'], ':' ) + 1 );
 
 		foreach ( $outputs as $output ) {
 			foreach ( array( self::json( $output ), serialize( $output ), var_export( $output, true ) ) as $serialized ) { // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize, WordPress.PHP.DevelopmentFunctions.error_log_var_export -- Privacy assertion.

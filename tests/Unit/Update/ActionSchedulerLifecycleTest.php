@@ -1079,10 +1079,10 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 	}
 
 	/**
-	 * Action Scheduler is not exposed yet: history and report output are the
-	 * same with and without Action Scheduler data, and name no Action Scheduler field.
+	 * Action Scheduler is additive in reports: Options and WP-Cron output is the
+	 * same with and without Action Scheduler data, and no argument reaches it.
 	 */
-	public function test_reports_unchanged() {
+	public function test_reports_add_action_scheduler_only() {
 		$this->lifecycle( self::as_before(), self::as_immediate(), self::as_settled() );
 		$with = $this->site;
 
@@ -1102,10 +1102,18 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 			$outputs[] = array( $reports->history( 1, 20 ), $reports->report( 1 ) );
 		}
 
-		$this->assertSame( $outputs[1], $outputs[0] );
+		$without_action_scheduler = static function ( array $output ) {
+			foreach ( array_keys( $output[1]['phases'] ) as $phase ) {
+				unset( $output[0]['items'][0]['phases'][ $phase ]['action_scheduler'], $output[1]['phases'][ $phase ]['action_scheduler'] );
+			}
+			return $output;
+		};
+		$this->assertSame( $without_action_scheduler( $outputs[1] ), $without_action_scheduler( $outputs[0] ) );
+		$this->assertTrue( $outputs[0][1]['phases']['final']['action_scheduler']['available'] );
+		$this->assertSame( 'not_installed', $outputs[1][1]['phases']['final']['action_scheduler']['reason'] );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Unit test.
 		$json = json_encode( $outputs[0] );
-		foreach ( array( 'action_scheduler', 'acme_upgrade_db', 'wc_cleanup', self::FAKE_SECRET ) as $needle ) {
+		foreach ( array( self::FAKE_SECRET, 'hooks.example.test', 'token', 'fingerprint', 'as-args-hmac', 'snapshot' ) as $needle ) {
 			$this->assertStringNotContainsString( $needle, $json );
 		}
 	}

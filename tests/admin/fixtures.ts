@@ -6,6 +6,7 @@
 import { vi } from 'vitest';
 
 import type {
+	ActionSchedulerPhase,
 	AnalysisHistoryItem,
 	AnalysisReport,
 	AvailableCronPhase,
@@ -15,6 +16,7 @@ import type {
 	OptionsPhase,
 	PhaseKey,
 	ReportPhase,
+	UnavailableActionSchedulerPhase,
 	UnavailableCronPhase,
 	UnavailableOptionsPhase,
 } from '@/admin/types/api';
@@ -192,6 +194,24 @@ export function cronUnavailable(
 	return { available: false, association, reason };
 }
 
+export function asUnavailable(
+	association: UnavailableActionSchedulerPhase[ 'association' ],
+	reason: UnavailableActionSchedulerPhase[ 'reason' ]
+): UnavailableActionSchedulerPhase {
+	return { available: false, association, reason };
+}
+
+/** Every Action Scheduler phase unavailable for the same reason. */
+export function asEverywhere(
+	reason: UnavailableActionSchedulerPhase[ 'reason' ]
+): Record< PhaseKey, ActionSchedulerPhase > {
+	return {
+		during_update: asUnavailable( 'update_request', reason ),
+		post_update: asUnavailable( 'observed_after_update', reason ),
+		final: asUnavailable( 'net_across_phases', reason ),
+	};
+}
+
 /** 2026-10-06T10:00:00Z. */
 export const T = 1791280800;
 
@@ -321,22 +341,36 @@ export const CRON_FINAL: AvailableCronPhase = {
 };
 
 /**
- * Report phases from options and Cron phases per phase.
+ * Report phases from options, Cron and Action Scheduler phases per phase.
+ * Action Scheduler defaults to a site without it (`not_installed`).
  *
- * @param options Options phases.
- * @param cron    Cron phases.
+ * @param options         Options phases.
+ * @param cron            Cron phases.
+ * @param actionScheduler Action Scheduler phases.
  */
 export function phases(
 	options: Record< PhaseKey, OptionsPhase >,
-	cron: Record< PhaseKey, CronPhase >
+	cron: Record< PhaseKey, CronPhase >,
+	actionScheduler: Record< PhaseKey, ActionSchedulerPhase > = asEverywhere(
+		'not_installed'
+	)
 ): Record< PhaseKey, ReportPhase > {
 	return {
 		during_update: {
 			options: options.during_update,
 			cron: cron.during_update,
+			action_scheduler: actionScheduler.during_update,
 		},
-		post_update: { options: options.post_update, cron: cron.post_update },
-		final: { options: options.final, cron: cron.final },
+		post_update: {
+			options: options.post_update,
+			cron: cron.post_update,
+			action_scheduler: actionScheduler.post_update,
+		},
+		final: {
+			options: options.final,
+			cron: cron.final,
+			action_scheduler: actionScheduler.final,
+		},
 	};
 }
 
@@ -546,7 +580,9 @@ export const PRE_CRON: AnalysisReport = {
  *
  * @param signal Report signal.
  */
-function historySignal( signal: OptionsPhase | CronPhase ): HistorySignal {
+function historySignal(
+	signal: OptionsPhase | CronPhase | ActionSchedulerPhase
+): HistorySignal {
 	if ( ! signal.available ) {
 		return { recorded: false, has_changes: null };
 	}
@@ -567,6 +603,9 @@ export function historyItem(
 	const phase = ( key: PhaseKey ) => ( {
 		options: historySignal( report.phases[ key ].options ),
 		cron: historySignal( report.phases[ key ].cron ),
+		action_scheduler: historySignal(
+			report.phases[ key ].action_scheduler
+		),
 	} );
 	return {
 		id: report.id,

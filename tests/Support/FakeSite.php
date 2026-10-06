@@ -7,6 +7,10 @@
 
 namespace UpdateLens\Tests\Support;
 
+use Throwable;
+use UpdateLens\Snapshot\ActionSchedulerArgsHasher;
+use UpdateLens\Snapshot\ActionSchedulerSnapshotBuilder;
+use UpdateLens\Snapshot\ActionSchedulerUnavailableException;
 use UpdateLens\Snapshot\AutoloadPolicy;
 use UpdateLens\Snapshot\CronArgsHasher;
 use UpdateLens\Snapshot\CronSnapshotBuilder;
@@ -16,7 +20,7 @@ use UpdateLens\Snapshot\OptionValueHasher;
 use UpdateLens\Update\PluginUpdateAnalyzer;
 
 /**
- * A fake `wp_options` table, `cron` option, salt and clock shared by several
+ * A fake `wp_options` table, `cron` option, Action Scheduler queue, salt and clock shared by several
  * "requests" (PluginUpdateAnalyzer instances) over one InMemoryAnalysisRepository.
  */
 final class FakeSite {
@@ -55,6 +59,29 @@ final class FakeSite {
 	 * @var string|null
 	 */
 	public $cron_salt = null;
+
+	/**
+	 * Fake Action Scheduler: null when not installed, a Throwable the provider
+	 * throws (e.g. an unsupported store), or active action rows (see
+	 * ActionSchedulerFixture::row()).
+	 *
+	 * @var array|Throwable|null
+	 */
+	public $action_scheduler = null;
+
+	/**
+	 * Secret used for Action Scheduler argument fingerprints; null means $salt.
+	 *
+	 * @var string|null
+	 */
+	public $action_scheduler_salt = null;
+
+	/**
+	 * Number of Action Scheduler snapshots attempted.
+	 *
+	 * @var int
+	 */
+	public $action_scheduler_captures = 0;
 
 	/**
 	 * Number of Cron snapshots attempted.
@@ -122,13 +149,26 @@ final class FakeSite {
 			return ( new CronSnapshotBuilder( new CronArgsHasher( null === $this->cron_salt ? $this->salt : $this->cron_salt ) ) )->build( $this->cron );
 		};
 
+		$capture_action_scheduler = function () {
+			++$this->action_scheduler_captures;
+			if ( null === $this->action_scheduler ) {
+				throw ActionSchedulerUnavailableException::not_installed();
+			}
+			if ( $this->action_scheduler instanceof Throwable ) {
+				throw $this->action_scheduler;
+			}
+
+			return ( new ActionSchedulerSnapshotBuilder( new ActionSchedulerArgsHasher( null === $this->action_scheduler_salt ? $this->salt : $this->action_scheduler_salt ) ) )->build( $this->action_scheduler );
+		};
+
 		return new PluginUpdateAnalyzer(
 			$this->repository,
 			$capture,
 			$capture_cron,
 			function () {
 				return $this->time;
-			}
+			},
+			$capture_action_scheduler
 		);
 	}
 

@@ -8,6 +8,7 @@
 namespace UpdateLens\Storage;
 
 use UpdateLens\Core\Plugin;
+use UpdateLens\Update\ActionSchedulerPhaseReason;
 use UpdateLens\Update\AnalysisStatus;
 use UpdateLens\Update\CronPhaseReason;
 use UpdateLens\Update\SettleOutcome;
@@ -26,8 +27,9 @@ final class Schema {
 	 *    immediate_snapshot, settle_deadline, settle_outcome.
 	 * 3: options columns prefixed `options_`; WP-Cron snapshot, diff and
 	 *    reason columns.
+	 * 4: Action Scheduler snapshot, diff and reason columns.
 	 */
-	const VERSION = 3;
+	const VERSION = 4;
 
 	/**
 	 * Column renames: current name => [ definition, earlier names, newest first ].
@@ -148,6 +150,24 @@ final class Schema {
 			);
 		}
 
+		if ( $upgrading && $installed < 4 ) {
+			// Finished analyses from before Action Scheduler observation never captured it.
+			// Open ones resolve when they end (no Action Scheduler BEFORE or IMMEDIATE snapshot).
+			// Options and Cron columns are not touched.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One-time schema upgrade.
+			$wpdb->query(
+				$wpdb->prepare(
+					'UPDATE %i SET action_scheduler_during_update_reason = %s, action_scheduler_post_update_reason = %s, action_scheduler_final_reason = %s WHERE status NOT IN (%s, %s)',
+					$table,
+					ActionSchedulerPhaseReason::NOT_CAPTURED,
+					ActionSchedulerPhaseReason::NOT_CAPTURED,
+					ActionSchedulerPhaseReason::NOT_CAPTURED,
+					AnalysisStatus::CAPTURED,
+					AnalysisStatus::AWAITING_SETTLE
+				)
+			);
+		}
+
 		update_option( self::VERSION_OPTION, self::VERSION, true );
 
 		return true;
@@ -209,6 +229,14 @@ final class Schema {
   cron_during_update_reason varchar(40) DEFAULT NULL,
   cron_post_update_reason varchar(40) DEFAULT NULL,
   cron_final_reason varchar(40) DEFAULT NULL,
+  action_scheduler_before_snapshot longtext DEFAULT NULL,
+  action_scheduler_immediate_snapshot longtext DEFAULT NULL,
+  action_scheduler_during_update_diff longtext DEFAULT NULL,
+  action_scheduler_post_update_diff longtext DEFAULT NULL,
+  action_scheduler_final_diff longtext DEFAULT NULL,
+  action_scheduler_during_update_reason varchar(40) DEFAULT NULL,
+  action_scheduler_post_update_reason varchar(40) DEFAULT NULL,
+  action_scheduler_final_reason varchar(40) DEFAULT NULL,
   error_code varchar(64) DEFAULT NULL,
   error_message text DEFAULT NULL,
   PRIMARY KEY  (id),

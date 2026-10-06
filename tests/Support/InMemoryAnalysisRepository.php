@@ -21,40 +21,67 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	 * Columns of a row, with defaults.
 	 */
 	const COLUMNS = array(
-		'id'                         => null,
-		'plugin_file'                => '',
-		'plugin_name'                => '',
-		'version_before'             => '',
-		'version_after'              => null,
-		'user_id'                    => 0,
-		'status'                     => '',
-		'active_plugin'              => null,
-		'settle_outcome'             => null,
-		'started_at'                 => '',
-		'updated_at'                 => '',
-		'settle_deadline'            => null,
-		'completed_at'               => null,
-		'options_before_snapshot'    => null,
-		'options_immediate_snapshot' => null,
-		'options_during_update_diff' => null,
-		'options_post_update_diff'   => null,
-		'options_final_diff'         => null,
-		'cron_before_snapshot'       => null,
-		'cron_immediate_snapshot'    => null,
-		'cron_during_update_diff'    => null,
-		'cron_post_update_diff'      => null,
-		'cron_final_diff'            => null,
-		'cron_during_update_reason'  => null,
-		'cron_post_update_reason'    => null,
-		'cron_final_reason'          => null,
-		'error_code'                 => null,
-		'error_message'              => null,
+		'id'                                    => null,
+		'plugin_file'                           => '',
+		'plugin_name'                           => '',
+		'version_before'                        => '',
+		'version_after'                         => null,
+		'user_id'                               => 0,
+		'status'                                => '',
+		'active_plugin'                         => null,
+		'settle_outcome'                        => null,
+		'started_at'                            => '',
+		'updated_at'                            => '',
+		'settle_deadline'                       => null,
+		'completed_at'                          => null,
+		'options_before_snapshot'               => null,
+		'options_immediate_snapshot'            => null,
+		'options_during_update_diff'            => null,
+		'options_post_update_diff'              => null,
+		'options_final_diff'                    => null,
+		'cron_before_snapshot'                  => null,
+		'cron_immediate_snapshot'               => null,
+		'cron_during_update_diff'               => null,
+		'cron_post_update_diff'                 => null,
+		'cron_final_diff'                       => null,
+		'cron_during_update_reason'             => null,
+		'cron_post_update_reason'               => null,
+		'cron_final_reason'                     => null,
+		'action_scheduler_before_snapshot'      => null,
+		'action_scheduler_immediate_snapshot'   => null,
+		'action_scheduler_during_update_diff'   => null,
+		'action_scheduler_post_update_diff'     => null,
+		'action_scheduler_final_diff'           => null,
+		'action_scheduler_during_update_reason' => null,
+		'action_scheduler_post_update_reason'   => null,
+		'action_scheduler_final_reason'         => null,
+		'error_code'                            => null,
+		'error_message'                         => null,
 	);
 
 	/**
 	 * Cron columns holding snapshot or diff JSON.
 	 */
 	const CRON_PAYLOAD_COLUMNS = array( 'cron_before_snapshot', 'cron_immediate_snapshot', 'cron_during_update_diff', 'cron_post_update_diff', 'cron_final_diff' );
+
+	/**
+	 * Action Scheduler columns holding snapshot or diff JSON.
+	 */
+	const ACTION_SCHEDULER_PAYLOAD_COLUMNS = array( 'action_scheduler_before_snapshot', 'action_scheduler_immediate_snapshot', 'action_scheduler_during_update_diff', 'action_scheduler_post_update_diff', 'action_scheduler_final_diff' );
+
+	/**
+	 * When true, a write that stores any Action Scheduler snapshot or diff throws.
+	 *
+	 * @var bool
+	 */
+	public $fail_action_scheduler_writes = false;
+
+	/**
+	 * Every write attempted (create + transition), in order, as column values.
+	 *
+	 * @var array<int, array<string, mixed>>
+	 */
+	public $attempted = array();
 
 	/**
 	 * When true, a write that stores any Cron snapshot or diff throws (e.g. a payload too large for the database).
@@ -79,11 +106,15 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	 */
 	private function write( array $values ) {
 		++$this->writes;
+		$this->attempted[] = $values;
 		if ( $this->fail_writes ) {
 			throw new RuntimeException( 'write failed' );
 		}
 		if ( $this->fail_cron_writes && array_filter( array_intersect_key( $values, array_flip( self::CRON_PAYLOAD_COLUMNS ) ), 'is_string' ) ) {
 			throw new RuntimeException( 'cron write failed' );
+		}
+		if ( $this->fail_action_scheduler_writes && array_filter( array_intersect_key( $values, array_flip( self::ACTION_SCHEDULER_PAYLOAD_COLUMNS ) ), 'is_string' ) ) {
+			throw new RuntimeException( 'action scheduler write failed' );
 		}
 	}
 

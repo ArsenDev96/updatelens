@@ -16,9 +16,9 @@ Initial snapshot sources:
 
 - `wp_options` incl. autoload size / autoloaded options — implemented (`Snapshot\OptionsSnapshotProvider`)
 - WP-Cron events — implemented and observed in every analysis (`Snapshot\CronSnapshotProvider`, `Diff\CronDiffBuilder`, `Update\CronObservation`), stored in the analyses table and shown in reports next to Options
-- Action Scheduler actions — snapshot and diff engine implemented as standalone backend logic (`Snapshot\ActionSchedulerSnapshotProvider`, `Diff\ActionSchedulerDiffBuilder`); not yet part of the lifecycle, storage, reports or UI
+- Action Scheduler actions — snapshot and diff engine (`Snapshot\ActionSchedulerSnapshotProvider`, `Diff\ActionSchedulerDiffBuilder`) observed in every analysis (`Update\ActionSchedulerObservation`) and stored in the analyses table; not yet exposed by the Reports API or the UI
 
-Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the WP-Cron snapshot and diff engines (observed, stored and reported with every analysis), the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
+Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the WP-Cron snapshot and diff engines (observed, stored and reported with every analysis), the Action Scheduler snapshot and diff engines (observed and stored with every analysis, not reported yet), the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
 
 ## Architecture boundaries
 
@@ -32,7 +32,7 @@ Current state: foundation (admin screen + status REST route), the `wp_options` s
   - `Admin/` – wp-admin screens and asset loading
   - `Rest/` – REST controllers
   - `Snapshot/` – capture safe state; `Diff/` – compare snapshots
-  - `Update/` – WordPress updater hooks (`PluginUpdateTracker`) and lifecycle rules (`PluginUpdateAnalyzer`, `CronObservation`, `UpdateClassifier`)
+  - `Update/` – WordPress updater hooks (`PluginUpdateTracker`) and lifecycle rules (`PluginUpdateAnalyzer`, `CronObservation`, `ActionSchedulerObservation`, `UpdateClassifier`)
   - `Storage/` – schema (`Schema`, `dbDelta`), SQL (`AnalysisRepository`), JSON persistence formats (`*Codec`)
   - `Report/` – safe read models of stored analyses for REST (`AnalysisReadModel`) and read access with lifecycle maintenance (`AnalysisReports`)
 - The admin app is TypeScript + React + Tailwind + shadcn/ui in `src/admin/`, built by Vite into `assets/admin/dist/`. There is no public/frontend app.
@@ -96,7 +96,7 @@ The plugin must stay distributable on WordPress.org:
 
 ## Action Scheduler snapshot and diff invariants
 
-- **Action Scheduler is its own signal**, separate from `wp_options` and WP-Cron: `Snapshot\ActionSchedulerSnapshotProvider` (WordPress/DB) → `ActionSchedulerSnapshotBuilder` (pure) → `ActionSchedulerSnapshot`; `Diff\ActionSchedulerDiffBuilder` → `ActionSchedulerDiff`. Not yet wired into the lifecycle, the analyses table, REST or the UI; integrate only in a task that asks for it.
+- **Action Scheduler is its own signal**, separate from `wp_options` and WP-Cron: `Snapshot\ActionSchedulerSnapshotProvider` (WordPress/DB) → `ActionSchedulerSnapshotBuilder` (pure) → `ActionSchedulerSnapshot`; `Diff\ActionSchedulerDiffBuilder` → `ActionSchedulerDiff`. Observed in the lifecycle and stored (see below); not yet in REST or the UI — expose it only in a task that asks for it.
 - **A snapshot is the active state only**: `pending` and `in-progress` actions (what Action Scheduler itself treats as existing: `as_has_scheduled_action()`, unique scheduling). Complete, failed and canceled rows are history (often hundreds of thousands, purged by Action Scheduler after 31 days), and logs and claims are operational data: never read them into snapshots or counts. An action that ran, failed or was canceled shows as removed; a recurring run (Action Scheduler stores the next run as a new row) shows as rescheduled.
 - **Bounded reads**: only the active rows, in `action_id`-cursor batches (`ActionSchedulerSnapshotProvider::BATCH_SIZE`), never OFFSET, never all rows; rows stream through a generator into the builder. Use Action Scheduler's existing indexes; never add indexes or other schema to third-party tables. Batches are not atomic (like the options snapshot); document rather than lock.
 - **Third-party tables are read-only**: only SELECT/SHOW. Never schedule, cancel, claim or run actions, call Action Scheduler's store or query API, initialize or migrate its schema, or call `ActionScheduler_Store::instance()` before `ActionScheduler::is_initialized()`.
@@ -114,10 +114,19 @@ The plugin must stay distributable on WordPress.org:
 - **Malformed Cron state disables Cron** for the phases that need that snapshot (`malformed_cron_state`); never skip records instead.
 - **Cron phase availability is independent.** during = BEFORE+IMMEDIATE, post = IMMEDIATE+SETTLED, final = BEFORE+SETTLED; a missing snapshot affects only its dependents (malformed IMMEDIATE → during/post unavailable, final still computed). A fingerprint-context mismatch affects only the pair compared.
 - `cron_*_reason` holds an `Update\CronPhaseReason` code (fixed codes, never messages). **Every Cron phase of a terminal analysis has exactly one of a diff or a reason**; in an open analysis a phase with neither is pending. The first cause wins: later lifecycle events never overwrite a resolved phase. Ending states map to `update_failed`, `analysis_abandoned`, `analysis_ended` (options failed/incompatible) or `settle_expired`; analyses from before schema 3 are `not_captured`.
-- Cron columns are written in the same statement as the options transition. If it fails, it is retried once without Cron payload (`CronObservation::without_payload()` → `storage_failed`), so Cron storage can never hold the options analysis back.
+- Cron columns are written in the same statement as the options transition. If it fails, it is retried without signal payload, one signal at a time (`PluginUpdateAnalyzer::attempts()`: all → without Action Scheduler → without Cron → without both; each signal's `without_payload()` → `storage_failed` for its own phases only), so neither signal's storage can hold the options analysis back or drop the other signal.
 - A failed update captures no IMMEDIATE Cron state; an expired settle window takes no late Cron snapshot.
 - **The backend preserves every observed Cron change**, including normal and core rescheduling (e.g. `wp_version_check` moving in the post-update phase): no ignore lists, no ownership filtering. De-emphasis belongs to presentation.
 - **Raw Cron arguments are never stored, logged or exposed.** Stored Cron snapshots keep `args_fingerprint` (internal); stored Cron diffs contain no fingerprints. Reports read Cron diffs and reasons, never Cron snapshots; History reads only SQL-computed recorded/has-changes flags of the Cron diff columns, never their content or the reasons.
+
+## Action Scheduler in the analysis lifecycle
+
+- **A third independent signal** (`Update\ActionSchedulerObservation`), captured right after Cron at BEFORE, IMMEDIATE and SETTLED. Same rules as Cron: never changes the global status, throws or blocks the update; failures only affect the phases that need the failing capture. No extra settle request or window.
+- **Absence is normal**: no Action Scheduler → every phase `not_installed`, never a failure. Provider reasons stay distinct (`Update\ActionSchedulerPhaseReason::from_unavailable()/from_malformed()`): `not_installed`, `unsupported_store`, `unsupported_schema`, `unsupported_schedule`, `malformed_action_scheduler_state`; `not_initialized` and `read_failed` are `snapshot_unavailable`. Keep the reason set finite (`ActionSchedulerPhaseReason::ALL`).
+- **A phase is available only if both of its captures are readable snapshots**; otherwise it gets the reason of the first capture that was not (first cause wins). Availability changes (e.g. not installed at BEFORE, available after) never produce invented added/removed diffs. Context mismatch affects only the pair compared (`fingerprint_context_changed`); options incompatibility stays global and unresolved Action Scheduler phases get `analysis_ended`.
+- `action_scheduler_*_reason` + diff: every phase of a terminal analysis has exactly one. Endings: `update_failed`, `analysis_abandoned`, `analysis_ended`, `settle_expired` (during diff kept, no late snapshot); analyses from before schema 4 are `not_captured` (open ones resolve the same way, no snapshots are fabricated).
+- Persist only via `Storage\ActionSchedulerSnapshotCodec` (temporary; records + context, never arguments, schedules, logs, claims or IDs) and `Storage\ActionSchedulerDiffCodec` (no fingerprints or context; counts and deltas validated). Not read by REST/History yet: `AnalysisRepository::REPORT_COLUMNS`/`history_columns()` must not include `action_scheduler_*` columns until a reporting task adds them.
+- Snapshot diffs cannot see an action that was queued and completed between two captures (it is in neither snapshot).
 
 ## Update lifecycle invariants
 
@@ -127,8 +136,8 @@ The plugin must stay distributable on WordPress.org:
 - Flow: `upgrader_pre_download` → BEFORE (`captured`); `upgrader_install_package_result` + `upgrader_process_complete` → IMMEDIATE + during-update diff (`awaiting_settle`) or `failed`; `shutdown` of a **later** wp-admin page request within the settle window → SETTLED + post-update and final diffs (`completed`). States: `Update\AnalysisStatus`; settle outcomes: `Update\SettleOutcome`.
 - **The update request's own shutdown never settles** (the analyzer remembers the analyses it created in this request). Ajax, REST, cron, CLI and frontend requests never settle. A request that activates/deactivates the analysed plugin does not settle it.
 - Before any other update starts, analyses awaiting settle from earlier requests are settled first (or expired, if past their deadline), so another update's changes never appear in their phases. Another update in the same request abandons that request's analysis.
-- **BEFORE and IMMEDIATE snapshots are temporary** (`options_*_snapshot`, `cron_*_snapshot`): cleared on every final state, in the same write. Final records keep metadata, status/error, settle outcome, the phase diffs and Cron phase reasons — never option values, Cron arguments or snapshots.
-- Columns are prefixed by signal (`options_*`, `cron_*`); the generic v1/v2 names are renamed by `Schema::RENAMES`.
+- **BEFORE and IMMEDIATE snapshots are temporary** (`options_*_snapshot`, `cron_*_snapshot`, `action_scheduler_*_snapshot`): cleared on every final state, in the same write. Final records keep metadata, status/error, settle outcome, the phase diffs and Cron/Action Scheduler phase reasons — never option values, Cron or Action Scheduler arguments, fingerprints or snapshots.
+- Columns are prefixed by signal (`options_*`, `cron_*`, `action_scheduler_*`); the generic v1/v2 names are renamed by `Schema::RENAMES`.
 - Persist snapshots/diffs only as versioned JSON via `Storage\*Codec` (never PHP `serialize()`); decoding validates everything. Stored errors use fixed messages and sanitized codes — never WordPress error messages (paths, URLs).
 - Every non-final analysis has a non-NULL `active_plugin` (unique), so there is at most one open analysis per plugin while history is kept. Transitions are compare-and-set on `status`.
 - Timestamps are UTC (`gmdate()`). Stale `captured` analyses (> `PluginUpdateAnalyzer::STALE_AFTER_SECONDS`) are abandoned on a later admin page request; no cron.

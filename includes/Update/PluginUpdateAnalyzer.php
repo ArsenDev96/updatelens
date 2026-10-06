@@ -11,6 +11,8 @@ use Throwable;
 use UnexpectedValueException;
 use UpdateLens\Diff\IncompatibleSnapshotsException;
 use UpdateLens\Diff\OptionsDiffBuilder;
+use UpdateLens\Snapshot\ActionSchedulerSnapshot;
+use UpdateLens\Snapshot\ActionSchedulerSnapshotProvider;
 use UpdateLens\Snapshot\CronSnapshot;
 use UpdateLens\Snapshot\CronSnapshotProvider;
 use UpdateLens\Snapshot\OptionsSnapshot;
@@ -26,11 +28,13 @@ defined( 'ABSPATH' ) || exit;
  * request → SETTLED, and stores the during-update, post-update and final
  * diffs (see ObservationPhase). Reports observed changes, not proven causes.
  *
- * Two independent signals are observed at the same moments: `wp_options`
- * drives the lifecycle and the analysis status; WP-Cron (CronObservation)
- * is captured right after it and never changes the status, blocks the
- * update or fails the options analysis. Its phases are available or carry
- * their own reason.
+ * Three signals are observed at the same moments: `wp_options` drives the
+ * lifecycle and the analysis status; WP-Cron (CronObservation) and Action
+ * Scheduler (ActionSchedulerObservation) are captured right after it, in
+ * that order, and never change the status, block the update or fail the
+ * options analysis. Their phases are available or carry their own reason,
+ * and a storage failure of one of them never drops the other's data (see
+ * transition()).
  *
  * Knows nothing about WordPress hooks (see PluginUpdateTracker). One instance
  * lives for one PHP request and remembers which analyses that request
@@ -102,6 +106,13 @@ final class PluginUpdateAnalyzer {
 	private $cron;
 
 	/**
+	 * Action Scheduler signal.
+	 *
+	 * @var ActionSchedulerObservation
+	 */
+	private $action_scheduler;
+
+	/**
 	 * Returns the current Unix time.
 	 *
 	 * @var callable
@@ -150,15 +161,18 @@ final class PluginUpdateAnalyzer {
 	 * @param callable           $capture      Returns a fresh OptionsSnapshot.
 	 * @param callable           $capture_cron Returns a fresh CronSnapshot.
 	 * @param callable|null      $now          Returns the current Unix time. Default time().
+	 * @param callable|null      $capture_action_scheduler Returns a fresh ActionSchedulerSnapshot.
+	 *                                         Null: no Action Scheduler (`not_installed`).
 	 */
-	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null ) {
-		$this->repository     = $repository;
-		$this->capture        = $capture;
-		$this->cron           = new CronObservation( $capture_cron );
-		$this->now            = null === $now ? 'time' : $now;
-		$this->snapshot_codec = new OptionsSnapshotCodec();
-		$this->diff_codec     = new OptionsDiffCodec();
-		$this->diff_builder   = new OptionsDiffBuilder();
+	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null ) {
+		$this->repository       = $repository;
+		$this->capture          = $capture;
+		$this->cron             = new CronObservation( $capture_cron );
+		$this->action_scheduler = new ActionSchedulerObservation( $capture_action_scheduler );
+		$this->now              = null === $now ? 'time' : $now;
+		$this->snapshot_codec   = new OptionsSnapshotCodec();
+		$this->diff_codec       = new OptionsDiffCodec();
+		$this->diff_builder     = new OptionsDiffBuilder();
 	}
 
 	/**
@@ -185,7 +199,15 @@ final class PluginUpdateAnalyzer {
 			return $cron_provider->capture();
 		};
 
-		return new self( new AnalysisRepository( $wpdb ), $capture, $capture_cron );
+		$action_scheduler_provider = null;
+		$capture_action_scheduler  = static function () use ( &$action_scheduler_provider ) {
+			if ( null === $action_scheduler_provider ) {
+				$action_scheduler_provider = ActionSchedulerSnapshotProvider::create();
+			}
+			return $action_scheduler_provider->capture();
+		};
+
+		return new self( new AnalysisRepository( $wpdb ), $capture, $capture_cron, null, $capture_action_scheduler );
 	}
 
 	/**
@@ -236,14 +258,15 @@ final class PluginUpdateAnalyzer {
 			}
 			return;
 		}
-		$cron_snapshot = $this->cron->capture();
+		$cron_snapshot             = $this->cron->capture();
+		$action_scheduler_snapshot = $this->action_scheduler->capture();
 
 		foreach ( $to_settle as $row ) {
-			$this->settle( $row, $snapshot, $cron_snapshot, SettleOutcome::NEXT_UPDATE );
+			$this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::NEXT_UPDATE );
 		}
 
 		if ( null !== $plugin_file ) {
-			$this->begin( $plugin_file, $plugin, $user_id, $snapshot, $cron_snapshot );
+			$this->begin( $plugin_file, $plugin, $user_id, $snapshot, $cron_snapshot, $action_scheduler_snapshot );
 		}
 	}
 
@@ -252,7 +275,7 @@ final class PluginUpdateAnalyzer {
 	 *
 	 * On success, stores the during-update diffs (BEFORE → IMMEDIATE) and keeps
 	 * the snapshots until the settle phase ends. A failed update captures no
-	 * Cron state.
+	 * Cron or Action Scheduler state.
 	 *
 	 * @param string      $plugin_file   Plugin basename.
 	 * @param string|null $error_code    Null if the update succeeded, else a WordPress error code.
@@ -284,10 +307,11 @@ final class PluginUpdateAnalyzer {
 		}
 
 		try {
-			$immediate          = call_user_func( $this->capture );
-			$cron_immediate     = $this->cron->capture();
-			$during_update_json = $this->diff_codec->encode( $this->diff_builder->build( $before, $immediate ) );
-			$immediate_json     = $this->snapshot_codec->encode( $immediate );
+			$immediate                  = call_user_func( $this->capture );
+			$cron_immediate             = $this->cron->capture();
+			$action_scheduler_immediate = $this->action_scheduler->capture();
+			$during_update_json         = $this->diff_codec->encode( $this->diff_builder->build( $before, $immediate ) );
+			$immediate_json             = $this->snapshot_codec->encode( $immediate );
 		} catch ( IncompatibleSnapshotsException $e ) {
 			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED, SettleOutcome::NOT_APPLICABLE );
 			return;
@@ -307,7 +331,8 @@ final class PluginUpdateAnalyzer {
 				'settle_deadline'            => self::datetime( $now + self::SETTLE_WINDOW_SECONDS ),
 				'updated_at'                 => self::datetime( $now ),
 			),
-			$this->cron->immediate( $row, $cron_immediate )
+			$this->cron->immediate( $row, $cron_immediate ),
+			$this->action_scheduler->immediate( $row, $action_scheduler_immediate )
 		);
 	}
 
@@ -341,8 +366,9 @@ final class PluginUpdateAnalyzer {
 			return;
 		}
 
-		$snapshot      = null;
-		$cron_snapshot = null;
+		$snapshot                  = null;
+		$cron_snapshot             = null;
+		$action_scheduler_snapshot = null;
 		foreach ( $open as $row ) {
 			if ( in_array( (int) $row['id'], $this->request_analyses, true ) ) {
 				continue;
@@ -370,9 +396,10 @@ final class PluginUpdateAnalyzer {
 				} catch ( Throwable $e ) {
 					return; // Try again on a later request within the window.
 				}
-				$cron_snapshot = $this->cron->capture();
+				$cron_snapshot             = $this->cron->capture();
+				$action_scheduler_snapshot = $this->action_scheduler->capture();
 			}
-			$this->settle( $row, $snapshot, $cron_snapshot, SettleOutcome::ADMIN_SHUTDOWN );
+			$this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::ADMIN_SHUTDOWN );
 		}
 	}
 
@@ -404,18 +431,20 @@ final class PluginUpdateAnalyzer {
 	/**
 	 * Create the analysis with its BEFORE snapshots.
 	 *
-	 * If the row cannot be written with the Cron snapshot, it is written
-	 * without it (Cron phases marked `storage_failed`), so Cron storage never
-	 * prevents the options analysis.
+	 * If the row cannot be written with the Cron or Action Scheduler
+	 * snapshot, it is written without the failing signal's payload (its
+	 * phases marked `storage_failed`, see attempts()), so neither signal's
+	 * storage ever prevents the options analysis or drops the other signal.
 	 *
-	 * @param string              $plugin_file   Plugin basename.
-	 * @param array               $plugin        Plugin header data.
-	 * @param int                 $user_id       User ID.
-	 * @param OptionsSnapshot     $snapshot      BEFORE options snapshot.
-	 * @param CronSnapshot|string $cron_snapshot BEFORE Cron snapshot or the reason it is unavailable.
+	 * @param string                         $plugin_file   Plugin basename.
+	 * @param array                          $plugin        Plugin header data.
+	 * @param int                            $user_id       User ID.
+	 * @param OptionsSnapshot                $snapshot      BEFORE options snapshot.
+	 * @param CronSnapshot|string            $cron_snapshot BEFORE Cron snapshot or the reason it is unavailable.
+	 * @param ActionSchedulerSnapshot|string $action_scheduler_snapshot BEFORE Action Scheduler snapshot or the reason it is unavailable.
 	 * @return void
 	 */
-	private function begin( $plugin_file, array $plugin, $user_id, OptionsSnapshot $snapshot, $cron_snapshot ) {
+	private function begin( $plugin_file, array $plugin, $user_id, OptionsSnapshot $snapshot, $cron_snapshot, $action_scheduler_snapshot ) {
 		try {
 			$open = $this->repository->find_open_for_plugin( $plugin_file );
 			if ( null !== $open ) {
@@ -425,8 +454,8 @@ final class PluginUpdateAnalyzer {
 				$this->finish( $open, AnalysisStatus::ABANDONED, AnalysisStatus::CAPTURED === $open['status'] ? self::ERROR_STALE : self::ERROR_ANOTHER_UPDATE_STARTED, SettleOutcome::NOT_APPLICABLE );
 			}
 
-			$now  = self::datetime( $this->now() );
-			$row  = array(
+			$now              = self::datetime( $this->now() );
+			$row              = array(
 				'plugin_file'             => $plugin_file,
 				'plugin_name'             => isset( $plugin['name'] ) ? (string) $plugin['name'] : '',
 				'version_before'          => isset( $plugin['version'] ) ? (string) $plugin['version'] : '',
@@ -437,16 +466,20 @@ final class PluginUpdateAnalyzer {
 				'updated_at'              => $now,
 				'options_before_snapshot' => $this->snapshot_codec->encode( $snapshot ),
 			);
-			$cron = $this->cron->before( $cron_snapshot );
+			$cron             = $this->cron->before( $cron_snapshot );
+			$action_scheduler = $this->action_scheduler->before( $action_scheduler_snapshot );
 
-			try {
-				$id = $this->repository->create( $row + $cron );
-			} catch ( Throwable $e ) {
-				$without_cron = CronObservation::without_payload( $cron );
-				if ( $without_cron === $cron ) {
-					return; // Not caused by Cron data; no analysis for this update.
+			$id = null;
+			foreach ( self::attempts( $row, $cron, $action_scheduler ) as $attempt ) {
+				try {
+					$id = $this->repository->create( $attempt );
+					break;
+				} catch ( Throwable $e ) {
+					continue; // Retry without the next signal payload, if any is left.
 				}
-				$id = $this->repository->create( $row + $without_cron );
+			}
+			if ( null === $id ) {
+				return; // No analysis for this update.
 			}
 		} catch ( Throwable $e ) {
 			return; // No analysis for this update; the update itself continues.
@@ -459,16 +492,17 @@ final class PluginUpdateAnalyzer {
 	 * Store the post-update (IMMEDIATE → SETTLED) and final (BEFORE → SETTLED)
 	 * diffs and complete the analysis.
 	 *
-	 * The Cron post-update and final phases are resolved independently in the
-	 * same write.
+	 * The Cron and Action Scheduler post-update and final phases are resolved
+	 * independently in the same write.
 	 *
-	 * @param array               $open         Open analysis in `awaiting_settle` (metadata columns).
-	 * @param OptionsSnapshot     $settled      Settled options snapshot.
-	 * @param CronSnapshot|string $cron_settled Settled Cron snapshot or the reason it is unavailable.
-	 * @param string              $outcome      SettleOutcome::ADMIN_SHUTDOWN or NEXT_UPDATE.
+	 * @param array                          $open         Open analysis in `awaiting_settle` (metadata columns).
+	 * @param OptionsSnapshot                $settled      Settled options snapshot.
+	 * @param CronSnapshot|string            $cron_settled Settled Cron snapshot or the reason it is unavailable.
+	 * @param ActionSchedulerSnapshot|string $action_scheduler_settled Settled Action Scheduler snapshot or the reason it is unavailable.
+	 * @param string                         $outcome      SettleOutcome::ADMIN_SHUTDOWN or NEXT_UPDATE.
 	 * @return void
 	 */
-	private function settle( array $open, OptionsSnapshot $settled, $cron_settled, $outcome ) {
+	private function settle( array $open, OptionsSnapshot $settled, $cron_settled, $action_scheduler_settled, $outcome ) {
 		try {
 			$row = $this->repository->find( (int) $open['id'] );
 		} catch ( Throwable $e ) {
@@ -505,7 +539,8 @@ final class PluginUpdateAnalyzer {
 				'options_post_update_diff' => $post_update_json,
 				'options_final_diff'       => $final_json,
 			) + $this->closing_changes( $outcome ),
-			$this->cron->settle( $row, $cron_settled )
+			$this->cron->settle( $row, $cron_settled ),
+			$this->action_scheduler->settle( $row, $action_scheduler_settled )
 		);
 	}
 
@@ -513,13 +548,14 @@ final class PluginUpdateAnalyzer {
 	 * Complete an analysis whose settle window passed without a settled snapshot.
 	 *
 	 * The during-update diffs stay; options post-update and final diffs remain
-	 * NULL and unresolved Cron phases get `settle_expired`.
+	 * NULL and unresolved Cron and Action Scheduler phases get `settle_expired`.
+	 * No late snapshot is taken.
 	 *
 	 * @param array $row Open analysis in `awaiting_settle`.
 	 * @return void
 	 */
 	private function expire( array $row ) {
-		$row = $this->with_cron_columns( $row );
+		$row = $this->with_signal_columns( $row );
 		if ( null === $row ) {
 			return;
 		}
@@ -527,7 +563,8 @@ final class PluginUpdateAnalyzer {
 		$this->transition(
 			$row,
 			array( 'status' => AnalysisStatus::COMPLETED ) + $this->closing_changes( SettleOutcome::EXPIRED ),
-			$this->cron->close( $row, CronPhaseReason::SETTLE_EXPIRED )
+			$this->cron->close( $row, CronPhaseReason::SETTLE_EXPIRED ),
+			$this->action_scheduler->close( $row, ActionSchedulerPhaseReason::SETTLE_EXPIRED )
 		);
 	}
 
@@ -596,7 +633,7 @@ final class PluginUpdateAnalyzer {
 	 * @return void
 	 */
 	private function finish( array $row, $status, $error_code, $outcome ) {
-		$row = $this->with_cron_columns( $row );
+		$row = $this->with_signal_columns( $row );
 		if ( null === $row ) {
 			return;
 		}
@@ -608,7 +645,8 @@ final class PluginUpdateAnalyzer {
 				'error_code'    => $error_code,
 				'error_message' => array_key_exists( $error_code, self::ERROR_MESSAGES ) ? self::ERROR_MESSAGES[ $error_code ] : 'The WordPress update did not succeed.',
 			) + $this->closing_changes( $outcome ),
-			$this->cron->close( $row, self::cron_reason( $status, $error_code ) )
+			$this->cron->close( $row, self::cron_reason( $status, $error_code ) ),
+			$this->action_scheduler->close( $row, self::action_scheduler_reason( $status, $error_code ) )
 		);
 	}
 
@@ -631,16 +669,35 @@ final class PluginUpdateAnalyzer {
 	}
 
 	/**
-	 * The analysis with its Cron columns, re-read if only metadata was loaded.
+	 * Reason for Action Scheduler phases still unresolved when an analysis
+	 * ends unsuccessfully: the same rule as for Cron.
+	 *
+	 * @param string $status     Final status.
+	 * @param string $error_code Error code.
+	 * @return string ActionSchedulerPhaseReason.
+	 */
+	private static function action_scheduler_reason( $status, $error_code ) {
+		if ( AnalysisStatus::ABANDONED === $status ) {
+			return ActionSchedulerPhaseReason::ANALYSIS_ABANDONED;
+		}
+		if ( AnalysisStatus::FAILED === $status && ! in_array( $error_code, array( self::ERROR_ANALYSIS_FAILED, self::ERROR_SNAPSHOT_CORRUPT ), true ) ) {
+			return ActionSchedulerPhaseReason::UPDATE_FAILED;
+		}
+
+		return ActionSchedulerPhaseReason::ANALYSIS_ENDED;
+	}
+
+	/**
+	 * The analysis with its Cron and Action Scheduler columns, re-read if only metadata was loaded.
 	 *
 	 * Null if it changed status meanwhile (the transition would not apply).
 	 * If it cannot be read, the metadata row is returned: the analysis still
-	 * ends, and only its Cron snapshots are cleared.
+	 * ends, and only its Cron and Action Scheduler snapshots are cleared.
 	 *
 	 * @param array $row Analysis (metadata or full row).
 	 * @return array|null
 	 */
-	private function with_cron_columns( array $row ) {
+	private function with_signal_columns( array $row ) {
 		if ( array_key_exists( CronObservation::BEFORE_SNAPSHOT, $row ) ) {
 			return $row;
 		}
@@ -656,8 +713,9 @@ final class PluginUpdateAnalyzer {
 
 	/**
 	 * Columns set on every final state: outcome, timestamps, and removal of the
-	 * temporary options snapshots and the open-analysis marker. Cron snapshots
-	 * are removed by the CronObservation changes of the same write.
+	 * temporary options snapshots and the open-analysis marker. Cron and
+	 * Action Scheduler snapshots are removed by their observations' changes of
+	 * the same write.
 	 *
 	 * @param string $outcome Settle outcome.
 	 * @return array<string, mixed>
@@ -678,31 +736,64 @@ final class PluginUpdateAnalyzer {
 	/**
 	 * Apply a transition from the row's current status; storage errors are swallowed.
 	 *
-	 * Cron changes are written in the same statement. If it fails, it is
-	 * retried once without Cron payload (CronObservation::without_payload()),
-	 * so Cron data can never keep the options analysis from moving on.
+	 * Cron and Action Scheduler changes are written in the same statement. If
+	 * it fails, it is retried without signal payload, one signal at a time
+	 * (attempts()), so neither signal's data can keep the options analysis from
+	 * moving on, and one signal's failure never drops the other's data.
 	 *
 	 * @param array $row          Analysis.
 	 * @param array $changes      Column values.
 	 * @param array $cron_changes Cron column values.
+	 * @param array $action_scheduler_changes Action Scheduler column values.
 	 * @return void
 	 */
-	private function transition( array $row, array $changes, array $cron_changes = array() ) {
-		try {
-			$this->repository->transition( (int) $row['id'], $row['status'], $changes + $cron_changes );
-			return;
-		} catch ( Throwable $e ) {
-			$without_cron = CronObservation::without_payload( $cron_changes );
-			if ( $without_cron === $cron_changes ) {
-				return; // Left open; a later request settles, expires or abandons it.
+	private function transition( array $row, array $changes, array $cron_changes = array(), array $action_scheduler_changes = array() ) {
+		foreach ( self::attempts( $changes, $cron_changes, $action_scheduler_changes ) as $attempt ) {
+			try {
+				$this->repository->transition( (int) $row['id'], $row['status'], $attempt );
+				return;
+			} catch ( Throwable $e ) {
+				continue; // Retry without the next signal payload, if any is left.
+			}
+		}
+		// All attempts failed: left open; a later request settles, expires or abandons it.
+	}
+
+	/**
+	 * Column sets to write, in order, until one succeeds.
+	 *
+	 * First everything. Then without the Action Scheduler payload (usually the
+	 * largest), keeping Cron; then without the Cron payload, keeping Action
+	 * Scheduler; then without both. A signal without payload in this write is
+	 * never stripped, and duplicate sets are skipped, so a write that failed
+	 * for another reason is not retried pointlessly. Options columns and the
+	 * transition itself are the same in every attempt: a signal's
+	 * `without_payload()` only marks its own phases `storage_failed`.
+	 *
+	 * @param array $changes                  Options and lifecycle column values.
+	 * @param array $cron_changes             Cron column values.
+	 * @param array $action_scheduler_changes Action Scheduler column values.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private static function attempts( array $changes, array $cron_changes, array $action_scheduler_changes ) {
+		$cron_fallback             = CronObservation::without_payload( $cron_changes );
+		$action_scheduler_fallback = ActionSchedulerObservation::without_payload( $action_scheduler_changes );
+
+		$attempts = array();
+		foreach (
+			array(
+				$changes + $cron_changes + $action_scheduler_changes,
+				$changes + $cron_changes + $action_scheduler_fallback,
+				$changes + $cron_fallback + $action_scheduler_changes,
+				$changes + $cron_fallback + $action_scheduler_fallback,
+			) as $attempt
+		) {
+			if ( ! in_array( $attempt, $attempts, true ) ) {
+				$attempts[] = $attempt;
 			}
 		}
 
-		try {
-			$this->repository->transition( (int) $row['id'], $row['status'], $changes + $without_cron );
-		} catch ( Throwable $e ) {
-			return; // Left open; a later request settles, expires or abandons it.
-		}
+		return $attempts;
 	}
 
 	/**

@@ -10,6 +10,8 @@ namespace UpdateLens\Tests\Unit\Storage;
 use PHPUnit\Framework\TestCase;
 use UpdateLens\Storage\AnalysisRepository;
 use UpdateLens\Storage\Schema;
+use UpdateLens\Update\ActionSchedulerObservation;
+use UpdateLens\Update\ActionSchedulerPhaseReason;
 use UpdateLens\Update\CronObservation;
 
 /**
@@ -32,7 +34,7 @@ final class SchemaTest extends TestCase {
 	 * Version 3 columns: provider-prefixed, without obsolete v1/v2 names.
 	 */
 	public function test_columns() {
-		$this->assertSame( 3, Schema::VERSION );
+		$this->assertSame( 4, Schema::VERSION );
 		$this->assertSame(
 			array(
 				'id',
@@ -61,6 +63,14 @@ final class SchemaTest extends TestCase {
 				'cron_during_update_reason',
 				'cron_post_update_reason',
 				'cron_final_reason',
+				'action_scheduler_before_snapshot',
+				'action_scheduler_immediate_snapshot',
+				'action_scheduler_during_update_diff',
+				'action_scheduler_post_update_diff',
+				'action_scheduler_final_diff',
+				'action_scheduler_during_update_reason',
+				'action_scheduler_post_update_reason',
+				'action_scheduler_final_reason',
 				'error_code',
 				'error_message',
 			),
@@ -134,6 +144,36 @@ final class SchemaTest extends TestCase {
 		}
 
 		$this->assertSame( array(), array_diff( $columns, $this->columns() ) );
+	}
+
+	/**
+	 * The Action Scheduler columns the lifecycle writes exist in the table, with full names.
+	 */
+	public function test_action_scheduler_observation_columns_exist() {
+		$columns = array( ActionSchedulerObservation::BEFORE_SNAPSHOT, ActionSchedulerObservation::IMMEDIATE_SNAPSHOT );
+		foreach ( ActionSchedulerObservation::PHASES as $phase_columns ) {
+			$columns = array_merge( $columns, $phase_columns );
+		}
+
+		$this->assertCount( 8, $columns );
+		$this->assertSame( array(), array_diff( $columns, $this->columns() ) );
+		foreach ( $columns as $column ) {
+			$this->assertStringStartsWith( 'action_scheduler_', $column );
+		}
+		$this->assertStringContainsString( 'action_scheduler_final_reason varchar(40) DEFAULT NULL', Schema::analyses_table_sql( 'wp_updatelens_analyses', '' ) );
+		foreach ( ActionSchedulerPhaseReason::ALL as $reason ) {
+			$this->assertLessThanOrEqual( 40, strlen( $reason ), $reason );
+		}
+	}
+
+	/**
+	 * Action Scheduler is not exposed yet: report and history queries never read its columns.
+	 */
+	public function test_reports_do_not_read_action_scheduler_columns() {
+		foreach ( array( AnalysisRepository::REPORT_COLUMNS, AnalysisRepository::history_columns(), AnalysisRepository::OPEN_COLUMNS ) as $columns ) {
+			$this->assertStringNotContainsString( 'action_scheduler', $columns );
+		}
+		$this->assertSame( array(), preg_grep( '/^action_scheduler_/', array_keys( AnalysisRepository::HISTORY_DIFFS ) ) );
 	}
 
 	/**

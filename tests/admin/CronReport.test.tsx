@@ -1,4 +1,5 @@
 import apiFetch from '@wordpress/api-fetch';
+import { setLocaleData } from '@wordpress/i18n';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -202,6 +203,41 @@ describe( 'WP-Cron in reports', () => {
 		expect( document.body ).not.toHaveTextContent(
 			/caused|created by|plugin rescheduled|warning|danger|regression/i
 		);
+	} );
+
+	it( 'uses translated duration units for movements and intervals', async () => {
+		setLocaleData(
+			{
+				'': {
+					domain: 'updatelens',
+					plural_forms: 'nplurals=2; plural=(n != 1);',
+				},
+				'%s hour': [ '%s xhour', '%s xhours' ],
+			},
+			'updatelens'
+		);
+		renderReport( COMPLETED );
+		await openCron( /After update/ );
+
+		const rows = within(
+			within( signalPanel() ).getByRole( 'region', {
+				name: 'Rescheduled (2)',
+			} )
+		).getAllByRole( 'listitem' );
+		expect( rows[ 0 ] ).toHaveTextContent( '(+2 xhours)' );
+		expect( rows[ 1 ] ).toHaveTextContent( '(+1 xhour)' );
+
+		await openCron( /Net result/ );
+		const task = within( signalPanel() )
+			.getByText( 'ul_fixture_task_1.5.0' )
+			.closest( 'li' )!;
+		expect( task ).toHaveTextContent( /Interval\s*1 xhour/ );
+		const once = within( signalPanel() )
+			.getByText( 'ul_fixture_update_once' )
+			.closest( 'li' )!;
+		expect( once ).toHaveTextContent( 'One-time' );
+		expect( once ).not.toHaveTextContent( /xhour|Interval/ );
+		expect( document.body ).not.toHaveTextContent( /\d hours?\b/ );
 	} );
 
 	it( 'renders recurrence changes and one-time to recurring', async () => {

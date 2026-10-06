@@ -3,7 +3,9 @@
  * are never changed; they are only formatted for display.
  *
  * `locale` and `timeZone` default to the browser's; tests pass fixed values.
+ * Words (duration units) come from UpdateLens translations, not from `locale`.
  */
+import { _n, sprintf } from '@wordpress/i18n';
 
 const BYTE_UNITS = [ 'B', 'KB', 'MB', 'GB', 'TB' ];
 
@@ -137,8 +139,10 @@ export function formatDateTime(
 	} ).format( date );
 }
 
+type DurationUnit = 'day' | 'hour' | 'minute' | 'second';
+
 /** Units for durations, largest first, with their length in seconds. */
-const DURATION_UNITS: Array< [ string, number ] > = [
+const DURATION_UNITS: Array< [ DurationUnit, number ] > = [
 	[ 'day', 86400 ],
 	[ 'hour', 3600 ],
 	[ 'minute', 60 ],
@@ -146,24 +150,69 @@ const DURATION_UNITS: Array< [ string, number ] > = [
 ];
 
 /**
+ * Translated "<number> <unit>" phrase. Each unit is a literal `_n()` call so
+ * the strings are extracted for translation.
+ *
+ * @param unit   Unit.
+ * @param count  Rounded value, for choosing the plural form.
+ * @param number Formatted value.
+ */
+function durationUnitText(
+	unit: DurationUnit,
+	count: number,
+	number: string
+): string {
+	switch ( unit ) {
+		case 'day':
+			return sprintf(
+				/* translators: %s: number of days, e.g. "7" or "1.5". */
+				_n( '%s day', '%s days', count, 'updatelens' ),
+				number
+			);
+		case 'hour':
+			return sprintf(
+				/* translators: %s: number of hours, e.g. "2" or "1.5". */
+				_n( '%s hour', '%s hours', count, 'updatelens' ),
+				number
+			);
+		case 'minute':
+			return sprintf(
+				/* translators: %s: number of minutes, e.g. "5" or "1.5". */
+				_n( '%s minute', '%s minutes', count, 'updatelens' ),
+				number
+			);
+		default:
+			return sprintf(
+				/* translators: %s: number of seconds, e.g. "45". */
+				_n( '%s second', '%s seconds', count, 'updatelens' ),
+				number
+			);
+	}
+}
+
+/**
  * Duration in the largest fitting unit, at most one decimal: `1 hour`,
- * `1.5 hours`, `7 days`.
+ * `1.5 hours`, `7 days`. Unit words are UpdateLens translations (the
+ * wp-admin language), never the browser's; only the number uses `locale`.
  *
  * @param seconds Duration in seconds (the sign is ignored).
- * @param locale  Locale.
+ * @param locale  Locale for the number.
  */
 export function formatDuration( seconds: number, locale?: string ): string {
 	const value = Math.abs( seconds );
 	const [ unit, size ] = DURATION_UNITS.find(
 		( [ , length ] ) => value >= length
 	) ?? [ 'second', 1 ];
+	// The displayed value (one decimal) decides singular/plural: 1 → "1 hour".
+	const count = Math.round( ( value / size ) * 10 ) / 10;
 
-	return new Intl.NumberFormat( locale, {
-		style: 'unit',
+	return durationUnitText(
 		unit,
-		unitDisplay: 'long',
-		maximumFractionDigits: 1,
-	} ).format( value / size );
+		count,
+		new Intl.NumberFormat( locale, {
+			maximumFractionDigits: 1,
+		} ).format( count )
+	);
 }
 
 /**

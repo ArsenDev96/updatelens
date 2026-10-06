@@ -1,3 +1,4 @@
+import { setLocaleData } from '@wordpress/i18n';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -286,15 +287,19 @@ describe( 'routes', () => {
 
 describe( 'durations', () => {
 	it.each( [
-		[ 60, '1 minute' ],
-		[ 3600, '1 hour' ],
-		[ 7200, '2 hours' ],
-		[ 86400, '1 day' ],
-		[ 604800, '7 days' ],
-		[ 5400, '1.5 hours' ],
-		[ 43200, '12 hours' ],
+		[ 1, '1 second' ],
 		[ 45, '45 seconds' ],
+		[ 60, '1 minute' ],
+		[ 120, '2 minutes' ],
 		[ 300, '5 minutes' ],
+		[ 3600, '1 hour' ],
+		[ 5400, '1.5 hours' ],
+		[ 7200, '2 hours' ],
+		[ 43200, '12 hours' ],
+		[ 86400, '1 day' ],
+		[ 172800, '2 days' ],
+		[ 604800, '7 days' ],
+		[ 3601, '1 hour' ],
 	] )( '%d seconds → %s', ( seconds, text ) => {
 		expect( formatDuration( seconds, 'en' ) ).toBe( text );
 	} );
@@ -304,7 +309,60 @@ describe( 'durations', () => {
 		expect( formatDurationDelta( -1800, 'en' ) ).toBe(
 			`${ MINUS }30 minutes`
 		);
+		expect( formatDurationDelta( 172800, 'en' ) ).toBe( '+2 days' );
 		expect( formatDurationDelta( 0, 'en' ) ).toBeNull();
+	} );
+
+	it( 'takes unit words from UpdateLens translations, not the number locale', () => {
+		// German number formatting, untranslated (English) UI.
+		expect( formatDuration( 5400, 'de' ) ).toBe( '1,5 hours' );
+		expect( formatDuration( 300, 'hy-AM' ) ).toBe( '5 minutes' );
+		// Default locale (the host's): the words stay English.
+		expect( formatDuration( 300 ) ).toBe( '5 minutes' );
+	} );
+
+	it( 'uses translated unit words with their plural forms', () => {
+		setLocaleData(
+			{
+				'': {
+					domain: 'updatelens',
+					plural_forms: 'nplurals=2; plural=(n != 1);',
+				},
+				'%s second': [ '%s xsec', '%s xsecs' ],
+				'%s minute': [ '%s xmin', '%s xmins' ],
+				'%s hour': [ '%s xhour', '%s xhours' ],
+				'%s day': [ '%s xday', '%s xdays' ],
+			},
+			'updatelens'
+		);
+
+		expect( formatDuration( 1, 'en' ) ).toBe( '1 xsec' );
+		expect( formatDuration( 60, 'en' ) ).toBe( '1 xmin' );
+		expect( formatDuration( 300, 'en' ) ).toBe( '5 xmins' );
+		expect( formatDuration( 3600, 'en' ) ).toBe( '1 xhour' );
+		expect( formatDuration( 5400, 'en' ) ).toBe( '1.5 xhours' );
+		expect( formatDuration( 86400, 'en' ) ).toBe( '1 xday' );
+		expect( formatDuration( 604800, 'en' ) ).toBe( '7 xdays' );
+		expect( formatDurationDelta( -1800, 'en' ) ).toBe(
+			`${ MINUS }30 xmins`
+		);
+		expect( formatDuration( 300, 'hy-AM' ) ).toBe( '5 xmins' );
+		// Observation-window copy goes through the same formatter.
+		expect(
+			unavailableReasonText( 'settle_expired', 300 ).description
+		).toContain( 'within 5 xmins of the update' );
+		expect(
+			cronUnavailableReasonText( 'settle_expired', 300 ).description
+		).toContain( 'within 5 xmins of the update' );
+	} );
+
+	it( 'renders the observation window from the API value in English', () => {
+		expect(
+			unavailableReasonText( 'settle_expired', 300 ).description
+		).toContain( 'within 5 minutes of the update' );
+		expect(
+			unavailableReasonText( 'settle_expired', 600 ).description
+		).toContain( 'within 10 minutes of the update' );
 	} );
 
 	it( 'formats Unix timestamps like API timestamps', () => {

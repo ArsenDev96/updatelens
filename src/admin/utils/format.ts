@@ -103,3 +103,73 @@ export function formatDateTime(
 		timeZone: options.timeZone,
 	} ).format( date );
 }
+
+/** Units for durations, largest first, with their length in seconds. */
+const DURATION_UNITS: Array< [ string, number ] > = [
+	[ 'day', 86400 ],
+	[ 'hour', 3600 ],
+	[ 'minute', 60 ],
+	[ 'second', 1 ],
+];
+
+/**
+ * Duration in the largest fitting unit, at most one decimal: `1 hour`,
+ * `1.5 hours`, `7 days`.
+ *
+ * @param seconds Duration in seconds (the sign is ignored).
+ * @param locale  Locale.
+ */
+export function formatDuration( seconds: number, locale?: string ): string {
+	const value = Math.abs( seconds );
+	const [ unit, size ] = DURATION_UNITS.find(
+		( [ , length ] ) => value >= length
+	) ?? [ 'second', 1 ];
+
+	return new Intl.NumberFormat( locale, {
+		style: 'unit',
+		unit,
+		unitDisplay: 'long',
+		maximumFractionDigits: 1,
+	} ).format( value / size );
+}
+
+/**
+ * Signed duration: `+1 hour`, `−30 minutes`; null for no movement.
+ *
+ * @param seconds Signed seconds (after - before).
+ * @param locale  Locale.
+ */
+export function formatDurationDelta(
+	seconds: number,
+	locale?: string
+): string | null {
+	if ( seconds === 0 ) {
+		return null;
+	}
+	return ( seconds > 0 ? '+' : MINUS ) + formatDuration( seconds, locale );
+}
+
+/**
+ * Unix timestamp (UTC seconds) in local date and time, like formatDateTime().
+ *
+ * @param seconds Unix timestamp.
+ * @param options Locale and time zone (default: the browser's).
+ */
+export function formatUnixDateTime(
+	seconds: number,
+	options: { locale?: string; timeZone?: string } = {}
+): string | null {
+	const date = new Date( seconds * 1000 );
+	return Number.isNaN( date.getTime() )
+		? null
+		: formatDateTime( date.toISOString(), options );
+}
+
+/**
+ * Unix timestamp as the ISO string for a `<time dateTime>` attribute.
+ *
+ * @param seconds Unix timestamp.
+ */
+export function unixToIso( seconds: number ): string {
+	return new Date( seconds * 1000 ).toISOString().replace( '.000Z', 'Z' );
+}

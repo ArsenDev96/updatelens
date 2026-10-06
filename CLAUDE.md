@@ -15,10 +15,10 @@ UpdateLens is a WordPress plugin that shows what changes when **one** plugin upd
 Initial snapshot sources:
 
 - `wp_options` incl. autoload size / autoloaded options — implemented (`Snapshot\OptionsSnapshotProvider`)
-- WP-Cron events — implemented and observed in every analysis (`Snapshot\CronSnapshotProvider`, `Diff\CronDiffBuilder`, `Update\CronObservation`), stored in the analyses table; not yet exposed via REST or UI
+- WP-Cron events — implemented and observed in every analysis (`Snapshot\CronSnapshotProvider`, `Diff\CronDiffBuilder`, `Update\CronObservation`), stored in the analyses table and shown in reports next to Options
 - Action Scheduler actions — planned
 
-Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the WP-Cron snapshot and diff engines (observed and stored with every analysis, not yet in REST/UI), the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
+Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the WP-Cron snapshot and diff engines (observed, stored and reported with every analysis), the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
 
 ## Architecture boundaries
 
@@ -103,7 +103,7 @@ The plugin must stay distributable on WordPress.org:
 - Cron columns are written in the same statement as the options transition. If it fails, it is retried once without Cron payload (`CronObservation::without_payload()` → `storage_failed`), so Cron storage can never hold the options analysis back.
 - A failed update captures no IMMEDIATE Cron state; an expired settle window takes no late Cron snapshot.
 - **The backend preserves every observed Cron change**, including normal and core rescheduling (e.g. `wp_version_check` moving in the post-update phase): no ignore lists, no ownership filtering. De-emphasis belongs to presentation.
-- **Raw Cron arguments are never stored, logged or exposed.** Stored Cron snapshots keep `args_fingerprint` (internal); stored Cron diffs contain no fingerprints. Cron is not in the Reports API yet: report queries select no `cron_*` column.
+- **Raw Cron arguments are never stored, logged or exposed.** Stored Cron snapshots keep `args_fingerprint` (internal); stored Cron diffs contain no fingerprints. Reports read Cron diffs and reasons, never Cron snapshots; History reads no `cron_*` column.
 
 ## Update lifecycle invariants
 
@@ -136,7 +136,10 @@ The plugin must stay distributable on WordPress.org:
 - **Snapshot and fingerprint internals are never API fields**: no snapshots, fingerprints, fingerprint contexts, option values, raw diff JSON, user data or stored error messages. Errors expose a sanitized `code` only.
 - **Stored diffs are decoded only through `Storage\OptionsDiffCodec::decode()` / `Storage\CronDiffCodec::decode()`**, which validates everything; never `json_decode()` stored data elsewhere. An unreadable diff becomes an unavailable phase (`data_corrupt`), never an error with the stored data.
 - **Report reads expire overdue analyses first** (`PluginUpdateAnalyzer::expire_overdue()`, same inclusive deadline rule, no late snapshot). Apart from that and `Schema::repair()`, report endpoints are read-only.
-- History lists read metadata and `IS NOT NULL` phase flags only, ordered by primary key; full diffs are decoded only for a single report.
+- **Reports are provider-aware**: `phases.<phase>.options` and `phases.<phase>.cron`, each with its own `available`/`reason`. Never couple one signal's availability to the other's; a phase is unavailable only if both are.
+- Cron REST output is only `CronDiffCodec::decode()` output (hooks, timestamps, schedules, intervals, flags, counts). **Never Cron arguments, args fingerprints, md5 event keys, the Cron fingerprint context, snapshots or raw JSON.** Stored Cron reasons are whitelisted (`AnalysisReadModel::CRON_REASONS`), anything else is `unknown`; Cron phases without data are explained from the status (`update_in_progress`, `awaiting_settle`) or `not_recorded`.
+- History lists read metadata and `IS NOT NULL` options phase flags only, ordered by primary key; full diffs are decoded only for a single report. History never reads Cron data.
+- **Observation-window wording comes from the API** (`observation_window_seconds`); presentation never hard-codes the window length.
 - **API timestamps are UTC ISO 8601** (`2026-10-05T17:46:23Z`) or `null`; never convert to site-local time in PHP. Counts, sizes and deltas are JSON integers; flags are booleans.
 - Unknown stored statuses/outcomes become `unknown`; never reinterpret them. Unavailable phases always carry a `Report\UnavailableReason` code.
 - Post-update observations keep non-causal wording in the API, docs and UI (association `observed_after_update`, never "caused by").
@@ -148,6 +151,8 @@ The plugin must stay distributable on WordPress.org:
 - **Phase wording stays observational/non-causal**: "During update", "After update", "Net result", "observed". Never "caused by", "created by <plugin>", "definitely".
 - **API internals are never shown** as main text: raw status/reason/outcome codes appear at most under "Technical details". Server error messages are never rendered; `api/errors.ts` maps failures to fixed texts.
 - **No option values exist in the UI** — only names, sizes and autoload state. Render only fields of the typed API contract (`src/admin/types/api.ts`).
+- **Reports show signals as second-level tabs** under the phase tabs (Options, WP-Cron). Default to Options unless only WP-Cron is available; an explicit choice is kept across phases. Each signal's availability is independent.
+- **WP-Cron in the UI**: hooks in monospace, never arguments or fingerprints (a hidden-arguments note explains repeated hooks). Rescheduled events are shown but with less emphasis than added/removed/changed, never as a warning or problem. WordPress core and unrelated jobs are never hidden or filtered; no ignore lists, no ownership, no risk wording.
 - **UTC API timestamps are localized only in presentation** (`Intl.DateTimeFormat`, browser time zone); **backend byte counts are formatted only in presentation** (`utils/format.ts`, 1 KB = 1024 B). Never change the values sent by PHP.
 - **No risk classification** (impact levels, "safe"/"dangerous", size thresholds) without an explicitly designed model.
 - Navigation is URL state on the admin page (`&analysis=<id>`, `&paged=<n>`) via the History API; no router dependency.

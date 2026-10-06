@@ -1,7 +1,9 @@
 import { __ } from '@wordpress/i18n';
 import type { ReactNode } from 'react';
 
-import type { DiffSummary } from '../types/api';
+import { cn } from '@/lib/utils';
+
+import type { OptionsDiffSummary } from '../types/api';
 import {
 	formatBytes,
 	formatBytesDelta,
@@ -16,7 +18,7 @@ import {
  * @param props         Props.
  * @param props.summary Phase summary.
  */
-export function PhaseSummary( { summary }: { summary: DiffSummary } ) {
+export function PhaseSummary( { summary }: { summary: OptionsDiffSummary } ) {
 	return (
 		<div className="space-y-3">
 			<dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -67,20 +69,57 @@ export function PhaseSummary( { summary }: { summary: DiffSummary } ) {
 	);
 }
 
-function Metric( { label, value }: { label: string; value: ReactNode } ) {
+/**
+ * Primary count card. Quiet cards carry less emphasis (e.g. normal WP-Cron rescheduling).
+ *
+ * @param props       Props.
+ * @param props.label Label.
+ * @param props.value Value.
+ * @param props.quiet Lower emphasis.
+ */
+export function Metric( {
+	label,
+	value,
+	quiet = false,
+}: {
+	label: string;
+	value: ReactNode;
+	quiet?: boolean;
+} ) {
 	return (
-		<div className="rounded-lg border bg-card px-4 py-3">
+		<div
+			className={ cn(
+				'rounded-lg border px-4 py-3',
+				quiet ? 'border-dashed bg-transparent' : 'bg-card'
+			) }
+		>
 			<dt className="text-xs font-medium text-muted-foreground">
 				{ label }
 			</dt>
-			<dd className="mt-1 text-xl font-semibold tabular-nums">
+			<dd
+				className={ cn(
+					'mt-1 text-xl tabular-nums',
+					quiet
+						? 'font-medium text-muted-foreground'
+						: 'font-semibold'
+				) }
+			>
 				{ value }
 			</dd>
 		</div>
 	);
 }
 
-function Total( {
+/**
+ * Secondary before → after total with its delta.
+ *
+ * @param props        Props.
+ * @param props.label  Label.
+ * @param props.before Formatted value before.
+ * @param props.after  Formatted value after.
+ * @param props.delta  Formatted delta.
+ */
+export function Total( {
 	label,
 	before,
 	after,

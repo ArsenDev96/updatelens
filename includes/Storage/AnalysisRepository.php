@@ -39,9 +39,10 @@ class AnalysisRepository {
 	const HISTORY_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff IS NOT NULL AS has_options_during_update_diff, options_post_update_diff IS NOT NULL AS has_options_post_update_diff, options_final_diff IS NOT NULL AS has_options_final_diff';
 
 	/**
-	 * Columns of a full report: report metadata plus the phase diffs.
+	 * Columns of a full report: report metadata plus the options and Cron
+	 * phase diffs and Cron phase reasons. Never snapshots.
 	 */
-	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff';
+	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff, cron_during_update_diff, cron_post_update_diff, cron_final_diff, cron_during_update_reason, cron_post_update_reason, cron_final_reason';
 
 	/**
 	 * Database.

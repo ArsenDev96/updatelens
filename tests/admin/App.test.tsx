@@ -140,51 +140,45 @@ describe( 'App navigation', () => {
 } );
 
 describe( 'privacy', () => {
+	const CRON_SECRET = 'sk_test_UPDATE_LENS_CRON_REPORT_SECRET';
+
 	/**
-	 * Fields that must never be in API responses, injected to prove the UI
+	 * Fields that must never be in API responses, injected into every object
+	 * of a report (phases, signals, options, Cron events) to prove the UI
 	 * only renders fields of the approved contract.
 	 */
-	function withLeakedInternals( report: AnalysisReport ): AnalysisReport {
-		const leak = {
-			option_value: SECRET,
-			fingerprint: 'a'.repeat( 64 ),
-			fingerprint_context: `hmac-sha256-v1:${ SECRET }`,
-			before_snapshot: `{"secret":"${ SECRET }"}`,
-			immediate_snapshot: `{"secret":"${ SECRET }"}`,
-		};
-		const phases = Object.fromEntries(
-			Object.entries( report.phases ).map( ( [ key, phase ] ) => [
-				key,
-				phase.available
-					? {
-							...phase,
-							...leak,
-							added: phase.added.map( ( o ) => ( {
-								...o,
-								...leak,
-							} ) ),
-							removed: phase.removed.map( ( o ) => ( {
-								...o,
-								...leak,
-							} ) ),
-							changed: phase.changed.map( ( o ) => ( {
-								...o,
-								...leak,
-							} ) ),
-						}
-					: { ...phase, ...leak },
-			] )
-		);
-		return {
-			...report,
-			...leak,
-			plugin: { ...report.plugin, ...leak },
-			phases,
-		} as unknown as AnalysisReport;
+	const LEAK = {
+		option_value: SECRET,
+		fingerprint: 'a'.repeat( 64 ),
+		fingerprint_context: `hmac-sha256-v1:${ SECRET }`,
+		before_snapshot: `{"secret":"${ SECRET }"}`,
+		immediate_snapshot: `{"secret":"${ SECRET }"}`,
+		args: [ `https://hooks.example.test/${ CRON_SECRET }` ],
+		args_fingerprint: 'b'.repeat( 64 ),
+		cron_before_snapshot: `{"fingerprint_context":"cron-args-hmac-sha256-v1:${ CRON_SECRET }"}`,
+		key: 'c'.repeat( 32 ),
+	};
+
+	function leakEverywhere( value: unknown ): unknown {
+		if ( Array.isArray( value ) ) {
+			return value.map( leakEverywhere );
+		}
+		if ( value && typeof value === 'object' ) {
+			return {
+				...Object.fromEntries(
+					Object.entries( value ).map( ( [ k, v ] ) => [
+						k,
+						leakEverywhere( v ),
+					] )
+				),
+				...LEAK,
+			};
+		}
+		return value;
 	}
 
-	it( 'renders only contract fields in History and every report phase', async () => {
-		const report = withLeakedInternals( COMPLETED );
+	it( 'renders only contract fields in History and every phase and signal', async () => {
+		const report = leakEverywhere( COMPLETED ) as AnalysisReport;
 		serveApi( [ report ] );
 		render( <App /> );
 		const user = userEvent.setup();
@@ -194,11 +188,16 @@ describe( 'privacy', () => {
 			const html = document.body.innerHTML;
 			for ( const needle of [
 				SECRET,
+				CRON_SECRET,
 				'option_value',
-				'fingerprint',
+				'fingerprint_context',
+				'args_fingerprint',
 				'hmac-sha256',
 				'snapshot',
+				'hooks.example.test',
 				'a'.repeat( 64 ),
+				'b'.repeat( 64 ),
+				'c'.repeat( 32 ),
 			] ) {
 				expect( html ).not.toContain( needle );
 			}
@@ -208,7 +207,7 @@ describe( 'privacy', () => {
 		await user.click(
 			screen.getByRole( 'link', { name: /UpdateLens Fixture A/ } )
 		);
-		await screen.findByRole( 'tablist' );
+		await screen.findAllByRole( 'tablist' );
 		await user.click( screen.getByText( 'Technical details' ) );
 		for ( const name of [
 			/During update/,
@@ -216,7 +215,12 @@ describe( 'privacy', () => {
 			/Net result/,
 		] ) {
 			await user.click( screen.getByRole( 'tab', { name } ) );
-			check();
+			for ( const signal of [ /^Options/, /^WP-Cron/ ] ) {
+				await user.click( screen.getByRole( 'tab', { name: signal } ) );
+				check();
+			}
 		}
+		// The Cron hooks themselves are shown.
+		expect( document.body ).toHaveTextContent( 'ul_fixture_cleanup' );
 	} );
 } );

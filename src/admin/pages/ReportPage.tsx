@@ -12,17 +12,30 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 import { getAnalysis } from '../api/analyses';
+import { CronDiffList, CronSummary } from '../components/CronDiff';
 import { LoadError } from '../components/LoadError';
 import { OptionDiffList } from '../components/OptionDiffList';
 import { PhaseSummary } from '../components/PhaseSummary';
-import { PhaseTabs } from '../components/PhaseTabs';
+import { PhaseTabs, ProviderTabs } from '../components/PhaseTabs';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { useRequest } from '../hooks/use-request';
-import type { AnalysisPhase, AnalysisReport, PhaseKey } from '../types/api';
+import type {
+	AnalysisReport,
+	CronPhase,
+	OptionsPhase,
+	PhaseKey,
+	Provider,
+	ReportPhase,
+} from '../types/api';
 import { formatDateTime } from '../utils/format';
 import {
+	cronPhaseNote,
+	cronUnavailableReasonText,
 	defaultPhase,
+	defaultProvider,
+	PHASE_KEYS,
+	phaseLabel,
 	phaseNote,
 	reportNotice,
 	unavailableReasonText,
@@ -108,6 +121,10 @@ function Report( {
 } ) {
 	const heading = useRef< HTMLHeadingElement >( null );
 	const [ chosen, setChosen ] = useState< PhaseKey | null >( null );
+	// An explicit signal choice is kept across phases; otherwise each phase picks its default.
+	const [ chosenProvider, setChosenProvider ] = useState< Provider | null >(
+		null
+	);
 	const initial = defaultPhase( report.phases );
 	const selected = chosen ?? initial;
 
@@ -168,6 +185,12 @@ function Report( {
 					<PhasePanel
 						phase={ selected }
 						data={ report.phases[ selected ] }
+						provider={
+							chosenProvider ??
+							defaultProvider( report.phases[ selected ] )
+						}
+						onProvider={ setChosenProvider }
+						windowSeconds={ report.observation_window_seconds }
 					/>
 				</PhaseTabs>
 			) }
@@ -213,29 +236,92 @@ function Notice( {
 function PhasePanel( {
 	phase,
 	data,
+	provider,
+	onProvider,
+	windowSeconds,
 }: {
 	phase: PhaseKey;
-	data: AnalysisPhase;
+	data: ReportPhase;
+	provider: Provider;
+	onProvider: ( provider: Provider ) => void;
+	windowSeconds: number;
 } ) {
 	return (
 		<div className="space-y-4">
 			<p className="text-sm text-muted-foreground">
 				{ phaseNote( phase ) }
 			</p>
-			{ data.available ? (
-				<>
-					<PhaseSummary summary={ data.summary } />
-					<OptionDiffList phase={ data } />
-				</>
-			) : (
-				<UnavailablePhase reason={ data.reason } />
-			) }
+			<ProviderTabs
+				phase={ data }
+				selected={ provider }
+				onSelect={ onProvider }
+			>
+				{ provider === 'options' ? (
+					<OptionsPanel
+						data={ data.options }
+						windowSeconds={ windowSeconds }
+					/>
+				) : (
+					<CronPanel
+						data={ data.cron }
+						windowSeconds={ windowSeconds }
+					/>
+				) }
+			</ProviderTabs>
 		</div>
 	);
 }
 
-function UnavailablePhase( { reason }: { reason: string } ) {
-	const text = unavailableReasonText( reason );
+function OptionsPanel( {
+	data,
+	windowSeconds,
+}: {
+	data: OptionsPhase;
+	windowSeconds: number;
+} ) {
+	if ( ! data.available ) {
+		return (
+			<UnavailablePhase
+				text={ unavailableReasonText( data.reason, windowSeconds ) }
+			/>
+		);
+	}
+	return (
+		<div className="space-y-4">
+			<PhaseSummary summary={ data.summary } />
+			<OptionDiffList phase={ data } />
+		</div>
+	);
+}
+
+function CronPanel( {
+	data,
+	windowSeconds,
+}: {
+	data: CronPhase;
+	windowSeconds: number;
+} ) {
+	if ( ! data.available ) {
+		return (
+			<UnavailablePhase
+				text={ cronUnavailableReasonText( data.reason, windowSeconds ) }
+			/>
+		);
+	}
+	return (
+		<div className="space-y-4">
+			<p className="text-sm text-muted-foreground">{ cronPhaseNote() }</p>
+			<CronSummary summary={ data.summary } />
+			<CronDiffList phase={ data } />
+		</div>
+	);
+}
+
+function UnavailablePhase( {
+	text,
+}: {
+	text: { title: string; description: string };
+} ) {
 	return (
 		<div className="rounded-lg border border-dashed px-4 py-3 text-sm">
 			<p className="font-medium">{ text.title }</p>
@@ -270,6 +356,18 @@ function TechnicalDetails( { report }: { report: AnalysisReport } ) {
 			formatDateTime( report.timestamps.completed_at ),
 			report.timestamps.completed_at,
 		],
+		...PHASE_KEYS.map( ( phase ): [ string, string | null, null ] => {
+			const cron = report.phases[ phase ].cron;
+			return [
+				sprintf(
+					/* translators: %s: observation phase, e.g. "Net result". */
+					__( 'WP-Cron reason (%s)', 'updatelens' ),
+					phaseLabel( phase )
+				),
+				cron.available ? null : cron.reason,
+				null,
+			];
+		} ),
 	];
 
 	return (

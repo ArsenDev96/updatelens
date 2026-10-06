@@ -39,6 +39,39 @@ final class AnalysesController extends WP_REST_Controller {
 	private $reports;
 
 	/**
+	 * Schema of one signal's phase object.
+	 *
+	 * @param string   $description Description.
+	 * @param string[] $reasons     Possible unavailable reasons.
+	 * @param string[] $lists       Change lists of an available phase.
+	 * @return array
+	 */
+	private static function provider_schema( $description, array $reasons, array $lists ) {
+		$properties = array(
+			'available'   => array( 'type' => 'boolean' ),
+			'association' => array(
+				'type' => 'string',
+				'enum' => array_values( ObservationPhase::ASSOCIATION ),
+			),
+			'reason'      => array(
+				'description' => __( 'Why the phase is unavailable (only when available is false).', 'updatelens' ),
+				'type'        => 'string',
+				'enum'        => $reasons,
+			),
+			'summary'     => array( 'type' => 'object' ),
+		);
+		foreach ( $lists as $list ) {
+			$properties[ $list ] = array( 'type' => 'array' );
+		}
+
+		return array(
+			'description' => $description,
+			'type'        => 'object',
+			'properties'  => $properties,
+		);
+	}
+
+	/**
 	 * History item schema, cached.
 	 *
 	 * @var array|null
@@ -210,33 +243,33 @@ final class AnalysesController extends WP_REST_Controller {
 			return $this->add_additional_fields_schema( $this->schema );
 		}
 
-		$phase = array(
+		$common_reasons = array(
+			UnavailableReason::UPDATE_IN_PROGRESS,
+			UnavailableReason::AWAITING_SETTLE,
+			UnavailableReason::SETTLE_EXPIRED,
+			UnavailableReason::UPDATE_FAILED,
+			UnavailableReason::ANALYSIS_FAILED,
+			UnavailableReason::FINGERPRINT_CONTEXT_CHANGED,
+			UnavailableReason::ANALYSIS_ABANDONED,
+			UnavailableReason::DATA_CORRUPT,
+			UnavailableReason::NOT_RECORDED,
+		);
+
+		$options = self::provider_schema(
+			__( 'Observed wp_options changes.', 'updatelens' ),
+			$common_reasons,
+			array( 'added', 'removed', 'changed' )
+		);
+		$cron    = self::provider_schema(
+			__( 'Observed WP-Cron changes. Arguments are never included.', 'updatelens' ),
+			array_values( array_unique( array_merge( $common_reasons, AnalysisReadModel::CRON_REASONS, array( AnalysisReadModel::UNKNOWN ) ) ) ),
+			array( 'added', 'removed', 'rescheduled', 'changed' )
+		);
+		$phase   = array(
 			'type'       => 'object',
 			'properties' => array(
-				'available'   => array( 'type' => 'boolean' ),
-				'association' => array(
-					'type' => 'string',
-					'enum' => array_values( ObservationPhase::ASSOCIATION ),
-				),
-				'reason'      => array(
-					'description' => __( 'Why the phase is unavailable (only when available is false).', 'updatelens' ),
-					'type'        => 'string',
-					'enum'        => array(
-						UnavailableReason::UPDATE_IN_PROGRESS,
-						UnavailableReason::AWAITING_SETTLE,
-						UnavailableReason::SETTLE_EXPIRED,
-						UnavailableReason::UPDATE_FAILED,
-						UnavailableReason::ANALYSIS_FAILED,
-						UnavailableReason::FINGERPRINT_CONTEXT_CHANGED,
-						UnavailableReason::ANALYSIS_ABANDONED,
-						UnavailableReason::DATA_CORRUPT,
-						UnavailableReason::NOT_RECORDED,
-					),
-				),
-				'summary'     => array( 'type' => 'object' ),
-				'added'       => array( 'type' => 'array' ),
-				'removed'     => array( 'type' => 'array' ),
-				'changed'     => array( 'type' => 'array' ),
+				'options' => $options,
+				'cron'    => $cron,
 			),
 		);
 
@@ -245,8 +278,14 @@ final class AnalysesController extends WP_REST_Controller {
 			'title'      => 'updatelens-analysis-report',
 			'type'       => 'object',
 			'properties' => self::metadata_schema() + array(
-				'phases' => array(
-					'description' => __( 'Observed wp_options changes per phase (observations, not proven causes).', 'updatelens' ),
+				'observation_window_seconds' => array(
+					'description' => __( 'Length of the post-update observation window in seconds.', 'updatelens' ),
+					'type'        => 'integer',
+					'context'     => array( 'view' ),
+					'readonly'    => true,
+				),
+				'phases'                     => array(
+					'description' => __( 'Observed changes per phase and signal, each with its own availability (observations, not proven causes).', 'updatelens' ),
 					'type'        => 'object',
 					'context'     => array( 'view' ),
 					'readonly'    => true,
@@ -272,7 +311,7 @@ final class AnalysesController extends WP_REST_Controller {
 			$properties = self::metadata_schema();
 			foreach ( array_keys( ObservationPhase::ASSOCIATION ) as $phase ) {
 				$properties[ "has_{$phase}" ] = array(
-					'description' => __( 'Whether a diff is stored for this phase.', 'updatelens' ),
+					'description' => __( 'Whether a wp_options diff is stored for this phase (WP-Cron is reported per analysis only).', 'updatelens' ),
 					'type'        => 'boolean',
 					'context'     => array( 'view' ),
 					'readonly'    => true,

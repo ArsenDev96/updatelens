@@ -8,8 +8,13 @@
 namespace UpdateLens\Tests\Unit\Report;
 
 use PHPUnit\Framework\TestCase;
+use ReflectionClass;
+use UpdateLens\Diff\CronDiffBuilder;
 use UpdateLens\Report\AnalysisReadModel;
 use UpdateLens\Report\UnavailableReason;
+use UpdateLens\Storage\CronDiffCodec;
+use UpdateLens\Tests\Support\CronFixture;
+use UpdateLens\Update\CronPhaseReason;
 
 /**
  * Stored rows → safe API arrays.
@@ -51,6 +56,61 @@ final class AnalysisReadModelTest extends TestCase {
 			),
 			$overrides
 		);
+	}
+
+	/**
+	 * Obviously fake credential used in Cron argument fixtures.
+	 */
+	const FAKE_SECRET = 'sk_test_UPDATE_LENS_CRON_REPORT_SECRET';
+
+	/**
+	 * Options part of every phase.
+	 *
+	 * @param array $report Report.
+	 * @return array<string, array>
+	 */
+	private static function options( array $report ) {
+		return array_map(
+			static function ( $phase ) {
+				return $phase['options'];
+			},
+			$report['phases']
+		);
+	}
+
+	/**
+	 * Cron part of every phase.
+	 *
+	 * @param array $report Report.
+	 * @return array<string, array>
+	 */
+	private static function cron( array $report ) {
+		return array_map(
+			static function ( $phase ) {
+				return $phase['cron'];
+			},
+			$report['phases']
+		);
+	}
+
+	/**
+	 * Stored Cron diff JSON for a fixture with secret arguments: one added, one rescheduled event.
+	 *
+	 * @return string
+	 */
+	private static function cron_diff_json() {
+		$args   = array( 'token' => self::FAKE_SECRET );
+		$before = CronFixture::snapshot( CronFixture::cron( array( CronFixture::recurring( 1767225600, 'acme_cleanup', 'daily', $args ) ) ) );
+		$after  = CronFixture::snapshot(
+			CronFixture::cron(
+				array(
+					CronFixture::recurring( 1767229200, 'acme_cleanup', 'daily', $args ),
+					CronFixture::single( 1767225900, 'acme_once', array( 'https://hooks.example.test/' . self::FAKE_SECRET ) ),
+				)
+			)
+		);
+
+		return ( new CronDiffCodec() )->encode( ( new CronDiffBuilder() )->build( $before, $after ) );
 	}
 
 	/**
@@ -108,7 +168,11 @@ final class AnalysisReadModelTest extends TestCase {
 	public function test_report_whitelists_fields() {
 		$report = ( new AnalysisReadModel() )->report( self::row() );
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'phases', 'error' ), array_keys( $report ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'error' ), array_keys( $report ) );
+		$this->assertSame( 300, $report['observation_window_seconds'] );
+		foreach ( $report['phases'] as $phase ) {
+			$this->assertSame( array( 'options', 'cron' ), array_keys( $phase ) );
+		}
 		$json = (string) json_encode( $report ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
 		foreach ( array( 'snapshot', 'fingerprint', 'hmac', 'user_id', 'Stored message', 'active_plugin', 'updated_at', '"schema"' ) as $needle ) {
 			$this->assertStringNotContainsString( $needle, $json );
@@ -226,7 +290,7 @@ final class AnalysisReadModelTest extends TestCase {
 		$this->assertSame( 'unknown', $report['settle_outcome'] );
 		$this->assertSame( array( 'code' => 'unknown' ), $report['error'] );
 		foreach ( $report['phases'] as $phase ) {
-			$this->assertSame( UnavailableReason::NOT_RECORDED, $phase['reason'] );
+			$this->assertSame( UnavailableReason::NOT_RECORDED, $phase['options']['reason'] );
 		}
 	}
 
@@ -308,8 +372,146 @@ final class AnalysisReadModelTest extends TestCase {
 					'reason'      => $reason,
 				),
 			),
-			$report['phases']
+			self::options( $report )
 		);
+	}
+
+	/**
+	 * An available Cron phase is the decoded Cron diff: no arguments, fingerprints or context.
+	 */
+	public function test_cron_available_phase() {
+		$json   = self::cron_diff_json();
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'cron_post_update_diff' => $json ) ) );
+		$diff   = ( new CronDiffCodec() )->decode( $json );
+
+		$this->assertSame(
+			array(
+				'available'   => true,
+				'association' => 'observed_after_update',
+				'summary'     => $diff['summary'],
+				'added'       => $diff['added'],
+				'removed'     => $diff['removed'],
+				'rescheduled' => $diff['rescheduled'],
+				'changed'     => $diff['changed'],
+			),
+			$report['phases']['post_update']['cron']
+		);
+		$this->assertSame( array( 'acme_once' ), array_column( $report['phases']['post_update']['cron']['added'], 'hook' ) );
+		$this->assertSame( 3600, $report['phases']['post_update']['cron']['rescheduled'][0]['timestamp_delta'] );
+
+		$output = (string) json_encode( $report ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+		$md5    = md5( serialize( array( 'token' => self::FAKE_SECRET ) ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- Core's unkeyed event key.
+		foreach ( array( self::FAKE_SECRET, 'hooks.example.test', 'token', 'fingerprint', 'cron-args', '"schema"', $md5 ) as $needle ) {
+			$this->assertStringNotContainsString( $needle, $output );
+		}
+	}
+
+	/**
+	 * Stored Cron reasons are passed through; unknown values become `unknown`.
+	 *
+	 * @return array
+	 */
+	public function provide_cron_reasons() {
+		$cases = array();
+		foreach ( AnalysisReadModel::CRON_REASONS as $reason ) {
+			$cases[ $reason ] = array( $reason, $reason );
+		}
+		$cases['unknown value'] = array( 'Malformed: <b>raw</b>', 'unknown' );
+
+		return $cases;
+	}
+
+	/**
+	 * Cron reasons.
+	 *
+	 * @dataProvider provide_cron_reasons
+	 * @param string $stored   Stored reason.
+	 * @param string $expected API reason.
+	 */
+	public function test_cron_stored_reasons( $stored, $expected ) {
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'cron_final_reason' => $stored ) ) );
+
+		$this->assertSame(
+			array(
+				'available'   => false,
+				'association' => 'net_across_phases',
+				'reason'      => $expected,
+			),
+			$report['phases']['final']['cron']
+		);
+	}
+
+	/**
+	 * The pass-through list covers every CronPhaseReason constant.
+	 */
+	public function test_cron_reason_list_is_complete() {
+		$constants = ( new ReflectionClass( CronPhaseReason::class ) )->getConstants();
+
+		$this->assertEqualsCanonicalizing( array_values( $constants ), AnalysisReadModel::CRON_REASONS );
+	}
+
+	/**
+	 * Cron phases without diff or reason are pending (explained by the status) or not recorded.
+	 *
+	 * @return array
+	 */
+	public function provide_pending_cron() {
+		return array(
+			'captured' => array( 'captured', array( 'update_in_progress', 'update_in_progress', 'update_in_progress' ) ),
+			'awaiting' => array( 'awaiting_settle', array( 'not_recorded', 'awaiting_settle', 'awaiting_settle' ) ),
+			'pre-Cron' => array( 'completed', array( 'not_recorded', 'not_recorded', 'not_recorded' ) ),
+			'unknown'  => array( 'mystery', array( 'not_recorded', 'not_recorded', 'not_recorded' ) ),
+		);
+	}
+
+	/**
+	 * Pending Cron phases.
+	 *
+	 * @dataProvider provide_pending_cron
+	 * @param string   $status  Stored status.
+	 * @param string[] $reasons Expected reasons per phase.
+	 */
+	public function test_cron_without_data( $status, array $reasons ) {
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'status' => $status ) ) );
+
+		$this->assertSame( $reasons, array_values( array_column( self::cron( $report ), 'reason' ) ) );
+	}
+
+	/**
+	 * A corrupt Cron diff only makes that Cron phase unavailable.
+	 */
+	public function test_corrupt_cron_diff_is_isolated() {
+		$report = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'cron_during_update_diff' => self::cron_diff_json(),
+					'cron_post_update_diff'   => '{"schema":1,"added":"' . self::FAKE_SECRET . '"',
+					'cron_final_diff'         => self::cron_diff_json(),
+				)
+			)
+		);
+
+		$this->assertTrue( $report['phases']['during_update']['cron']['available'] );
+		$this->assertTrue( $report['phases']['final']['cron']['available'] );
+		$this->assertSame( UnavailableReason::DATA_CORRUPT, $report['phases']['post_update']['cron']['reason'] );
+		$this->assertSame( UnavailableReason::SETTLE_EXPIRED, $report['phases']['post_update']['options']['reason'], 'Options are unaffected.' );
+		$this->assertStringNotContainsString( self::FAKE_SECRET, (string) json_encode( $report ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+	}
+
+	/**
+	 * Cron snapshot columns never reach a report, whatever the row contains.
+	 */
+	public function test_cron_snapshots_are_never_exposed() {
+		$report = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'cron_before_snapshot'    => '{"schema":1,"fingerprint_context":"cron-args-hmac-sha256-v1:' . self::FAKE_SECRET . '"}',
+					'cron_immediate_snapshot' => self::FAKE_SECRET,
+				)
+			)
+		);
+
+		$this->assertStringNotContainsString( self::FAKE_SECRET, (string) json_encode( $report ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
 	}
 
 	/**
@@ -342,7 +544,7 @@ final class AnalysisReadModelTest extends TestCase {
 				'association' => 'update_request',
 				'reason'      => UnavailableReason::DATA_CORRUPT,
 			),
-			$report['phases']['during_update']
+			$report['phases']['during_update']['options']
 		);
 	}
 }

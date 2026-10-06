@@ -8,8 +8,11 @@
 namespace UpdateLens\Report;
 
 use Throwable;
+use UpdateLens\Storage\CronDiffCodec;
 use UpdateLens\Storage\OptionsDiffCodec;
 use UpdateLens\Update\AnalysisStatus;
+use UpdateLens\Update\CronObservation;
+use UpdateLens\Update\CronPhaseReason;
 use UpdateLens\Update\ObservationPhase;
 use UpdateLens\Update\PluginUpdateAnalyzer;
 use UpdateLens\Update\SettleOutcome;
@@ -18,6 +21,10 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Builds history rows and reports from analysis rows.
+ *
+ * Reports are provider-aware: each phase holds an `options` and a `cron`
+ * object with independent availability. History rows describe the options
+ * signal only and never read Cron columns.
  *
  * Whitelists fields: snapshots, fingerprints, user IDs, stored error
  * messages and raw diff JSON are never part of the output, whatever the row
@@ -58,7 +65,24 @@ final class AnalysisReadModel {
 	);
 
 	/**
-	 * Diff column per phase, in report order.
+	 * Stored Cron phase reasons passed through to the API (CronPhaseReason).
+	 * Any other stored value becomes `unknown`.
+	 */
+	const CRON_REASONS = array(
+		CronPhaseReason::MALFORMED_CRON_STATE,
+		CronPhaseReason::SNAPSHOT_UNAVAILABLE,
+		CronPhaseReason::FINGERPRINT_CONTEXT_CHANGED,
+		CronPhaseReason::NOT_CAPTURED,
+		CronPhaseReason::STORAGE_FAILED,
+		CronPhaseReason::ANALYSIS_FAILED,
+		CronPhaseReason::SETTLE_EXPIRED,
+		CronPhaseReason::UPDATE_FAILED,
+		CronPhaseReason::ANALYSIS_ABANDONED,
+		CronPhaseReason::ANALYSIS_ENDED,
+	);
+
+	/**
+	 * Options diff column per phase, in report order.
 	 */
 	const PHASE_COLUMNS = array(
 		ObservationPhase::DURING_UPDATE => 'options_during_update_diff',
@@ -74,10 +98,18 @@ final class AnalysisReadModel {
 	private $diff_codec;
 
 	/**
+	 * Cron diff decoding.
+	 *
+	 * @var CronDiffCodec
+	 */
+	private $cron_diff_codec;
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
-		$this->diff_codec = new OptionsDiffCodec();
+		$this->diff_codec      = new OptionsDiffCodec();
+		$this->cron_diff_codec = new CronDiffCodec();
 	}
 
 	/**
@@ -110,17 +142,23 @@ final class AnalysisReadModel {
 		$phases   = array();
 
 		foreach ( self::PHASE_COLUMNS as $phase => $column ) {
-			$phases[ $phase ] = $this->phase( $phase, isset( $row[ $column ] ) ? $row[ $column ] : null, $metadata );
+			list( $cron_diff, $cron_reason ) = CronObservation::PHASES[ $phase ];
+
+			$phases[ $phase ] = array(
+				'options' => $this->phase( $phase, isset( $row[ $column ] ) ? $row[ $column ] : null, $metadata ),
+				'cron'    => $this->cron_phase( $phase, self::field( $row, $cron_diff ), self::field( $row, $cron_reason ), $metadata ),
+			);
 		}
 
 		return array(
-			'id'             => $metadata['id'],
-			'plugin'         => $metadata['plugin'],
-			'status'         => $metadata['status'],
-			'settle_outcome' => $metadata['settle_outcome'],
-			'timestamps'     => $metadata['timestamps'],
-			'phases'         => $phases,
-			'error'          => $metadata['error'],
+			'id'                         => $metadata['id'],
+			'plugin'                     => $metadata['plugin'],
+			'status'                     => $metadata['status'],
+			'settle_outcome'             => $metadata['settle_outcome'],
+			'timestamps'                 => $metadata['timestamps'],
+			'observation_window_seconds' => PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS,
+			'phases'                     => $phases,
+			'error'                      => $metadata['error'],
 		);
 	}
 
@@ -181,6 +219,53 @@ final class AnalysisReadModel {
 			'removed'     => $diff['removed'],
 			'changed'     => $diff['changed'],
 		);
+	}
+
+	/**
+	 * One Cron phase: the decoded Cron diff, or why there is none.
+	 *
+	 * A stored reason is passed through (whitelisted); without diff and
+	 * reason the phase is still pending, which the status explains.
+	 *
+	 * @param string               $phase    ObservationPhase constant.
+	 * @param mixed                $json     Stored Cron diff JSON or null.
+	 * @param mixed                $reason   Stored CronPhaseReason or null.
+	 * @param array<string, mixed> $metadata Output of metadata().
+	 * @return array<string, mixed>
+	 */
+	private function cron_phase( $phase, $json, $reason, array $metadata ) {
+		$association = ObservationPhase::ASSOCIATION[ $phase ];
+
+		if ( null !== $json ) {
+			try {
+				$diff = $this->cron_diff_codec->decode( $json );
+			} catch ( Throwable $e ) {
+				return self::unavailable( $association, UnavailableReason::DATA_CORRUPT );
+			}
+
+			return array(
+				'available'   => true,
+				'association' => $association,
+				'summary'     => $diff['summary'],
+				'added'       => $diff['added'],
+				'removed'     => $diff['removed'],
+				'rescheduled' => $diff['rescheduled'],
+				'changed'     => $diff['changed'],
+			);
+		}
+
+		if ( null !== $reason && '' !== $reason ) {
+			return self::unavailable( $association, self::known( $reason, self::CRON_REASONS ) );
+		}
+
+		if ( AnalysisStatus::CAPTURED === $metadata['status'] ) {
+			return self::unavailable( $association, UnavailableReason::UPDATE_IN_PROGRESS );
+		}
+		if ( AnalysisStatus::AWAITING_SETTLE === $metadata['status'] && ObservationPhase::DURING_UPDATE !== $phase ) {
+			return self::unavailable( $association, UnavailableReason::AWAITING_SETTLE );
+		}
+
+		return self::unavailable( $association, UnavailableReason::NOT_RECORDED );
 	}
 
 	/**

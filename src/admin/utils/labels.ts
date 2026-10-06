@@ -1,13 +1,16 @@
-import { __ } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 
 import type {
-	AnalysisPhase,
 	AnalysisReport,
 	AnalysisStatus,
+	CronUnavailableReason,
+	OptionsUnavailableReason,
 	PhaseKey,
+	Provider,
+	ReportPhase,
 	SettleOutcome,
-	UnavailableReason,
 } from '../types/api';
+import { formatDuration } from './format';
 
 /*
  * Human text for the API's codes. Wording is observational: phases say when
@@ -90,19 +93,63 @@ export function phaseNote( phase: PhaseKey ): string {
 }
 
 /**
- * Phase shown first: Net result, else During update, else After update.
- * Null if no phase is available.
+ * Whether any signal of a phase is available.
+ *
+ * @param phase Report phase.
+ */
+export function isPhaseAvailable( phase: ReportPhase ): boolean {
+	return phase.options.available || phase.cron.available;
+}
+
+/**
+ * Phase shown first: Net result, else During update, else After update,
+ * counting a phase as available if any signal is. Null if none is.
  *
  * @param phases Report phases.
  */
 export function defaultPhase(
-	phases: Record< PhaseKey, AnalysisPhase >
+	phases: Record< PhaseKey, ReportPhase >
 ): PhaseKey | null {
 	const order: PhaseKey[] = [ 'final', 'during_update', 'post_update' ];
-	return order.find( ( key ) => phases[ key ].available ) ?? null;
+	return order.find( ( key ) => isPhaseAvailable( phases[ key ] ) ) ?? null;
 }
 
-export function unavailableReasonText( reason: UnavailableReason | string ): {
+/** Signals in display order. */
+export const PROVIDERS: Provider[] = [ 'options', 'cron' ];
+
+export function providerLabel( provider: Provider ): string {
+	switch ( provider ) {
+		case 'options':
+			return __( 'Options', 'updatelens' );
+		case 'cron':
+			return __( 'WP-Cron', 'updatelens' );
+	}
+}
+
+/**
+ * Signal shown first in a phase: Options, unless only WP-Cron is available.
+ *
+ * @param phase Report phase.
+ */
+export function defaultProvider( phase: ReportPhase ): Provider {
+	return ! phase.options.available && phase.cron.available
+		? 'cron'
+		: 'options';
+}
+
+/**
+ * The observation window as a phrase, e.g. "5 minutes".
+ *
+ * @param seconds Window length from the API.
+ */
+export function windowText( seconds: number ): string {
+	return formatDuration( seconds );
+}
+
+export function unavailableReasonText(
+	reason: OptionsUnavailableReason | string,
+	windowSeconds: number
+): {
 	title: string;
 	description: string;
 } {
@@ -126,9 +173,13 @@ export function unavailableReasonText( reason: UnavailableReason | string ): {
 		case 'settle_expired':
 			return {
 				title: __( 'Not captured', 'updatelens' ),
-				description: __(
-					'No eligible admin request occurred within the 5-minute observation window.',
-					'updatelens'
+				description: sprintf(
+					/* translators: %s: observation window length, e.g. "5 minutes". */
+					__(
+						'No eligible admin request occurred within %s of the update.',
+						'updatelens'
+					),
+					windowText( windowSeconds )
 				),
 			};
 		case 'update_failed':
@@ -183,12 +234,156 @@ export function unavailableReasonText( reason: UnavailableReason | string ): {
 }
 
 /**
+ * Why a WP-Cron phase is unavailable, in plain text.
+ *
+ * @param reason        API reason.
+ * @param windowSeconds Observation window length from the API.
+ */
+export function cronUnavailableReasonText(
+	reason: CronUnavailableReason | string,
+	windowSeconds: number
+): { title: string; description: string } {
+	const unavailable = __( 'WP-Cron analysis unavailable', 'updatelens' );
+
+	switch ( reason ) {
+		case 'malformed_cron_state':
+			return {
+				title: unavailable,
+				description: __(
+					"The site's Cron state contained data UpdateLens could not safely normalize.",
+					'updatelens'
+				),
+			};
+		case 'snapshot_unavailable':
+			return {
+				title: unavailable,
+				description: __(
+					"UpdateLens couldn't capture or read the WP-Cron state this phase needs.",
+					'updatelens'
+				),
+			};
+		case 'fingerprint_context_changed':
+			return {
+				title: __( 'Comparison stopped', 'updatelens' ),
+				description: __(
+					"WP-Cron comparison stopped because the site's fingerprint context changed.",
+					'updatelens'
+				),
+			};
+		case 'settle_expired':
+			return {
+				title: __( 'Not captured', 'updatelens' ),
+				description: sprintf(
+					/* translators: %s: observation window length, e.g. "5 minutes". */
+					__(
+						'Post-update WP-Cron state was not captured within %s of the update.',
+						'updatelens'
+					),
+					windowText( windowSeconds )
+				),
+			};
+		case 'storage_failed':
+			return {
+				title: unavailable,
+				description: __(
+					'WP-Cron analysis could not be stored safely for this phase.',
+					'updatelens'
+				),
+			};
+		case 'not_captured':
+			return {
+				title: __( 'Not captured', 'updatelens' ),
+				description: __(
+					'WP-Cron was not captured for this phase.',
+					'updatelens'
+				),
+			};
+		case 'analysis_failed':
+			return {
+				title: unavailable,
+				description: __(
+					"UpdateLens couldn't compare the WP-Cron state for this phase.",
+					'updatelens'
+				),
+			};
+		case 'update_failed':
+			return {
+				title: __( 'Not available', 'updatelens' ),
+				description: __(
+					'WP-Cron analysis is unavailable because the plugin update failed.',
+					'updatelens'
+				),
+			};
+		case 'analysis_abandoned':
+			return {
+				title: __( 'Not available', 'updatelens' ),
+				description: __(
+					"WP-Cron analysis is unavailable because the analysis didn't finish.",
+					'updatelens'
+				),
+			};
+		case 'analysis_ended':
+			return {
+				title: __( 'Not available', 'updatelens' ),
+				description: __(
+					'WP-Cron was not observed for this phase because the analysis stopped early.',
+					'updatelens'
+				),
+			};
+		case 'update_in_progress':
+			return {
+				title: __( 'Not available yet', 'updatelens' ),
+				description: __(
+					"The plugin update hasn't reported back yet.",
+					'updatelens'
+				),
+			};
+		case 'awaiting_settle':
+			return {
+				title: __( 'Not captured yet', 'updatelens' ),
+				description: __(
+					'Waiting for the first eligible admin request after the update.',
+					'updatelens'
+				),
+			};
+		case 'data_corrupt':
+			return {
+				title: __( 'Unreadable', 'updatelens' ),
+				description: __(
+					"This stored WP-Cron phase couldn't be read safely.",
+					'updatelens'
+				),
+			};
+		default:
+			return {
+				title: __( 'Not available', 'updatelens' ),
+				description: __(
+					'No WP-Cron data was recorded for this phase.',
+					'updatelens'
+				),
+			};
+	}
+}
+
+/**
+ * Note shown above WP-Cron changes: other activity schedules jobs too.
+ */
+export function cronPhaseNote(): string {
+	return __(
+		'WP-Cron changes observed during this phase. WordPress core and other plugins may also schedule or reschedule jobs during the observation window.',
+		'updatelens'
+	);
+}
+
+/**
  * How the observation window ended, or null if there is nothing useful to say.
  *
- * @param outcome Settle outcome.
+ * @param outcome       Settle outcome.
+ * @param windowSeconds Observation window length from the API.
  */
 export function settleOutcomeText(
-	outcome: SettleOutcome | string | null
+	outcome: SettleOutcome | string | null,
+	windowSeconds: number
 ): string | null {
 	switch ( outcome ) {
 		case 'admin_shutdown':
@@ -202,9 +397,13 @@ export function settleOutcomeText(
 				'updatelens'
 			);
 		case 'expired':
-			return __(
-				'Post-update observation was not captured within 5 minutes.',
-				'updatelens'
+			return sprintf(
+				/* translators: %s: observation window length, e.g. "5 minutes". */
+				__(
+					'Post-update observation was not captured within %s.',
+					'updatelens'
+				),
+				windowText( windowSeconds )
 			);
 		default:
 			return null;
@@ -276,6 +475,7 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 		? errorText( report.error.code, report.status )
 		: null;
 	const base = { details: [] as string[], open: false };
+	const windowLength = windowText( report.observation_window_seconds );
 
 	switch ( report.status ) {
 		case 'completed': {
@@ -287,13 +487,20 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 						'Post-update observation expired',
 						'updatelens'
 					),
-					description: __(
-						'The update itself was analyzed, but no eligible admin request occurred within the 5-minute observation window.',
-						'updatelens'
+					description: sprintf(
+						/* translators: %s: observation window length, e.g. "5 minutes". */
+						__(
+							'The update itself was analyzed, but no eligible admin request occurred within %s of the update.',
+							'updatelens'
+						),
+						windowLength
 					),
 				};
 			}
-			const outcome = settleOutcomeText( report.settle_outcome );
+			const outcome = settleOutcomeText(
+				report.settle_outcome,
+				report.observation_window_seconds
+			);
 			return {
 				...base,
 				tone: 'positive',
@@ -311,9 +518,13 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 				open: true,
 				tone: 'progress',
 				title: __( 'Observing post-update activity…', 'updatelens' ),
-				description: __(
-					'UpdateLens is waiting for the first eligible admin page within the 5-minute observation window. Changes observed during the update are already available.',
-					'updatelens'
+				description: sprintf(
+					/* translators: %s: observation window length, e.g. "5 minutes". */
+					__(
+						'UpdateLens is waiting for the first eligible admin page within %s of the update. Changes observed during the update are already available.',
+						'updatelens'
+					),
+					windowLength
 				),
 			};
 		case 'captured':

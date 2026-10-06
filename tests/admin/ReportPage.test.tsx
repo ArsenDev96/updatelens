@@ -36,7 +36,8 @@ function renderReport( report: AnalysisReport | null, onBack = vi.fn() ) {
 	return onBack;
 }
 
-const panel = () => screen.getByRole( 'tabpanel' );
+/** The phase panel (the first tab panel; the signal panel is nested in it). */
+const panel = () => screen.getAllByRole( 'tabpanel' )[ 0 ];
 const tab = ( name: RegExp ) => screen.getByRole( 'tab', { name } );
 
 describe( 'ReportPage', () => {
@@ -135,7 +136,7 @@ describe( 'ReportPage', () => {
 	it( 'switches phases by click and keyboard', async () => {
 		renderReport( COMPLETED );
 		const user = userEvent.setup();
-		await screen.findByRole( 'tablist' );
+		await screen.findAllByRole( 'tablist' );
 
 		await user.click( tab( /During update/ ) );
 		expect( tab( /During update/ ) ).toHaveAttribute(
@@ -213,7 +214,7 @@ describe( 'ReportPage', () => {
 		await user.click( tab( /Net result/ ) );
 		expect( panel() ).toHaveTextContent( 'Not captured' );
 		expect( panel() ).toHaveTextContent(
-			'No eligible admin request occurred within the 5-minute observation window.'
+			'No eligible admin request occurred within 5 minutes of the update.'
 		);
 		expect( within( panel() ).queryByRole( 'definition' ) ).toBeNull();
 		expect( panel() ).not.toHaveTextContent( 'settle_expired' );
@@ -285,7 +286,11 @@ describe( 'ReportPage', () => {
 			within( panel() ).getByRole( 'heading', { name: 'Added (2)' } )
 		).toBeInTheDocument();
 
+		// Options is unreadable here, so the available WP-Cron signal is shown first.
 		await user.click( tab( /After update/ ) );
+		expect( tab( /^WP-Cron/ ) ).toHaveAttribute( 'aria-selected', 'true' );
+		expect( tab( /^Options/ ) ).toHaveTextContent( '(not available)' );
+		await user.click( tab( /^Options/ ) );
 		expect( panel() ).toHaveTextContent(
 			"This stored phase couldn't be read safely."
 		);
@@ -329,35 +334,38 @@ describe( 'ReportPage', () => {
 			phases: {
 				...COMPLETED.phases,
 				final: {
-					...FINAL,
-					changed: [
-						{
-							name: 'plugin_settings',
-							value_changed: true,
-							before_size: 84,
-							after_size: 115,
-							size_delta: 31,
-							before_autoload: 'yes',
-							after_autoload: 'auto-off',
-							autoload_value_changed: true,
-							before_is_autoloaded: true,
-							after_is_autoloaded: false,
-							autoload_behavior_changed: true,
-						},
-						{
-							name: 'plugin_db_version',
-							value_changed: false,
-							before_size: 5,
-							after_size: 5,
-							size_delta: 0,
-							before_autoload: 'yes',
-							after_autoload: 'on',
-							autoload_value_changed: true,
-							before_is_autoloaded: true,
-							after_is_autoloaded: true,
-							autoload_behavior_changed: false,
-						},
-					],
+					...COMPLETED.phases.final,
+					options: {
+						...FINAL,
+						changed: [
+							{
+								name: 'plugin_settings',
+								value_changed: true,
+								before_size: 84,
+								after_size: 115,
+								size_delta: 31,
+								before_autoload: 'yes',
+								after_autoload: 'auto-off',
+								autoload_value_changed: true,
+								before_is_autoloaded: true,
+								after_is_autoloaded: false,
+								autoload_behavior_changed: true,
+							},
+							{
+								name: 'plugin_db_version',
+								value_changed: false,
+								before_size: 5,
+								after_size: 5,
+								size_delta: 0,
+								before_autoload: 'yes',
+								after_autoload: 'on',
+								autoload_value_changed: true,
+								before_is_autoloaded: true,
+								after_is_autoloaded: true,
+								autoload_behavior_changed: false,
+							},
+						],
+					},
 				},
 			},
 		} );
@@ -447,7 +455,7 @@ describe( 'ReportPage', () => {
 	it( 'never uses causal wording', async () => {
 		renderReport( COMPLETED );
 		const user = userEvent.setup();
-		await screen.findByRole( 'tablist' );
+		await screen.findAllByRole( 'tablist' );
 
 		for ( const name of [
 			/During update/,

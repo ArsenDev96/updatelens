@@ -1,7 +1,7 @@
 import { __, sprintf } from '@wordpress/i18n';
 import type { ReactNode } from 'react';
 
-import type { AvailablePhase } from '../types/api';
+import type { AvailableOptionsPhase } from '../types/api';
 import { ChangedOptionRow, OptionStateRow } from './OptionRows';
 
 /**
@@ -11,7 +11,7 @@ import { ChangedOptionRow, OptionStateRow } from './OptionRows';
  * @param props       Props.
  * @param props.phase Available phase.
  */
-export function OptionDiffList( { phase }: { phase: AvailablePhase } ) {
+export function OptionDiffList( { phase }: { phase: AvailableOptionsPhase } ) {
 	const titles = {
 		/* translators: %d: number of options. */
 		added: sprintf( __( 'Added (%d)', 'updatelens' ), phase.added.length ),

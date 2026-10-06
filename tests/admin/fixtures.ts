@@ -1,17 +1,24 @@
 /**
  * API responses for tests, based on real Reports API output for the
- * disposable "UpdateLens Fixture A" plugin (docs/rest-api.md).
+ * disposable "UpdateLens Fixture A" plugin (options) and the
+ * "UL Cron Fixture" update 1.4.0 → 1.5.0 (WP-Cron) (docs/rest-api.md).
  */
 import { vi } from 'vitest';
 
 import type {
 	AnalysisHistoryItem,
 	AnalysisReport,
-	AvailablePhase,
-	UnavailablePhase,
+	AvailableCronPhase,
+	AvailableOptionsPhase,
+	CronPhase,
+	OptionsPhase,
+	PhaseKey,
+	ReportPhase,
+	UnavailableCronPhase,
+	UnavailableOptionsPhase,
 } from '@/admin/types/api';
 
-export const DURING_UPDATE: AvailablePhase = {
+export const DURING_UPDATE: AvailableOptionsPhase = {
 	available: true,
 	association: 'update_request',
 	summary: {
@@ -88,7 +95,7 @@ const CHANGED = [
 	},
 ];
 
-export const POST_UPDATE: AvailablePhase = {
+export const POST_UPDATE: AvailableOptionsPhase = {
 	available: true,
 	association: 'observed_after_update',
 	summary: {
@@ -142,7 +149,7 @@ export const POST_UPDATE: AvailablePhase = {
 	changed: CHANGED,
 };
 
-export const FINAL: AvailablePhase = {
+export const FINAL: AvailableOptionsPhase = {
 	available: true,
 	association: 'net_across_phases',
 	summary: {
@@ -171,10 +178,188 @@ export const FINAL: AvailablePhase = {
 };
 
 export function unavailable(
-	association: UnavailablePhase[ 'association' ],
-	reason: UnavailablePhase[ 'reason' ]
-): UnavailablePhase {
+	association: UnavailableOptionsPhase[ 'association' ],
+	reason: UnavailableOptionsPhase[ 'reason' ]
+): UnavailableOptionsPhase {
 	return { available: false, association, reason };
+}
+
+export function cronUnavailable(
+	association: UnavailableCronPhase[ 'association' ],
+	reason: UnavailableCronPhase[ 'reason' ]
+): UnavailableCronPhase {
+	return { available: false, association, reason };
+}
+
+/** 2026-10-06T10:00:00Z. */
+export const T = 1791280800;
+
+/** Cron hook names repeat across lists; the core job is shown, never hidden. */
+export const CRON_DURING: AvailableCronPhase = {
+	available: true,
+	association: 'update_request',
+	summary: {
+		before_event_count: 12,
+		after_event_count: 13,
+		event_count_delta: 1,
+		before_recurring_count: 11,
+		after_recurring_count: 11,
+		recurring_count_delta: 0,
+		before_single_count: 1,
+		after_single_count: 2,
+		single_count_delta: 1,
+		before_unique_hook_count: 11,
+		after_unique_hook_count: 11,
+		unique_hook_count_delta: 0,
+		added_count: 1,
+		removed_count: 0,
+		rescheduled_count: 0,
+		changed_count: 0,
+	},
+	added: [
+		{
+			hook: 'ul_fixture_update_once',
+			timestamp: T + 600,
+			schedule: null,
+			interval: null,
+			is_recurring: false,
+		},
+	],
+	removed: [],
+	rescheduled: [],
+	changed: [],
+};
+
+export const CRON_POST: AvailableCronPhase = {
+	available: true,
+	association: 'observed_after_update',
+	summary: {
+		before_event_count: 13,
+		after_event_count: 13,
+		event_count_delta: 0,
+		before_recurring_count: 11,
+		after_recurring_count: 11,
+		recurring_count_delta: 0,
+		before_single_count: 2,
+		after_single_count: 2,
+		single_count_delta: 0,
+		before_unique_hook_count: 11,
+		after_unique_hook_count: 11,
+		unique_hook_count_delta: 0,
+		added_count: 1,
+		removed_count: 1,
+		rescheduled_count: 2,
+		changed_count: 0,
+	},
+	added: [
+		{
+			hook: 'ul_fixture_task_1.5.0',
+			timestamp: T + 1800,
+			schedule: 'hourly',
+			interval: 3600,
+			is_recurring: true,
+		},
+	],
+	removed: [
+		{
+			hook: 'ul_fixture_task_1.4.0',
+			timestamp: T + 1200,
+			schedule: 'hourly',
+			interval: 3600,
+			is_recurring: true,
+		},
+	],
+	rescheduled: [
+		{
+			hook: 'ul_fixture_cleanup',
+			before_timestamp: T + 3600,
+			after_timestamp: T + 10800,
+			timestamp_delta: 7200,
+			schedule: 'daily',
+			interval: 86400,
+			is_recurring: true,
+		},
+		{
+			hook: 'wp_privacy_delete_old_export_files',
+			before_timestamp: T,
+			after_timestamp: T + 3600,
+			timestamp_delta: 3600,
+			schedule: 'hourly',
+			interval: 3600,
+			is_recurring: true,
+		},
+	],
+	changed: [],
+};
+
+export const CRON_FINAL: AvailableCronPhase = {
+	available: true,
+	association: 'net_across_phases',
+	summary: {
+		before_event_count: 12,
+		after_event_count: 13,
+		event_count_delta: 1,
+		before_recurring_count: 11,
+		after_recurring_count: 11,
+		recurring_count_delta: 0,
+		before_single_count: 1,
+		after_single_count: 2,
+		single_count_delta: 1,
+		before_unique_hook_count: 11,
+		after_unique_hook_count: 11,
+		unique_hook_count_delta: 0,
+		added_count: 2,
+		removed_count: 1,
+		rescheduled_count: 2,
+		changed_count: 0,
+	},
+	added: [ CRON_POST.added[ 0 ], CRON_DURING.added[ 0 ] ],
+	removed: CRON_POST.removed,
+	rescheduled: CRON_POST.rescheduled,
+	changed: [],
+};
+
+/**
+ * Report phases from options and Cron phases per phase.
+ *
+ * @param options Options phases.
+ * @param cron    Cron phases.
+ */
+export function phases(
+	options: Record< PhaseKey, OptionsPhase >,
+	cron: Record< PhaseKey, CronPhase >
+): Record< PhaseKey, ReportPhase > {
+	return {
+		during_update: {
+			options: options.during_update,
+			cron: cron.during_update,
+		},
+		post_update: { options: options.post_update, cron: cron.post_update },
+		final: { options: options.final, cron: cron.final },
+	};
+}
+
+const OPTIONS_ALL = {
+	during_update: DURING_UPDATE,
+	post_update: POST_UPDATE,
+	final: FINAL,
+};
+
+const CRON_ALL = {
+	during_update: CRON_DURING,
+	post_update: CRON_POST,
+	final: CRON_FINAL,
+};
+
+/** Every phase of one signal unavailable for the same reason. */
+function cronEverywhere(
+	reason: UnavailableCronPhase[ 'reason' ]
+): Record< PhaseKey, CronPhase > {
+	return {
+		during_update: cronUnavailable( 'update_request', reason ),
+		post_update: cronUnavailable( 'observed_after_update', reason ),
+		final: cronUnavailable( 'net_across_phases', reason ),
+	};
 }
 
 export const COMPLETED: AnalysisReport = {
@@ -192,11 +377,8 @@ export const COMPLETED: AnalysisReport = {
 		settle_deadline: '2026-10-05T18:51:08Z',
 		completed_at: '2026-10-05T18:46:09Z',
 	},
-	phases: {
-		during_update: DURING_UPDATE,
-		post_update: POST_UPDATE,
-		final: FINAL,
-	},
+	observation_window_seconds: 300,
+	phases: phases( OPTIONS_ALL, CRON_ALL ),
 	error: null,
 };
 
@@ -208,11 +390,24 @@ export const EXPIRED: AnalysisReport = {
 		...COMPLETED.timestamps,
 		completed_at: '2026-10-05T19:10:41Z',
 	},
-	phases: {
-		during_update: DURING_UPDATE,
-		post_update: unavailable( 'observed_after_update', 'settle_expired' ),
-		final: unavailable( 'net_across_phases', 'settle_expired' ),
-	},
+	phases: phases(
+		{
+			during_update: DURING_UPDATE,
+			post_update: unavailable(
+				'observed_after_update',
+				'settle_expired'
+			),
+			final: unavailable( 'net_across_phases', 'settle_expired' ),
+		},
+		{
+			during_update: CRON_DURING,
+			post_update: cronUnavailable(
+				'observed_after_update',
+				'settle_expired'
+			),
+			final: cronUnavailable( 'net_across_phases', 'settle_expired' ),
+		}
+	),
 };
 
 export const FAILED: AnalysisReport = {
@@ -222,11 +417,17 @@ export const FAILED: AnalysisReport = {
 	status: 'failed',
 	settle_outcome: 'not_applicable',
 	error: { code: 'update_not_installed' },
-	phases: {
-		during_update: unavailable( 'update_request', 'update_failed' ),
-		post_update: unavailable( 'observed_after_update', 'update_failed' ),
-		final: unavailable( 'net_across_phases', 'update_failed' ),
-	},
+	phases: phases(
+		{
+			during_update: unavailable( 'update_request', 'update_failed' ),
+			post_update: unavailable(
+				'observed_after_update',
+				'update_failed'
+			),
+			final: unavailable( 'net_across_phases', 'update_failed' ),
+		},
+		cronEverywhere( 'update_failed' )
+	),
 };
 
 export const INCOMPATIBLE: AnalysisReport = {
@@ -234,27 +435,40 @@ export const INCOMPATIBLE: AnalysisReport = {
 	id: 4,
 	status: 'incompatible',
 	error: { code: 'fingerprint_context_changed' },
-	phases: {
-		during_update: DURING_UPDATE,
-		post_update: unavailable(
-			'observed_after_update',
-			'fingerprint_context_changed'
-		),
-		final: unavailable(
-			'net_across_phases',
-			'fingerprint_context_changed'
-		),
-	},
+	phases: phases(
+		{
+			during_update: DURING_UPDATE,
+			post_update: unavailable(
+				'observed_after_update',
+				'fingerprint_context_changed'
+			),
+			final: unavailable(
+				'net_across_phases',
+				'fingerprint_context_changed'
+			),
+		},
+		{
+			during_update: CRON_DURING,
+			post_update: cronUnavailable(
+				'observed_after_update',
+				'analysis_ended'
+			),
+			final: cronUnavailable( 'net_across_phases', 'analysis_ended' ),
+		}
+	),
 };
 
 export const CORRUPT_POST: AnalysisReport = {
 	...COMPLETED,
 	id: 5,
-	phases: {
-		during_update: DURING_UPDATE,
-		post_update: unavailable( 'observed_after_update', 'data_corrupt' ),
-		final: FINAL,
-	},
+	phases: phases(
+		{
+			during_update: DURING_UPDATE,
+			post_update: unavailable( 'observed_after_update', 'data_corrupt' ),
+			final: FINAL,
+		},
+		CRON_ALL
+	),
 };
 
 export const AWAITING: AnalysisReport = {
@@ -263,11 +477,66 @@ export const AWAITING: AnalysisReport = {
 	status: 'awaiting_settle',
 	settle_outcome: null,
 	timestamps: { ...COMPLETED.timestamps, completed_at: null },
-	phases: {
-		during_update: DURING_UPDATE,
-		post_update: unavailable( 'observed_after_update', 'awaiting_settle' ),
-		final: unavailable( 'net_across_phases', 'awaiting_settle' ),
-	},
+	phases: phases(
+		{
+			during_update: DURING_UPDATE,
+			post_update: unavailable(
+				'observed_after_update',
+				'awaiting_settle'
+			),
+			final: unavailable( 'net_across_phases', 'awaiting_settle' ),
+		},
+		{
+			during_update: CRON_DURING,
+			post_update: cronUnavailable(
+				'observed_after_update',
+				'awaiting_settle'
+			),
+			final: cronUnavailable( 'net_across_phases', 'awaiting_settle' ),
+		}
+	),
+};
+
+/** Options complete; WP-Cron after-update lost (partial availability). */
+export const PARTIAL_CRON: AnalysisReport = {
+	...COMPLETED,
+	id: 7,
+	phases: phases( OPTIONS_ALL, {
+		during_update: CRON_DURING,
+		post_update: cronUnavailable(
+			'observed_after_update',
+			'snapshot_unavailable'
+		),
+		final: CRON_FINAL,
+	} ),
+};
+
+/** Options complete; the site's Cron state was malformed. */
+export const MALFORMED_CRON: AnalysisReport = {
+	...COMPLETED,
+	id: 8,
+	phases: phases( OPTIONS_ALL, cronEverywhere( 'malformed_cron_state' ) ),
+};
+
+/** Options unreadable in every phase, WP-Cron available. */
+export const CRON_ONLY: AnalysisReport = {
+	...COMPLETED,
+	id: 9,
+	phases: phases(
+		{
+			during_update: unavailable( 'update_request', 'data_corrupt' ),
+			post_update: unavailable( 'observed_after_update', 'data_corrupt' ),
+			final: unavailable( 'net_across_phases', 'data_corrupt' ),
+		},
+		CRON_ALL
+	),
+};
+
+/** A report from before WP-Cron observation (migrated history). */
+export const PRE_CRON: AnalysisReport = {
+	...COMPLETED,
+	id: 10,
+	phases: phases( OPTIONS_ALL, cronEverywhere( 'not_captured' ) ),
 };
 
 export function historyItem(
@@ -281,9 +550,9 @@ export function historyItem(
 		settle_outcome: report.settle_outcome,
 		timestamps: report.timestamps,
 		error: report.error,
-		has_during_update: report.phases.during_update.available,
-		has_post_update: report.phases.post_update.available,
-		has_final: report.phases.final.available,
+		has_during_update: report.phases.during_update.options.available,
+		has_post_update: report.phases.post_update.options.available,
+		has_final: report.phases.final.options.available,
 		...overrides,
 	};
 }

@@ -22,7 +22,11 @@ export type PhaseKey = 'during_update' | 'post_update' | 'final';
 export type PhaseAssociation =
 	'update_request' | 'observed_after_update' | 'net_across_phases';
 
-export type UnavailableReason =
+/** Signals observed per phase. */
+export type Provider = 'options' | 'cron';
+
+/** Why an options phase is unavailable. */
+export type OptionsUnavailableReason =
 	| 'update_in_progress'
 	| 'awaiting_settle'
 	| 'settle_expired'
@@ -32,6 +36,24 @@ export type UnavailableReason =
 	| 'analysis_abandoned'
 	| 'data_corrupt'
 	| 'not_recorded';
+
+/** Why a WP-Cron phase is unavailable (stored Cron reasons plus read-model reasons). */
+export type CronUnavailableReason =
+	| 'update_in_progress'
+	| 'awaiting_settle'
+	| 'malformed_cron_state'
+	| 'snapshot_unavailable'
+	| 'fingerprint_context_changed'
+	| 'not_captured'
+	| 'storage_failed'
+	| 'analysis_failed'
+	| 'settle_expired'
+	| 'update_failed'
+	| 'analysis_abandoned'
+	| 'analysis_ended'
+	| 'data_corrupt'
+	| 'not_recorded'
+	| 'unknown';
 
 export interface PluginInfo {
 	/** Plugin basename (`dir/file.php`); null if the stored value was invalid. */
@@ -64,15 +86,15 @@ interface AnalysisBase {
 	error: AnalysisError | null;
 }
 
-/** Row of GET /updatelens/v1/analyses. Flags say whether a phase diff is stored. */
+/** Row of GET /updatelens/v1/analyses. Flags say whether an options diff is stored per phase. */
 export interface AnalysisHistoryItem extends AnalysisBase {
 	has_during_update: boolean;
 	has_post_update: boolean;
 	has_final: boolean;
 }
 
-/** Totals and signed deltas (`after - before`) in raw counts and bytes. */
-export interface DiffSummary {
+/** Options totals and signed deltas (`after - before`) in raw counts and bytes. */
+export interface OptionsDiffSummary {
 	before_option_count: number;
 	after_option_count: number;
 	option_count_delta: number;
@@ -124,26 +146,119 @@ export interface ChangedOption {
 	autoload_behavior_changed: boolean;
 }
 
-export interface AvailablePhase {
+export interface AvailableOptionsPhase {
 	available: true;
 	association: PhaseAssociation;
-	summary: DiffSummary;
+	summary: OptionsDiffSummary;
 	added: AddedOption[];
 	removed: RemovedOption[];
 	changed: ChangedOption[];
 }
 
-export interface UnavailablePhase {
+export interface UnavailableOptionsPhase {
 	available: false;
 	association: PhaseAssociation;
-	reason: UnavailableReason;
+	reason: OptionsUnavailableReason;
 }
 
-export type AnalysisPhase = AvailablePhase | UnavailablePhase;
+export type OptionsPhase = AvailableOptionsPhase | UnavailableOptionsPhase;
+
+/** WP-Cron totals and signed deltas (`after - before`) in event counts. */
+export interface CronDiffSummary {
+	before_event_count: number;
+	after_event_count: number;
+	event_count_delta: number;
+	before_recurring_count: number;
+	after_recurring_count: number;
+	recurring_count_delta: number;
+	before_single_count: number;
+	after_single_count: number;
+	single_count_delta: number;
+	before_unique_hook_count: number;
+	after_unique_hook_count: number;
+	unique_hook_count_delta: number;
+	added_count: number;
+	removed_count: number;
+	rescheduled_count: number;
+	changed_count: number;
+}
+
+/**
+ * A scheduled event on one side of a diff. Arguments are never included:
+ * events of one hook with different arguments look the same.
+ */
+export interface CronEventState {
+	hook: string;
+	/** Unix timestamp (UTC seconds) of the next run. */
+	timestamp: number;
+	/** Recurrence name, null for a one-time event. */
+	schedule: string | null;
+	/** Stored interval in seconds, null for a one-time event or when not stored. */
+	interval: number | null;
+	is_recurring: boolean;
+}
+
+/** State after the change. */
+export type AddedCronEvent = CronEventState;
+
+/** State before the change. */
+export type RemovedCronEvent = CronEventState;
+
+/** The same event (hook + arguments) with the same recurrence at another time. */
+export interface RescheduledCronEvent {
+	hook: string;
+	before_timestamp: number;
+	after_timestamp: number;
+	/** Signed seconds (after - before), never 0. */
+	timestamp_delta: number;
+	schedule: string | null;
+	interval: number | null;
+	is_recurring: boolean;
+}
+
+/** The same event (hook + arguments) with another recurrence. */
+export interface ChangedCronEvent {
+	hook: string;
+	before_timestamp: number;
+	after_timestamp: number;
+	timestamp_changed: boolean;
+	before_schedule: string | null;
+	after_schedule: string | null;
+	before_interval: number | null;
+	after_interval: number | null;
+	before_is_recurring: boolean;
+	after_is_recurring: boolean;
+}
+
+export interface AvailableCronPhase {
+	available: true;
+	association: PhaseAssociation;
+	summary: CronDiffSummary;
+	added: AddedCronEvent[];
+	removed: RemovedCronEvent[];
+	rescheduled: RescheduledCronEvent[];
+	changed: ChangedCronEvent[];
+}
+
+export interface UnavailableCronPhase {
+	available: false;
+	association: PhaseAssociation;
+	reason: CronUnavailableReason;
+}
+
+export type CronPhase = AvailableCronPhase | UnavailableCronPhase;
+
+/** One observation phase: each signal with its own availability. */
+export interface ReportPhase {
+	options: OptionsPhase;
+	cron: CronPhase;
+}
 
 /** GET /updatelens/v1/analyses/{id}. */
 export interface AnalysisReport extends AnalysisBase {
-	phases: Record< PhaseKey, AnalysisPhase >;
+	/** Length of the post-update observation window in seconds. */
+	observation_window_seconds: number;
+	phases: Record< PhaseKey, ReportPhase >;
 }
 
 /** One history page with the pagination headers. */

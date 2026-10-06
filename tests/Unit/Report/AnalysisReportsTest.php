@@ -320,14 +320,14 @@ final class AnalysisReportsTest extends TestCase {
 
 		$this->assertSame( 'completed', $report['status'] );
 		$this->assertSame( 'expired', $report['settle_outcome'] );
-		$this->assertTrue( $report['phases']['during_update']['available'] );
+		$this->assertTrue( $report['phases']['during_update']['options']['available'] );
 		$this->assertSame(
 			array(
 				'available'   => false,
 				'association' => 'observed_after_update',
 				'reason'      => 'settle_expired',
 			),
-			$report['phases']['post_update']
+			$report['phases']['post_update']['options']
 		);
 		$this->assertSame(
 			array(
@@ -335,7 +335,7 @@ final class AnalysisReportsTest extends TestCase {
 				'association' => 'net_across_phases',
 				'reason'      => 'settle_expired',
 			),
-			$report['phases']['final']
+			$report['phases']['final']['options']
 		);
 		$this->assertSame( '2027-01-15T08:05:01Z', $report['timestamps']['completed_at'] );
 		$this->assertSame( $captures, $this->site->captures );
@@ -352,7 +352,7 @@ final class AnalysisReportsTest extends TestCase {
 		$codec  = new OptionsDiffCodec();
 		$report = $this->reports()->report( 1 );
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'phases', 'error' ), array_keys( $report ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'error' ), array_keys( $report ) );
 		$this->assertSame( 1, $report['id'] );
 		$this->assertSame( 'completed', $report['status'] );
 		$this->assertSame( 'admin_shutdown', $report['settle_outcome'] );
@@ -375,25 +375,25 @@ final class AnalysisReportsTest extends TestCase {
 					'removed'     => $diff['removed'],
 					'changed'     => $diff['changed'],
 				),
-				$report['phases'][ $phase ],
+				$report['phases'][ $phase ]['options'],
 				$phase
 			);
 		}
 
-		$this->assertSame( array( 'acme_needs_migration' ), array_column( $report['phases']['during_update']['added'], 'name' ) );
-		$this->assertSame( array( 'acme_flags' ), array_column( $report['phases']['post_update']['added'], 'name' ) );
-		$this->assertSame( array( 'acme_legacy', 'acme_needs_migration' ), array_column( $report['phases']['post_update']['removed'], 'name' ) );
-		$this->assertSame( array( 'acme_settings' ), array_column( $report['phases']['final']['changed'], 'name' ) );
-		$this->assertSame( array( 'acme_legacy' ), array_column( $report['phases']['final']['removed'], 'name' ) );
+		$this->assertSame( array( 'acme_needs_migration' ), array_column( $report['phases']['during_update']['options']['added'], 'name' ) );
+		$this->assertSame( array( 'acme_flags' ), array_column( $report['phases']['post_update']['options']['added'], 'name' ) );
+		$this->assertSame( array( 'acme_legacy', 'acme_needs_migration' ), array_column( $report['phases']['post_update']['options']['removed'], 'name' ) );
+		$this->assertSame( array( 'acme_settings' ), array_column( $report['phases']['final']['options']['changed'], 'name' ) );
+		$this->assertSame( array( 'acme_legacy' ), array_column( $report['phases']['final']['options']['removed'], 'name' ) );
 
-		$summary = $report['phases']['final']['summary'];
+		$summary = $report['phases']['final']['options']['summary'];
 		$this->assertSame( 0, $summary['option_count_delta'] );
 		$this->assertSame( 1, $summary['changed_count'] );
 		$this->assertSame( 1, $summary['value_changed_count'] );
 		foreach ( $summary as $key => $value ) {
 			$this->assertIsInt( $value, $key );
 		}
-		$changed = $report['phases']['final']['changed'][0];
+		$changed = $report['phases']['final']['options']['changed'][0];
 		$this->assertTrue( $changed['value_changed'] );
 		$this->assertIsInt( $changed['size_delta'] );
 		$this->assertFalse( $changed['autoload_behavior_changed'] );
@@ -414,8 +414,8 @@ final class AnalysisReportsTest extends TestCase {
 		$this->assertSame( array( 'code' => 'incompatible_archive' ), $report['error'] );
 		$this->assertNull( $report['plugin']['version_after'] );
 		foreach ( $report['phases'] as $phase ) {
-			$this->assertFalse( $phase['available'] );
-			$this->assertSame( UnavailableReason::UPDATE_FAILED, $phase['reason'] );
+			$this->assertFalse( $phase['options']['available'] );
+			$this->assertSame( UnavailableReason::UPDATE_FAILED, $phase['options']['reason'] );
 		}
 	}
 
@@ -430,7 +430,7 @@ final class AnalysisReportsTest extends TestCase {
 		$report = $this->reports()->report( 1 );
 
 		$this->assertSame( array( 'code' => 'update_not_completed' ), $report['error'] );
-		$this->assertSame( UnavailableReason::UPDATE_FAILED, $report['phases']['during_update']['reason'] );
+		$this->assertSame( UnavailableReason::UPDATE_FAILED, $report['phases']['during_update']['options']['reason'] );
 	}
 
 	/**
@@ -447,7 +447,7 @@ final class AnalysisReportsTest extends TestCase {
 		$this->assertSame( 'incompatible', $report['status'] );
 		$this->assertSame( array( 'code' => 'fingerprint_context_changed' ), $report['error'] );
 		foreach ( $report['phases'] as $phase ) {
-			$this->assertSame( UnavailableReason::FINGERPRINT_CONTEXT_CHANGED, $phase['reason'] );
+			$this->assertSame( UnavailableReason::FINGERPRINT_CONTEXT_CHANGED, $phase['options']['reason'] );
 		}
 	}
 
@@ -463,9 +463,9 @@ final class AnalysisReportsTest extends TestCase {
 
 		$this->assertSame( 'incompatible', $report['status'] );
 		$this->assertSame( 'admin_shutdown', $report['settle_outcome'] );
-		$this->assertTrue( $report['phases']['during_update']['available'] );
-		$this->assertSame( UnavailableReason::FINGERPRINT_CONTEXT_CHANGED, $report['phases']['post_update']['reason'] );
-		$this->assertSame( UnavailableReason::FINGERPRINT_CONTEXT_CHANGED, $report['phases']['final']['reason'] );
+		$this->assertTrue( $report['phases']['during_update']['options']['available'] );
+		$this->assertSame( UnavailableReason::FINGERPRINT_CONTEXT_CHANGED, $report['phases']['post_update']['options']['reason'] );
+		$this->assertSame( UnavailableReason::FINGERPRINT_CONTEXT_CHANGED, $report['phases']['final']['options']['reason'] );
 	}
 
 	/**
@@ -481,9 +481,9 @@ final class AnalysisReportsTest extends TestCase {
 		$this->assertNull( $report['settle_outcome'] );
 		$this->assertNull( $report['timestamps']['completed_at'] );
 		$this->assertSame( '2027-01-15T08:05:00Z', $report['timestamps']['settle_deadline'] );
-		$this->assertTrue( $report['phases']['during_update']['available'] );
-		$this->assertSame( UnavailableReason::AWAITING_SETTLE, $report['phases']['post_update']['reason'] );
-		$this->assertSame( UnavailableReason::AWAITING_SETTLE, $report['phases']['final']['reason'] );
+		$this->assertTrue( $report['phases']['during_update']['options']['available'] );
+		$this->assertSame( UnavailableReason::AWAITING_SETTLE, $report['phases']['post_update']['options']['reason'] );
+		$this->assertSame( UnavailableReason::AWAITING_SETTLE, $report['phases']['final']['options']['reason'] );
 	}
 
 	/**
@@ -495,7 +495,7 @@ final class AnalysisReportsTest extends TestCase {
 		$report = $this->reports()->report( 1 );
 
 		$this->assertSame( 'captured', $report['status'] );
-		$this->assertSame( UnavailableReason::UPDATE_IN_PROGRESS, $report['phases']['during_update']['reason'] );
+		$this->assertSame( UnavailableReason::UPDATE_IN_PROGRESS, $report['phases']['during_update']['options']['reason'] );
 	}
 
 	/**
@@ -510,7 +510,7 @@ final class AnalysisReportsTest extends TestCase {
 
 		$this->assertSame( 'abandoned', $report['status'] );
 		$this->assertSame( array( 'code' => 'another_update_started' ), $report['error'] );
-		$this->assertSame( UnavailableReason::ANALYSIS_ABANDONED, $report['phases']['during_update']['reason'] );
+		$this->assertSame( UnavailableReason::ANALYSIS_ABANDONED, $report['phases']['during_update']['options']['reason'] );
 	}
 
 	/**
@@ -532,15 +532,15 @@ final class AnalysisReportsTest extends TestCase {
 
 		$report = $this->reports()->report( 1 );
 
-		$this->assertTrue( $report['phases']['during_update']['available'] );
-		$this->assertTrue( $report['phases']['final']['available'] );
+		$this->assertTrue( $report['phases']['during_update']['options']['available'] );
+		$this->assertTrue( $report['phases']['final']['options']['available'] );
 		$this->assertSame(
 			array(
 				'available'   => false,
 				'association' => 'observed_after_update',
 				'reason'      => 'data_corrupt',
 			),
-			$report['phases']['post_update']
+			$report['phases']['post_update']['options']
 		);
 		$this->assertStringNotContainsString( self::FAKE_SECRET, (string) self::json( $report ) );
 	}
@@ -663,30 +663,357 @@ final class AnalysisReportsTest extends TestCase {
 	}
 
 	/**
-	 * Stored WP-Cron data is not part of the reports yet: the API contract is unchanged.
+	 * Obviously fake credential in Cron arguments.
 	 */
-	public function test_cron_data_is_not_exposed() {
-		$this->site->cron = CronFixture::cron( array( CronFixture::recurring( self::T0 + 600, 'acme_cleanup', 'daily', array( 'token' => self::FAKE_SECRET ) ) ) );
-		$this->site->update( 'a/a.php' );
-		$this->site->cron  = CronFixture::cron( array( CronFixture::recurring( self::T0 + 4200, 'acme_cleanup', 'daily', array( 'token' => self::FAKE_SECRET ) ) ) );
-		$this->site->time += 60;
-		$this->site->admin_page();
-		$this->site->update( 'b/b.php' ); // Awaiting, with Cron snapshots stored.
+	const CRON_SECRET = 'sk_test_UPDATE_LENS_CRON_REPORT_SECRET';
 
-		$row = $this->site->repository->rows[1];
-		$this->assertNotNull( $row['cron_post_update_diff'], 'The fixture stores Cron data.' );
+	/**
+	 * Cron before the update: a plugin job with secret arguments and a core job.
+	 *
+	 * @return array
+	 */
+	private static function cron_before() {
+		return CronFixture::cron(
+			array(
+				CronFixture::recurring( self::T0 + 3600, 'acme_cleanup', 'daily', array( 'token' => self::CRON_SECRET ) ),
+				CronFixture::recurring( self::T0 + 600, 'wp_version_check', 'twicedaily' ),
+			)
+		);
+	}
+
+	/**
+	 * Cron right after the update: the update request scheduled a one-time job.
+	 *
+	 * @return array
+	 */
+	private static function cron_immediate() {
+		return CronFixture::cron(
+			array(
+				CronFixture::recurring( self::T0 + 3600, 'acme_cleanup', 'daily', array( 'token' => self::CRON_SECRET ) ),
+				CronFixture::recurring( self::T0 + 600, 'wp_version_check', 'twicedaily' ),
+				CronFixture::single( self::T0 + 900, 'acme_update_once', array( 'https://hooks.example.test/' . self::CRON_SECRET ) ),
+			)
+		);
+	}
+
+	/**
+	 * Cron at settle: the plugin job and a core job moved, a report job was added.
+	 *
+	 * @return array
+	 */
+	private static function cron_settled() {
+		return CronFixture::cron(
+			array(
+				CronFixture::recurring( self::T0 + 7200, 'acme_cleanup', 'daily', array( 'token' => self::CRON_SECRET ) ),
+				CronFixture::recurring( self::T0 + 600 + 43200, 'wp_version_check', 'twicedaily' ),
+				CronFixture::single( self::T0 + 900, 'acme_update_once', array( 'https://hooks.example.test/' . self::CRON_SECRET ) ),
+				CronFixture::recurring( self::T0 + 1800, 'acme_report', 'hourly' ),
+			)
+		);
+	}
+
+	/**
+	 * Cron state with a malformed plugin entry.
+	 *
+	 * @param array $cron Valid state.
+	 * @return array
+	 */
+	private static function malformed( array $cron ) {
+		$cron[ self::T0 + 99 ]['acme_broken'] = array( 'k' => 'token=' . self::CRON_SECRET );
+
+		return $cron;
+	}
+
+	/**
+	 * An update with the given Cron states; a null settled state leaves it awaiting.
+	 *
+	 * @param array      $before    Cron before.
+	 * @param array      $immediate Cron after the update request.
+	 * @param array|null $settled   Cron at the next admin page, or null.
+	 * @return void
+	 */
+	private function cron_update( array $before, array $immediate, $settled ) {
+		$this->site->cron = $before;
+		$request          = $this->site->request();
+		$this->site->start( $request, 'acme/acme.php' );
+		$this->site->options['acme_needs_migration'] = array( '1', 'off' );
+		$this->site->cron                            = $immediate;
+		$this->site->time                           += 5;
+		$request->update_finished( 'acme/acme.php', null, '1.1.0' );
+		$request->request_ending( true );
+
+		if ( null !== $settled ) {
+			$this->site->cron  = $settled;
+			$this->site->time += 10;
+			$this->site->admin_page();
+		}
+	}
+
+	/**
+	 * Per phase and signal: true, or the unavailable reason.
+	 *
+	 * @param array $report Report.
+	 * @return array
+	 */
+	private static function availability( array $report ) {
+		$result = array();
+		foreach ( $report['phases'] as $phase => $signals ) {
+			foreach ( $signals as $signal => $data ) {
+				$result[ $phase ][ $signal ] = $data['available'] ? true : $data['reason'];
+			}
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Hooks per list of a Cron phase.
+	 *
+	 * @param array $cron Available Cron phase.
+	 * @return array
+	 */
+	private static function hooks( array $cron ) {
+		return array(
+			'added'       => array_column( $cron['added'], 'hook' ),
+			'removed'     => array_column( $cron['removed'], 'hook' ),
+			'rescheduled' => array_column( $cron['rescheduled'], 'hook' ),
+			'changed'     => array_column( $cron['changed'], 'hook' ),
+		);
+	}
+
+	/**
+	 * Full success: both signals available in all three phases, core Cron movement kept.
+	 */
+	public function test_cron_full_report() {
+		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'error' ), array_keys( $report ) );
+		$this->assertSame( PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS, $report['observation_window_seconds'] );
+		$this->assertSame(
+			array_fill_keys(
+				array( 'during_update', 'post_update', 'final' ),
+				array(
+					'options' => true,
+					'cron'    => true,
+				)
+			),
+			self::availability( $report )
+		);
+
+		$during = $report['phases']['during_update']['cron'];
+		$this->assertSame( 'update_request', $during['association'] );
+		$this->assertSame( array( 'acme_update_once' ), self::hooks( $during )['added'] );
+		$this->assertSame(
+			array(
+				'hook'         => 'acme_update_once',
+				'timestamp'    => self::T0 + 900,
+				'schedule'     => null,
+				'interval'     => null,
+				'is_recurring' => false,
+			),
+			$during['added'][0]
+		);
+
+		$post = $report['phases']['post_update']['cron'];
+		$this->assertSame(
+			array(
+				'added'       => array( 'acme_report' ),
+				'removed'     => array(),
+				'rescheduled' => array( 'acme_cleanup', 'wp_version_check' ),
+				'changed'     => array(),
+			),
+			self::hooks( $post )
+		);
+		$this->assertSame( array( 'hook', 'before_timestamp', 'after_timestamp', 'timestamp_delta', 'schedule', 'interval', 'is_recurring' ), array_keys( $post['rescheduled'][0] ) );
+		$this->assertSame( 43200, $post['rescheduled'][1]['timestamp_delta'] );
+
+		$final = $report['phases']['final']['cron'];
+		$this->assertSame( array( 'acme_report', 'acme_update_once' ), self::hooks( $final )['added'] );
+		$this->assertSame( 2, $final['summary']['event_count_delta'] );
+		foreach ( $final['summary'] as $key => $value ) {
+			$this->assertIsInt( $value, $key );
+		}
+	}
+
+	/**
+	 * Partial availability: Cron after-update lost (corrupt stored IMMEDIATE), everything else available.
+	 */
+	public function test_cron_partial_availability() {
+		$this->cron_update( self::cron_before(), self::cron_immediate(), null );
+		$this->site->repository->rows[1]['cron_immediate_snapshot'] = '{"schema":1,';
+		$this->site->cron  = self::cron_settled();
+		$this->site->time += 10;
+		$this->site->admin_page();
+
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame( 'completed', $report['status'] );
+		$this->assertSame(
+			array(
+				'during_update' => array(
+					'options' => true,
+					'cron'    => true,
+				),
+				'post_update'   => array(
+					'options' => true,
+					'cron'    => 'snapshot_unavailable',
+				),
+				'final'         => array(
+					'options' => true,
+					'cron'    => true,
+				),
+			),
+			self::availability( $report )
+		);
+	}
+
+	/**
+	 * Malformed Cron state: the options report is complete, Cron unavailable everywhere.
+	 */
+	public function test_malformed_cron_report() {
+		$this->cron_update( self::malformed( self::cron_before() ), self::malformed( self::cron_immediate() ), self::malformed( self::cron_settled() ) );
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame( 'completed', $report['status'] );
+		$this->assertNull( $report['error'] );
+		foreach ( $report['phases'] as $phase ) {
+			$this->assertTrue( $phase['options']['available'] );
+			$this->assertSame( 'malformed_cron_state', $phase['cron']['reason'] );
+		}
+		$this->assertStringNotContainsString( self::CRON_SECRET, self::json( $report ) );
+		$this->assertStringNotContainsString( 'acme_broken', self::json( $report ) );
+	}
+
+	/**
+	 * Expired settle window (expired by the report read): during available, after/net expired for both signals.
+	 */
+	public function test_expired_cron_report() {
+		$this->cron_update( self::cron_before(), self::cron_immediate(), null );
+		$this->site->time += PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS + 1;
+
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame( 'expired', $report['settle_outcome'] );
+		$this->assertSame(
+			array(
+				'during_update' => array(
+					'options' => true,
+					'cron'    => true,
+				),
+				'post_update'   => array(
+					'options' => 'settle_expired',
+					'cron'    => 'settle_expired',
+				),
+				'final'         => array(
+					'options' => 'settle_expired',
+					'cron'    => 'settle_expired',
+				),
+			),
+			self::availability( $report )
+		);
+	}
+
+	/**
+	 * While awaiting, the Cron during phase is available and the rest pending.
+	 */
+	public function test_awaiting_cron_report() {
+		$this->cron_update( self::cron_before(), self::cron_immediate(), null );
+		$report = $this->reports()->report( 1 );
+
+		$this->assertTrue( $report['phases']['during_update']['cron']['available'] );
+		$this->assertSame( 'awaiting_settle', $report['phases']['post_update']['cron']['reason'] );
+		$this->assertSame( 'awaiting_settle', $report['phases']['final']['cron']['reason'] );
+	}
+
+	/**
+	 * A corrupt stored Cron diff makes only that Cron phase unavailable.
+	 */
+	public function test_corrupt_stored_cron_diff() {
+		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
+		$this->site->repository->rows[1]['cron_final_diff'] = '{"schema":1,"added":"' . self::CRON_SECRET . '"';
+
+		$report = $this->reports()->report( 1 );
+
+		$this->assertSame( 'data_corrupt', $report['phases']['final']['cron']['reason'] );
+		$this->assertTrue( $report['phases']['final']['options']['available'] );
+		$this->assertTrue( $report['phases']['during_update']['cron']['available'] );
+		$this->assertTrue( $report['phases']['post_update']['cron']['available'] );
+		$this->assertStringNotContainsString( self::CRON_SECRET, self::json( $report ) );
+	}
+
+	/**
+	 * Reports from before Cron observation: options render; Cron is `not_captured` (migrated) or `not_recorded`.
+	 */
+	public function test_pre_cron_reports() {
+		$this->completed_update( 'a/a.php' );
+		$this->completed_update( 'b/b.php' );
+		foreach ( array( 1, 2 ) as $id ) {
+			foreach ( array( 'during_update', 'post_update', 'final' ) as $phase ) {
+				$this->site->repository->rows[ $id ][ "cron_{$phase}_diff" ]   = null;
+				$this->site->repository->rows[ $id ][ "cron_{$phase}_reason" ] = 1 === $id ? 'not_captured' : null;
+			}
+		}
 
 		$reports = $this->reports();
-		$history = $reports->history( 1, 20 );
-		$report  = $reports->report( 1 );
-
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'phases', 'error' ), array_keys( $report ) );
-		foreach ( $report['phases'] as $phase ) {
-			$this->assertNotContains( 'cron', array_keys( $phase ) );
+		foreach ( array(
+			1 => 'not_captured',
+			2 => 'not_recorded',
+		) as $id => $reason ) {
+			$report = $reports->report( $id );
+			foreach ( $report['phases'] as $phase ) {
+				$this->assertTrue( $phase['options']['available'] );
+				$this->assertSame( $reason, $phase['cron']['reason'] );
+			}
 		}
-		foreach ( array( self::json( $history ), self::json( $report ), self::json( $reports->report( 2 ) ) ) as $output ) {
-			foreach ( array( 'cron', 'acme_cleanup', 'args_fingerprint', 'fingerprint_context', 'rescheduled', self::FAKE_SECRET ) as $needle ) {
-				$this->assertStringNotContainsString( $needle, $output );
+	}
+
+	/**
+	 * History stays options-only and reads no Cron data.
+	 */
+	public function test_history_is_unchanged_by_cron() {
+		$this->cron_update( self::malformed( self::cron_before() ), self::malformed( self::cron_immediate() ), self::malformed( self::cron_settled() ) );
+		$items = $this->reports()->history( 1, 20 )['items'];
+
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'error', 'has_during_update', 'has_post_update', 'has_final' ), array_keys( $items[0] ) );
+		$this->assertTrue( $items[0]['has_final'], 'Flags describe the options signal.' );
+		$this->assertStringNotContainsString( 'cron', strtolower( self::json( $items ) ) );
+	}
+
+	/**
+	 * No Cron argument, fingerprint, context, md5 event key or snapshot reaches history or reports.
+	 */
+	public function test_cron_privacy() {
+		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
+		$this->cron_update( self::cron_settled(), self::malformed( self::cron_settled() ), null ); // Awaiting, with a stored Cron BEFORE.
+		$this->assertNotNull( $this->site->repository->rows[2]['cron_before_snapshot'] );
+
+		$reports = $this->reports();
+		$outputs = array( $reports->history( 1, 20 ), $reports->report( 1 ), $reports->report( 2 ) );
+
+		$forbidden = array(
+			self::CRON_SECRET,
+			'hooks.example.test',
+			'token',
+			'args',
+			'fingerprint',
+			'cron-args-hmac',
+			'snapshot',
+			'"schema"',
+			md5( serialize( array( 'token' => self::CRON_SECRET ) ) ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- Core's unkeyed event key.
+			md5( serialize( array( 'https://hooks.example.test/' . self::CRON_SECRET ) ) ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- Core's unkeyed event key.
+		);
+		$snapshot  = json_decode( $this->site->repository->rows[2]['cron_before_snapshot'], true );
+		foreach ( $snapshot['events'] as $event ) {
+			$forbidden[] = $event['args_fingerprint'];
+		}
+		$forbidden[] = $snapshot['fingerprint_context'];
+
+		foreach ( $outputs as $output ) {
+			foreach ( array( self::json( $output ), serialize( $output ), var_export( $output, true ) ) as $serialized ) { // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize, WordPress.PHP.DevelopmentFunctions.error_log_var_export -- Privacy assertion.
+				foreach ( $forbidden as $needle ) {
+					$this->assertStringNotContainsString( $needle, $serialized );
+				}
 			}
 		}
 	}

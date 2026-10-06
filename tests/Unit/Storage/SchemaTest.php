@@ -89,10 +89,11 @@ final class SchemaTest extends TestCase {
 
 		$this->assertSame( array(), array_diff( $report, $this->columns() ) );
 		foreach ( array( AnalysisRepository::REPORT_COLUMNS, AnalysisRepository::HISTORY_COLUMNS ) as $columns ) {
-			foreach ( array( '_snapshot', 'cron_', 'fingerprint', 'user_id', 'error_message', 'active_plugin' ) as $internal ) {
+			foreach ( array( '_snapshot', 'fingerprint', 'user_id', 'error_message', 'active_plugin' ) as $internal ) {
 				$this->assertStringNotContainsString( $internal, $columns );
 			}
 		}
+		$this->assertStringNotContainsString( 'cron_', AnalysisRepository::HISTORY_COLUMNS, 'History reads no Cron data.' );
 	}
 
 	/**

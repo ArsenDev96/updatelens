@@ -2,7 +2,7 @@
 
 A WordPress plugin that will show what changes when a plugin update runs. It will capture site state before and after a single plugin update and report the difference in wp-admin.
 
-**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records the `wp_options` changes it observed during the update request and during the first admin request after it (names, sizes and autoload state, never values) in its own database table. These are observed changes, not proven causes. **Tools → UpdateLens** shows the update history and a report per analysis (during update, after update, net result), backed by a read-only REST API ([docs/rest-api.md](docs/rest-api.md)).
+**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records the changes it observed during the update request and during the first admin request after it in its own database table, for two signals: **Options** (`wp_options` names, sizes and autoload state, never values) and **WP-Cron** (scheduled hooks, timing and recurrence, never event arguments). These are observed changes, not proven causes. **Tools → UpdateLens** shows the update history and a report per analysis (during update, after update, net result), backed by a read-only REST API ([docs/rest-api.md](docs/rest-api.md)).
 
 ## Requirements
 
@@ -77,9 +77,9 @@ includes/                PHP, PSR-4 namespace UpdateLens\
                          hooks, timing, recurrence — never option values or Cron arguments)
   Diff/                  wp_options and WP-Cron diffs between two snapshots (no values, arguments or fingerprints)
   Update/                Plugin update analysis lifecycle (WordPress updater hooks + rules); WP-Cron is observed
-                         and stored alongside wp_options as an independent signal, not yet shown in reports
+                         and stored alongside wp_options as an independent signal
   Storage/               Analyses table, SQL and JSON persistence formats
-  Report/                Safe read models for the report REST endpoints
+  Report/                Safe, provider-aware read models for the report REST endpoints (Options, WP-Cron)
 libs/assets.php          Vendored Vite ↔ WordPress asset loader (kucrut/vite-for-wp)
 src/
   admin/                 React + TypeScript admin app (entry: main.tsx)

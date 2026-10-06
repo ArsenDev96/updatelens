@@ -43,6 +43,7 @@ The plugin must stay distributable on WordPress.org:
 
 - GPL-2.0-or-later compatible code and dependencies only.
 - Minimums: PHP 7.4, WordPress 6.2 (the vendored Vite loader needs both). Don't use newer APIs without a guard or a deliberate minimum bump in `updatelens.php`, `readme.txt` and `phpcs.xml.dist`.
+- Stay clean on the newest PHP too: explicit nullable types (`?callable $now = null`, never `callable $now = null`, deprecated since PHP 8.4 and reported whenever the class loads).
 - Prefix all globals (`updatelens_` / `UPDATELENS_` / `UpdateLens\`). Text domain is `updatelens`.
 - Translate user-facing strings: PHP via `__()`/`esc_html__()` etc.; JS via `__()` from `@wordpress/i18n` (mapped to `wp.i18n`).
 - Don't bundle WordPress-provided packages. Any `@wordpress/*` import must be added to `WP_GLOBALS` in `vite.config.ts` **and** to the script dependencies in `Admin\AdminPage::enqueue_assets()`.
@@ -160,7 +161,7 @@ The plugin must stay distributable on WordPress.org:
 - **Changed options are dense**: one "Value changed · size" line; autoload setting/behavior rows only when `autoload_value_changed` or `autoload_behavior_changed`. Byte pairs that would round alike ("6 KB → 6 KB") get two decimals (`formatBytesPair`); the exact signed delta stays visible.
 - **Ownership is never guessed.** No "likely plugin-related"/"other activity" grouping, filters or prefix heuristics; every observed record is shown, including cache-like options (e.g. `_wpforms_transient_*`), other plugins' jobs and core jobs.
 - **WP-Cron in the UI**: hooks in monospace, never arguments or fingerprints. Rescheduled events are shown by default but with less emphasis than added/removed/changed, never as a warning or problem. WordPress core and unrelated jobs are never hidden or filtered; no ignore lists, no ownership, no risk wording.
-- **A removed one-time WP-Cron event is "No longer scheduled"** ("Previously scheduled for …"): it may have run or been unscheduled, which UpdateLens cannot tell apart, so never "ran", "executed", "completed" or "deleted". Recurring removals stay "Removed". This is wording only; the API category stays `removed`.
+- **A removed one-time WP-Cron event is "No longer scheduled"** ("Previously scheduled for …"): it may have run or been unscheduled, which UpdateLens cannot tell apart, so never "ran", "executed", "completed" or "deleted". Recurring removals stay "Removed". The summary card counting both says "No longer present". This is wording only; the API category stays `removed`.
 - **WP-Cron notes appear only when relevant**: the hidden-arguments note when events are listed; "One-time jobs may disappear…" only with a one-time disappearance; the moved-one-time note only with a rescheduled one-time event.
 - **UTC API timestamps are localized only in presentation** (`Intl.DateTimeFormat`, browser time zone); **backend byte counts are formatted only in presentation** (`utils/format.ts`, 1 KB = 1024 B). Never change the values sent by PHP.
 - **No risk classification** (impact levels, "safe"/"dangerous", size thresholds) without an explicitly designed model.
@@ -197,5 +198,5 @@ npm run i18n           # languages/updatelens.pot (needs WP-CLI)
 - CSS is scoped: `postcss.config.cjs` prefixes every selector with `#updatelens-root` (`:root`/`html`/`body` become the root itself). Radix/shadcn components that portal to `document.body` lose their styles — portal into an element inside the root.
 - The root id `updatelens-root` is shared by `Admin\AdminPage::ROOT_ID`, `src/admin/main.tsx` and `postcss.config.cjs`.
 - A stale `assets/admin/dist/vite-dev-server.json` (dev server killed uncleanly) makes the site load from `localhost:5173`. Delete it or run `npm run build`.
-- Bump versions together: `package.json`, `updatelens.php` (header + `UPDATELENS_VERSION`), `readme.txt` Stable tag. The release script enforces this.
+- Bump versions together: `package.json` (+ `package-lock.json`), `updatelens.php` (header + `UPDATELENS_VERSION`), `readme.txt` Stable tag. The release script enforces this. Betas are pre-releases of the next minor (`0.2.0-beta.1`); `0.1.0-beta.N` would sort below the `0.1.0` dev builds (see `docs/private-beta-release.md`).
 - `libs/assets.php` is vendored third-party code; it is excluded from WordPress PHPCS rules. Avoid editing it.

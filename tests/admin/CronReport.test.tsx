@@ -117,7 +117,7 @@ describe( 'WP-Cron in reports', () => {
 				.getAllByRole( 'term' )
 				.slice( 0, 4 )
 				.map( ( t ) => t.textContent )
-		).toEqual( [ 'Added', 'Removed', 'Changed', 'Rescheduled' ] );
+		).toEqual( [ 'Added', 'No longer present', 'Changed', 'Rescheduled' ] );
 		expect( metrics.slice( 0, 4 ).map( ( m ) => m.textContent ) ).toEqual( [
 			'2',
 			'1',

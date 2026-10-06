@@ -151,7 +151,7 @@ final class PluginUpdateAnalyzer {
 	 * @param callable           $capture_cron Returns a fresh CronSnapshot.
 	 * @param callable|null      $now          Returns the current Unix time. Default time().
 	 */
-	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, callable $now = null ) {
+	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null ) {
 		$this->repository     = $repository;
 		$this->capture        = $capture;
 		$this->cron           = new CronObservation( $capture_cron );

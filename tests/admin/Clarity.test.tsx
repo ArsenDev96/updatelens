@@ -285,10 +285,55 @@ describe( 'report clarity', () => {
 			expect( removed ).toHaveTextContent( 'Recurring · hourly' );
 			expect( removed ).toHaveTextContent( /Was scheduled for/ );
 			expect( removed ).not.toHaveTextContent( 'wordfence' );
-			// The summary still counts both under the backend category.
-			const terms = within( signalPanel() ).getAllByRole( 'term' );
-			expect( terms[ 1 ] ).toHaveTextContent( 'Removed' );
+		} );
+
+		it( 'counts recurring and one-time disappearances together as "No longer present"', async () => {
+			await renderReport( MIXED_WOOCOMMERCE );
+			const user = userEvent.setup();
+			await user.click( tab( /^WP-Cron/ ) );
+
+			const terms = within( signalPanel() )
+				.getAllByRole( 'term' )
+				.slice( 0, 4 );
+			expect( terms.map( ( t ) => t.textContent ) ).toEqual( [
+				'Added',
+				'No longer present',
+				'Changed',
+				'Rescheduled',
+			] );
+			// One recurring "Removed" plus one one-time "No longer scheduled".
 			expect( terms[ 1 ].nextElementSibling ).toHaveTextContent( '2' );
+			expect( section( 'Removed (1)' ) ).toBeInTheDocument();
+			expect( section( 'No longer scheduled (1)' ) ).toBeInTheDocument();
+		} );
+
+		it( 'never labels only one-time disappearances "Removed"', async () => {
+			await renderReport( {
+				...WORDFENCE,
+				phases: {
+					...WORDFENCE.phases,
+					final: {
+						...WORDFENCE.phases.final,
+						cron: cronPhase( 'net_across_phases', {
+							removed: [
+								oneTime(
+									'wordfence_completeCoreUpdateNotification',
+									T + 60
+								),
+								oneTime( 'wordfence_version_check', T + 120 ),
+							],
+						} ),
+					},
+				},
+			} );
+			const user = userEvent.setup();
+			await user.click( tab( /^WP-Cron/ ) );
+
+			const terms = within( signalPanel() ).getAllByRole( 'term' );
+			expect( terms[ 1 ] ).toHaveTextContent( 'No longer present' );
+			expect( terms[ 1 ].nextElementSibling ).toHaveTextContent( '2' );
+			expect( section( 'No longer scheduled (2)' ) ).toBeInTheDocument();
+			expect( signalPanel() ).not.toHaveTextContent( /Removed/ );
 		} );
 	} );
 

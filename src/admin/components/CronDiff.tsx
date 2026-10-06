@@ -29,7 +29,10 @@ import { Metric, Total } from './PhaseSummary';
  */
 
 /**
- * Added, removed, changed and rescheduled counts, then before → after totals.
+ * Added, no longer present, changed and rescheduled counts, then before →
+ * after totals. "No longer present" covers every event of the backend's
+ * `removed` category, recurring ("Removed") and one-time ("No longer
+ * scheduled") alike.
  *
  * @param props         Props.
  * @param props.summary Cron phase summary.
@@ -43,7 +46,10 @@ export function CronSummary( { summary }: { summary: CronDiffSummary } ) {
 					value={ formatCount( summary.added_count ) }
 				/>
 				<Metric
-					label={ __( 'Removed', 'updatelens' ) }
+					label={
+						/* translators: Summary count of WP-Cron events present before and absent after (removed or no longer scheduled). */
+						__( 'No longer present', 'updatelens' )
+					}
 					value={ formatCount( summary.removed_count ) }
 				/>
 				<Metric

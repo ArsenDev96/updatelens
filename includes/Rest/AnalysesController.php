@@ -83,7 +83,7 @@ final class AnalysesController extends WP_REST_Controller {
 	 *
 	 * @param callable|null $reports Returns an AnalysisReports instance. Default AnalysisReports::create().
 	 */
-	public function __construct( callable $reports = null ) {
+	public function __construct( ?callable $reports = null ) {
 		$this->namespace = Plugin::REST_NAMESPACE;
 		$this->rest_base = 'analyses';
 		$this->reports   = null === $reports ? array( AnalysisReports::class, 'create' ) : $reports;

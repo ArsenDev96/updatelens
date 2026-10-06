@@ -2,7 +2,7 @@
 
 A WordPress plugin that will show what changes when a plugin update runs. It will capture site state before and after a single plugin update and report the difference in wp-admin.
 
-**Status:** early development. When a single plugin is updated from wp-admin, UpdateLens records the changes it observed during the update request and during the first admin request after it in its own database table, for two signals: **Options** (`wp_options` names, sizes and autoload state, never values) and **WP-Cron** (scheduled hooks, timing and recurrence, never event arguments). These are observed changes, not proven causes. **Tools → UpdateLens** shows the update history and a report per analysis (during update, after update, net result), backed by a read-only REST API ([docs/rest-api.md](docs/rest-api.md)).
+**Status:** Private Beta 1 (`0.2.0-beta.1`, see [docs/private-beta.md](docs/private-beta.md) for testers and [docs/private-beta-release.md](docs/private-beta-release.md) for the release checklist). When a single plugin is updated from wp-admin, UpdateLens records the changes it observed during the update request and during the first admin request after it in its own database table, for two signals: **Options** (`wp_options` names, sizes and autoload state, never values) and **WP-Cron** (scheduled hooks, timing and recurrence, never event arguments). These are observed changes, not proven causes. **Tools → UpdateLens** shows the update history and a report per analysis (during update, after update, net result), backed by a read-only REST API ([docs/rest-api.md](docs/rest-api.md)).
 
 ## Requirements
 
@@ -88,7 +88,7 @@ src/
 assets/admin/dist/       Build output (git-ignored)
 scripts/release.mjs      ZIP packaging
 tests/                   PHPUnit (Unit/) and Vitest (admin/) tests (not shipped)
-docs/                    Developer documentation (REST API)
+docs/                    REST API reference, private-beta guide and release checklist
 ```
 
 ### How the pieces connect

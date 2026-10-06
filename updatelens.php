@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       UpdateLens
  * Description:       Observe what changes around WordPress plugin updates: options, autoload data and WP-Cron events.
- * Version:           0.2.0-beta.1
+ * Version:           0.2.0-beta.2
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            UpdateLens
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'UPDATELENS_VERSION', '0.2.0-beta.1' );
+define( 'UPDATELENS_VERSION', '0.2.0-beta.2' );
 define( 'UPDATELENS_FILE', __FILE__ );
 define( 'UPDATELENS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'UPDATELENS_URL', plugin_dir_url( __FILE__ ) );

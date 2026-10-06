@@ -1,6 +1,6 @@
 {
   "name": "updatelens",
-  "version": "0.2.0-beta.1",
+  "version": "0.2.0-beta.2",
   "private": true,
   "description": "Observe what changes around WordPress plugin updates: options, autoload data and WP-Cron events.",
   "license": "GPL-2.0-or-later",

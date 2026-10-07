@@ -249,14 +249,15 @@ final class Schema {
 	/**
 	 * Rename columns from earlier versions to their current names, keeping their data.
 	 *
-	 * All renames run in one ALTER TABLE statement. Version 1 `settled_diff`
-	 * was BEFORE → SETTLED, i.e. today's final diff; version 1 and 2 phase
-	 * columns held the options signal.
+	 * Version 1 `settled_diff` was BEFORE → SETTLED, i.e. today's final diff;
+	 * version 1 and 2 phase columns held the options signal. Each rename is
+	 * its own statement. If one fails, the upgrade stops and is retried later;
+	 * renames() then skips the columns already renamed.
 	 *
 	 * @param string $table Full table name.
 	 * @return bool Whether the renames succeeded (true if none were needed).
 	 */
-	private static function rename_columns( $table ) {
+	public static function rename_columns( $table ) {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema inspection.
@@ -265,16 +266,38 @@ final class Schema {
 			return false;
 		}
 
-		$clauses = array();
 		foreach ( self::renames( $columns ) as $rename ) {
-			$clauses[] = $wpdb->prepare( 'CHANGE COLUMN %i %i ', $rename[0], $rename[1] ) . $rename[2];
-		}
-		if ( ! $clauses ) {
-			return true;
+			if ( ! self::rename_column( $table, $rename[0], $rename[1], $rename[2] ) ) {
+				return false;
+			}
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.NotPrepared -- One-time schema upgrade; clauses prepared above, definitions are class constants.
-		return false !== $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i ', $table ) . implode( ', ', $clauses ) );
+		return true;
+	}
+
+	/**
+	 * Rename one column, keeping its data. Only the definitions used in
+	 * RENAMES are supported.
+	 *
+	 * @param string $table      Full table name.
+	 * @param string $from       Existing column name.
+	 * @param string $to         New column name.
+	 * @param string $definition Column definition from RENAMES.
+	 * @return bool Whether the column was renamed.
+	 */
+	private static function rename_column( $table, $from, $to, $definition ) {
+		global $wpdb;
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- One-time schema upgrade of the plugin's own table.
+		switch ( $definition ) {
+			case 'longtext DEFAULT NULL':
+				return false !== $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i CHANGE COLUMN %i %i longtext DEFAULT NULL', $table, $from, $to ) );
+			case 'varchar(20) DEFAULT NULL':
+				return false !== $wpdb->query( $wpdb->prepare( 'ALTER TABLE %i CHANGE COLUMN %i %i varchar(20) DEFAULT NULL', $table, $from, $to ) );
+		}
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange
+
+		return false;
 	}
 
 	/**

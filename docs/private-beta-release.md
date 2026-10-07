@@ -2,6 +2,15 @@
 
 Maintainer notes for packaging and running UpdateLens private betas. The tester-facing guide is [private-beta.md](private-beta.md).
 
+## WordPress.org releases (0.2.0 and later)
+
+The private-beta notes below still apply to packaging and testing. For a WordPress.org release, additionally:
+
+- Use a plain `X.Y.Z` version (the Stable tag may contain only numbers and periods). `0.2.0` sorts above `0.2.0-beta.2`, so beta sites can upgrade.
+- Run the official Plugin Check plugin against the exact release ZIP on a native, disposable WordPress site (all categories). Do not rely on WordPress Playground for this: its PHPCS checks can fail silently and report a false "No errors found". Plugin Repo errors block submission.
+- Validate `readme.txt` with the official readme validator (https://wordpress.org/plugins/developers/readme-validator/).
+- The release runtime loads only the production build; the dev-server helper in `dev/` and generated `languages/` files are never shipped. Third-party code that ships is listed in `THIRD-PARTY-NOTICES.txt`; update it when dependencies change.
+
 ## Distribution
 
 - Private ZIP distribution only: no WordPress.org submission, SVN, public release assets, licence keys, activation server or telemetry.
@@ -11,7 +20,7 @@ Maintainer notes for packaging and running UpdateLens private betas. The tester-
 
 ## Release-package audit
 
-The `INCLUDE` allowlist in `scripts/release.mjs` is the source of truth. The ZIP must contain the plugin PHP, `vendor/` (production autoloader only), the built admin app and the unminified `src/` with its build config. It must not contain `tests/`, `phpunit.xml.dist`, `phpcs.xml.dist`, `vendor/bin`, dev Composer packages, source maps, `vite-dev-server.json`, `docs/`, `node_modules/`, scratch or browser-test scripts, `.env`/local files or secrets.
+The `INCLUDE` allowlist in `scripts/release.mjs` is the source of truth. The ZIP must contain the plugin PHP, `vendor/` (production autoloader only), the built admin app and the unminified `src/` with its build config. It must not contain `tests/`, `phpunit.xml.dist`, `phpcs.xml.dist`, `vendor/bin`, dev Composer packages, source maps, `vite-dev-server.json`, `dev/`, `languages/`, `docs/`, `node_modules/`, scratch or browser-test scripts, `.env`/local files or secrets.
 
 ## Test matrix
 

@@ -7,6 +7,9 @@ node_modules/
 /release/
 *.tsbuildinfo
 
+# Local translation template (`npm run i18n`); translate.wordpress.org builds its own.
+/languages/
+
 # Vite dev-server marker: points the site at localhost while `npm run dev` runs.
 # Already covered by /assets/admin/dist/ above; listed so it stays ignored if dist/ is ever tracked.
 /assets/admin/dist/vite-dev-server.json

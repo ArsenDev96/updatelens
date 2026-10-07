@@ -14,17 +14,17 @@ import { ChangedOptionRow, OptionStateRow } from './OptionRows';
  */
 export function OptionDiffList( { phase }: { phase: AvailableOptionsPhase } ) {
 	const titles = {
-		/* translators: %s: number of options. */
+		/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 		added: sprintf(
 			__( 'Added (%s)', 'updatelens' ),
 			formatCount( phase.added.length )
 		),
-		/* translators: %s: number of options. */
+		/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 		removed: sprintf(
 			__( 'Removed (%s)', 'updatelens' ),
 			formatCount( phase.removed.length )
 		),
-		/* translators: %s: number of options. */
+		/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 		changed: sprintf(
 			__( 'Changed (%s)', 'updatelens' ),
 			formatCount( phase.changed.length )

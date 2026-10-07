@@ -43,12 +43,15 @@ Current state: foundation (admin screen + status REST route), the `wp_options` s
 The plugin must stay distributable on WordPress.org:
 
 - GPL-2.0-or-later compatible code and dependencies only.
-- Minimums: PHP 7.4, WordPress 6.2 (the vendored Vite loader needs both). Don't use newer APIs without a guard or a deliberate minimum bump in `updatelens.php`, `readme.txt` and `phpcs.xml.dist`.
+- Minimums: PHP 7.4, WordPress 6.2 (`%i` placeholders and `WP_HTML_Tag_Processor` need 6.2). Don't use newer APIs without a guard or a deliberate minimum bump in `updatelens.php`, `readme.txt` and `phpcs.xml.dist`.
 - Stay clean on the newest PHP too: explicit nullable types (`?callable $now = null`, never `callable $now = null`, deprecated since PHP 8.4 and reported whenever the class loads).
 - Prefix all globals (`updatelens_` / `UPDATELENS_` / `UpdateLens\`). Text domain is `updatelens`.
 - Translate user-facing strings: PHP via `__()`/`esc_html__()` etc.; JS via `__()` from `@wordpress/i18n` (mapped to `wp.i18n`).
-- Don't bundle WordPress-provided packages. Any `@wordpress/*` import must be added to `WP_GLOBALS` in `vite.config.ts` **and** to the script dependencies in `Admin\AdminPage::enqueue_assets()`.
-- No obfuscated code; `src/` ships in the release ZIP.
+- Don't bundle WordPress-provided packages. Any `@wordpress/*` import must be added to `WP_GLOBALS` in `vite.config.ts` **and** to the script dependencies in `Admin\AdminAssets::DEPENDENCIES`.
+- No obfuscated code; `src/` ships in the release ZIP. The build keeps `translators:` comments (Babel + Terser instead of esbuild in `vite.config.ts`), because translate.wordpress.org extracts JS strings from the built bundle; same string, same translator comment.
+- **The release runtime is production-only.** `AdminAdminAssets` (UpdateLens's own code) enqueues the build from `assets/admin/dist/manifest.json`: no dev-server discovery, other origins or loader filters. The Vite dev-server helper is the must-use plugin `dev/updatelens-vite-dev-server.php`, which is never shipped. No heredoc/nowdoc (Plugin Check error).
+- Ship every third-party notice: list distributed third-party code in `THIRD-PARTY-NOTICES.txt`.
+- Keep Plugin Check (run natively, never in Playground) at zero errors and warnings: SQL is written out as literal `prepare()` templates; only values and identifiers are placeholders.
 
 ## Security and privacy rules
 
@@ -171,7 +174,7 @@ The plugin must stay distributable on WordPress.org:
 - **Reports are provider-aware**: `phases.<phase>.options`, `phases.<phase>.cron` and `phases.<phase>.action_scheduler`, each with its own `available`/`reason`. Never couple one signal's availability to another's; a phase is unavailable only if all are. Adding a signal is additive: existing signal objects never change. **Provider corruption stays isolated**: an unreadable stored diff makes only that signal's phase `data_corrupt`; the report is still HTTP 200.
 - Cron REST output is only `CronDiffCodec::decode()` output (hooks, timestamps, schedules, intervals, flags, counts). **Never Cron arguments, args fingerprints, md5 event keys, the Cron fingerprint context, snapshots or raw JSON.** Stored Cron reasons are whitelisted (`AnalysisReadModel::CRON_REASONS`), anything else is `unknown`; Cron phases without data are explained from the status (`update_in_progress`, `awaiting_settle`) or `not_recorded`.
 - **Action Scheduler is the third independent report signal**, read like Cron (`AnalysisReadModel::signal_phase()`): REST output is only `ActionSchedulerDiffCodec::decode()` output (hooks, groups, statuses, timestamps, normalized schedules, flags, counts). **Never arguments, args fingerprints, the fingerprint context, action/claim/group IDs, serialized schedules, logs, snapshots or raw JSON.** Stored reasons are whitelisted (`AnalysisReadModel::ACTION_SCHEDULER_REASONS` = `ActionSchedulerPhaseReason::ALL`), anything else is `unknown`. Pre-schema-4 analyses are `not_captured`, never a zero-change diff.
-- History lists read metadata plus per-phase, per-signal flags computed in SQL (`AnalysisRepository::history_columns()`): `IS NOT NULL` (recorded) and `NOT LIKE` the codec's `EMPTY_PREFIX` (has changes), ordered by primary key. Diff JSON is never selected or decoded for the history; full diffs are decoded only for a single report. If a codec's encoding changes, its `EMPTY_PREFIX` must change with it (codec tests pin both).
+- History lists read metadata plus per-phase, per-signal flags computed in SQL (the literal query in `AnalysisRepository::find_page()`, in `HISTORY_DIFFS` order): `IS NOT NULL` (recorded) and `NOT LIKE` the codec's escaped `EMPTY_PREFIX` passed as a placeholder (has changes), ordered by primary key. Diff JSON is never selected or decoded for the history; full diffs are decoded only for a single report. If a codec's encoding changes, its `EMPTY_PREFIX` must change with it (codec tests pin both).
 - The API exposes facts (`recorded`, `has_changes`), never wording like "4 changes" or "No changes"; presentation belongs in React.
 - **Observation-window wording comes from the API** (`observation_window_seconds`); presentation never hard-codes the window length.
 - **API timestamps are UTC ISO 8601** (`2026-10-05T17:46:23Z`) or `null`; never convert to site-local time in PHP. Counts, sizes and deltas are JSON integers; flags are booleans.
@@ -204,7 +207,7 @@ The plugin must stay distributable on WordPress.org:
   - **Arguments and fingerprints never reach the UI**. With rows listed, the hidden-arguments note and the between-capture note are shown ("Very short-lived actions that are queued and completed between captures may not appear."); the leave-the-queue note only with a no-longer-active action. No notes in the compact no-changes state.
 - **UTC API timestamps are localized only in presentation** (`Intl.DateTimeFormat`, browser time zone); **backend byte counts are formatted only in presentation** (`utils/format.ts`, 1 KB = 1024 B). Never change the values sent by PHP.
 - **No risk classification** (impact levels, "safe"/"dangerous", size thresholds) without an explicitly designed model.
-- Navigation is URL state on the admin page (`&analysis=<id>`, `&paged=<n>`) via the History API; no router dependency. The screen is a top-level menu page (`add_menu_page()`, `dashicons-visibility`, slug `updatelens`); former `tools.php?page=updatelens` URLs are redirected to `admin.php` with the same `analysis`/`paged` values (`AdminPage::redirect_legacy_url()`).
+- Navigation is URL state on the admin page (`&analysis=<id>`, `&paged=<n>`) via the History API; no router dependency. The screen is a top-level menu page (`add_menu_page()`, `dashicons-visibility`, slug `updatelens`).
 - **First run** (no analyses): onboarding replaces the History (`components/FirstRun.tsx`): steps, one "Go to Plugins" link (URL from PHP, only for users who can open it), the three signals (Options & autoload, WP-Cron, Action Scheduler), privacy and observation notes, and the monitoring start with the baseline plugin list (alphabetical, collapsed after 10, Active/Inactive as text). No "scan"/"start" buttons: nothing is started manually. If baseline data is unavailable, a fallback sentence replaces it without an error. Once an analysis exists, onboarding disappears.
 - The History boundary ("Monitoring began on … Updates before this point were not observed by UpdateLens.") appears only on the last History page, after the oldest analysis, and only when the start is known.
 - Frontend tests (Vitest + Testing Library, jsdom) live in `tests/admin/` (not `src/`, which ships in the release ZIP); mock `@wordpress/api-fetch` with API-shaped fixtures.
@@ -220,8 +223,8 @@ The plugin must stay distributable on WordPress.org:
 
 ```bash
 npm install && composer install
-npm run dev            # Vite dev server + HMR (writes assets/admin/dist/vite-dev-server.json)
-npm run dev:server     # dev server + WordPress Playground
+npm run dev            # Vite dev server + HMR (writes assets/admin/dist/vite-dev-server.json; needs dev/updatelens-vite-dev-server.php as a must-use plugin and one prior build)
+npm run dev:server     # dev server + WordPress Playground (mounts the dev helper)
 npm run build          # production build → assets/admin/dist/
 npm run typecheck      # tsc
 npm run lint           # ESLint
@@ -231,13 +234,12 @@ npm test               # Vitest frontend tests (tests/admin/)
 composer lint          # PHPCS (WordPress + PHPCompatibilityWP)
 composer test          # PHPUnit 9.6 unit tests (no WordPress needed)
 npm run release        # build + release/updatelens-<version>.zip (needs Composer; COMPOSER_BIN to override)
-npm run i18n           # languages/updatelens.pot (needs WP-CLI)
+npm run i18n           # build + languages/updatelens.pot from PHP and the built bundle (needs WP-CLI; git-ignored, not shipped)
 ```
 
 ## Gotchas
 
 - CSS is scoped: `postcss.config.cjs` prefixes every selector with `#updatelens-root` (`:root`/`html`/`body` become the root itself). Radix/shadcn components that portal to `document.body` lose their styles — portal into an element inside the root.
 - The root id `updatelens-root` is shared by `Admin\AdminPage::ROOT_ID`, `src/admin/main.tsx` and `postcss.config.cjs`.
-- A stale `assets/admin/dist/vite-dev-server.json` (dev server killed uncleanly) makes the site load from `localhost:5173`. Delete it or run `npm run build`.
-- Bump versions together: `package.json` (+ `package-lock.json`), `updatelens.php` (header + `UPDATELENS_VERSION`), `readme.txt` Stable tag. The release script enforces this. Betas are pre-releases of the next minor (`0.2.0-beta.1`); `0.1.0-beta.N` would sort below the `0.1.0` dev builds (see `docs/private-beta-release.md`).
-- `libs/assets.php` is vendored third-party code; it is excluded from WordPress PHPCS rules. Avoid editing it.
+- A stale `assets/admin/dist/vite-dev-server.json` (dev server killed uncleanly) makes a site with the dev helper load from `localhost:5173`. Delete it or run `npm run build`.
+- Bump versions together: `package.json` (+ `package-lock.json`), `updatelens.php` (header + `UPDATELENS_VERSION`), `readme.txt` Stable tag. The release script enforces this. Public releases use plain `X.Y.Z` (WordPress.org Stable tag: numbers and periods only); betas were pre-releases of the next minor (`0.2.0-beta.1`, see `docs/private-beta-release.md`). The plugin version is independent of `StorageSchema::VERSION`.

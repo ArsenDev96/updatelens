@@ -29,30 +29,10 @@ final class AdminPage {
 	const MENU_ICON = 'dashicons-visibility';
 
 	/**
-	 * Admin file of the former Tools → UpdateLens screen, redirected to the top-level screen.
-	 */
-	const LEGACY_PARENT = 'tools.php';
-
-	/**
-	 * Screen URL parameters kept by the legacy redirect (see src/admin/utils/route.ts).
-	 */
-	const ROUTE_PARAMS = array( 'analysis', 'paged' );
-
-	/**
-	 * Script handle for the admin app.
-	 */
-	const SCRIPT_HANDLE = 'updatelens-admin';
-
-	/**
 	 * DOM id the React app mounts into. Must match src/admin/main.tsx and the
 	 * CSS scope in postcss.config.cjs.
 	 */
 	const ROOT_ID = 'updatelens-root';
-
-	/**
-	 * Vite entry point, relative to the plugin root.
-	 */
-	const ENTRY = 'src/admin/main.tsx';
 
 	/**
 	 * Hook suffix returned by add_menu_page().
@@ -74,8 +54,6 @@ final class AdminPage {
 	 * @return void
 	 */
 	public function register() {
-		// Before WordPress checks access to the requested admin page (also on admin_menu).
-		add_action( 'admin_menu', array( $this, 'redirect_legacy_url' ), 0 );
 		add_action( 'admin_menu', array( $this, 'add_page' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
@@ -114,33 +92,6 @@ final class AdminPage {
 	}
 
 	/**
-	 * Send bookmarks of the former Tools → UpdateLens screen to the top-level
-	 * screen, keeping the History page or report they point to.
-	 *
-	 * @return void
-	 */
-	public function redirect_legacy_url() {
-		global $pagenow;
-
-		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- Read-only redirect between screens; values are validated.
-		if ( self::LEGACY_PARENT !== $pagenow || ! isset( $_GET['page'] ) || self::SLUG !== $_GET['page'] ) {
-			return;
-		}
-
-		$args = array( 'page' => self::SLUG );
-		foreach ( self::ROUTE_PARAMS as $param ) {
-			$value = isset( $_GET[ $param ] ) ? absint( $_GET[ $param ] ) : 0;
-			if ( $value > 0 ) {
-				$args[ $param ] = $value;
-			}
-		}
-		// phpcs:enable WordPress.Security.NonceVerification.Recommended
-
-		wp_safe_redirect( add_query_arg( $args, admin_url( 'admin.php' ) ) );
-		exit;
-	}
-
-	/**
 	 * Enqueue the admin app, only on the UpdateLens screen.
 	 *
 	 * @param string $hook_suffix Current admin page hook suffix.
@@ -151,22 +102,7 @@ final class AdminPage {
 			return;
 		}
 
-		require_once UPDATELENS_DIR . 'libs/assets.php';
-
-		$this->assets_loaded = \UpdateLens\Libs\Assets\enqueue_asset(
-			UPDATELENS_DIR . 'assets/admin/dist',
-			self::ENTRY,
-			array(
-				// WordPress-provided packages; the Vite build maps these imports to wp.* globals.
-				'dependencies' => array( 'wp-api-fetch', 'wp-i18n' ),
-				'handle'       => self::SCRIPT_HANDLE,
-				'in-footer'    => true,
-			)
-		);
-
-		if ( $this->assets_loaded ) {
-			wp_set_script_translations( self::SCRIPT_HANDLE, 'updatelens' );
-		}
+		$this->assets_loaded = AdminAssets::enqueue();
 	}
 
 	/**
@@ -192,7 +128,7 @@ final class AdminPage {
 				</noscript>
 			<?php else : ?>
 				<div class="notice notice-error inline">
-					<p><?php esc_html_e( 'UpdateLens admin assets are missing. Run "npm run build" (or "npm run dev") in the plugin directory.', 'updatelens' ); ?></p>
+					<p><?php esc_html_e( 'UpdateLens cannot display this screen because some of its files are missing. Please reinstall the plugin.', 'updatelens' ); ?></p>
 				</div>
 			<?php endif; ?>
 		</div>

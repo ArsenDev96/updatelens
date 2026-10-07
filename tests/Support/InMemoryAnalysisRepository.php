@@ -229,7 +229,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	public $fail_reads = false;
 
 	/**
-	 * Page of rows, newest first, projected like history_columns() (flags as "0"/"1" strings or NULL, like MySQL).
+	 * Page of rows, newest first, projected like the find_page() query (flags as "0"/"1" strings or NULL, like MySQL).
 	 *
 	 * @param int $limit  Page size.
 	 * @param int $offset Offset.

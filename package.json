@@ -1,13 +1,13 @@
 {
   "name": "updatelens",
-  "version": "0.2.0-beta.2",
+  "version": "0.2.0",
   "private": true,
-  "description": "Observe what changes around WordPress plugin updates: options, autoload data and WP-Cron events.",
+  "description": "Observe what changes around WordPress plugin updates, including options, autoload data, WP-Cron events and Action Scheduler actions.",
   "license": "GPL-2.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:server": "concurrently \"npm run dev\" \"npx @wp-playground/cli@latest server --auto-mount --login\"",
+    "dev:server": "concurrently \"npm run dev\" \"npx @wp-playground/cli@latest server --auto-mount --mount=./dev/updatelens-vite-dev-server.php:/wordpress/wp-content/mu-plugins/updatelens-vite-dev-server.php --login\"",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "release": "npm run build && node scripts/release.mjs",
-    "i18n": "wp i18n make-pot . languages/updatelens.pot --domain=updatelens --exclude=node_modules,vendor,release,assets/admin/dist"
+    "i18n": "npm run build && wp i18n make-pot . languages/updatelens.pot --domain=updatelens --exclude=release,src,tests,docs,scripts,dev,languages"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -26,6 +26,8 @@
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
+    "@babel/preset-react": "^7.29.7",
+    "@babel/preset-typescript": "^7.29.7",
     "@eslint/js": "^10.0.1",
     "@kucrut/vite-for-wp": "^0.12.0",
     "@testing-library/dom": "^10.4.2",
@@ -53,6 +55,7 @@
     "rollup-plugin-external-globals": "^0.13.0",
     "tailwindcss": "^3.4.19",
     "tailwindcss-animate": "^1.0.7",
+    "terser": "^5.51.2",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.71.0",
     "vite": "^7.3.6",

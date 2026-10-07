@@ -145,7 +145,7 @@ export function ActionSchedulerDiffList( {
 				<DiffSection
 					id="updatelens-as-added"
 					title={ sprintf(
-						/* translators: %s: number of Action Scheduler actions. */
+						/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 						__( 'Added (%s)', 'updatelens' ),
 						formatCount( phase.added.length )
 					) }
@@ -208,7 +208,7 @@ export function ActionSchedulerDiffList( {
 				<DiffSection
 					id="updatelens-as-changed"
 					title={ sprintf(
-						/* translators: %s: number of Action Scheduler actions. */
+						/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 						__( 'Changed (%s)', 'updatelens' ),
 						formatCount( phase.changed.length )
 					) }
@@ -241,7 +241,7 @@ export function ActionSchedulerDiffList( {
 				<DiffSection
 					id="updatelens-as-rescheduled"
 					title={ sprintf(
-						/* translators: %s: number of Action Scheduler actions. */
+						/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 						__( 'Rescheduled (%s)', 'updatelens' ),
 						formatCount( phase.rescheduled.length )
 					) }

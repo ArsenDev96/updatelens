@@ -56,26 +56,6 @@ class AnalysisRepository {
 	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff, cron_during_update_diff, cron_post_update_diff, cron_final_diff, cron_during_update_reason, cron_post_update_reason, cron_final_reason, action_scheduler_during_update_diff, action_scheduler_post_update_diff, action_scheduler_final_diff, action_scheduler_during_update_reason, action_scheduler_post_update_reason, action_scheduler_final_reason';
 
 	/**
-	 * Columns of a history row: report metadata plus, per phase diff, whether
-	 * it is stored (`has_<column>`) and whether it has changes
-	 * (`has_changes_<column>`, NULL if not stored).
-	 *
-	 * Both are computed in SQL: NULL check and a prefix comparison with the
-	 * codec's empty diff. The diff JSON is never returned or decoded.
-	 *
-	 * @return string
-	 */
-	public static function history_columns() {
-		$columns = array( self::REPORT_METADATA_COLUMNS );
-		foreach ( self::HISTORY_DIFFS as $column => $empty_prefix ) {
-			$columns[] = "{$column} IS NOT NULL AS has_{$column}";
-			$columns[] = "{$column} NOT LIKE '{$empty_prefix}%' AS has_changes_{$column}";
-		}
-
-		return implode( ', ', $columns );
-	}
-
-	/**
 	 * Database.
 	 *
 	 * @var wpdb
@@ -206,9 +186,15 @@ class AnalysisRepository {
 	}
 
 	/**
-	 * One page of analyses, newest first (history_columns()).
+	 * One page of analyses, newest first.
 	 *
-	 * Ordered by primary key, so the page is read from the PK index without a sort.
+	 * A history row is the report metadata plus, per phase diff in
+	 * HISTORY_DIFFS order, whether it is stored (`has_<column>`) and whether it
+	 * has changes (`has_changes_<column>`, NULL if not stored). Both are
+	 * computed in SQL: a NULL check and a prefix comparison with the codec's
+	 * empty diff (history_like_patterns()). The diff JSON is never returned or
+	 * decoded. Ordered by primary key, so the page is read from the PK index
+	 * without a sort.
 	 *
 	 * @param int $limit  Page size.
 	 * @param int $offset Rows to skip.
@@ -217,11 +203,39 @@ class AnalysisRepository {
 	 */
 	public function find_page( $limit, $offset ) {
 		$wpdb = $this->wpdb;
+		$like = $this->history_like_patterns();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Column list is built from class constants only.
-				'SELECT ' . self::history_columns() . ' FROM %i ORDER BY id DESC LIMIT %d OFFSET %d',
+				'SELECT id, plugin_file, plugin_name, version_before, version_after, status, settle_outcome, started_at, settle_deadline, completed_at, error_code,
+					options_during_update_diff IS NOT NULL AS has_options_during_update_diff,
+					options_during_update_diff NOT LIKE %s AS has_changes_options_during_update_diff,
+					options_post_update_diff IS NOT NULL AS has_options_post_update_diff,
+					options_post_update_diff NOT LIKE %s AS has_changes_options_post_update_diff,
+					options_final_diff IS NOT NULL AS has_options_final_diff,
+					options_final_diff NOT LIKE %s AS has_changes_options_final_diff,
+					cron_during_update_diff IS NOT NULL AS has_cron_during_update_diff,
+					cron_during_update_diff NOT LIKE %s AS has_changes_cron_during_update_diff,
+					cron_post_update_diff IS NOT NULL AS has_cron_post_update_diff,
+					cron_post_update_diff NOT LIKE %s AS has_changes_cron_post_update_diff,
+					cron_final_diff IS NOT NULL AS has_cron_final_diff,
+					cron_final_diff NOT LIKE %s AS has_changes_cron_final_diff,
+					action_scheduler_during_update_diff IS NOT NULL AS has_action_scheduler_during_update_diff,
+					action_scheduler_during_update_diff NOT LIKE %s AS has_changes_action_scheduler_during_update_diff,
+					action_scheduler_post_update_diff IS NOT NULL AS has_action_scheduler_post_update_diff,
+					action_scheduler_post_update_diff NOT LIKE %s AS has_changes_action_scheduler_post_update_diff,
+					action_scheduler_final_diff IS NOT NULL AS has_action_scheduler_final_diff,
+					action_scheduler_final_diff NOT LIKE %s AS has_changes_action_scheduler_final_diff
+				FROM %i ORDER BY id DESC LIMIT %d OFFSET %d',
+				$like[0],
+				$like[1],
+				$like[2],
+				$like[3],
+				$like[4],
+				$like[5],
+				$like[6],
+				$like[7],
+				$like[8],
 				$this->table,
 				(int) $limit,
 				(int) $offset
@@ -231,6 +245,21 @@ class AnalysisRepository {
 		$this->assert_no_error();
 
 		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * LIKE patterns matching each history diff without changes, in
+	 * HISTORY_DIFFS order: the codec's empty prefix, escaped, then `%`.
+	 *
+	 * @return string[]
+	 */
+	private function history_like_patterns() {
+		$patterns = array();
+		foreach ( self::HISTORY_DIFFS as $empty_prefix ) {
+			$patterns[] = $this->wpdb->esc_like( $empty_prefix ) . '%';
+		}
+
+		return $patterns;
 	}
 
 	/**

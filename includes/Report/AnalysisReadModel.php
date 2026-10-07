@@ -145,7 +145,7 @@ final class AnalysisReadModel {
 	}
 
 	/**
-	 * History row (from AnalysisRepository::history_columns()).
+	 * History row (from AnalysisRepository::find_page()).
 	 *
 	 * Built from flags computed in SQL; no diff is decoded. `has_<phase>` says
 	 * whether a wp_options diff is stored. `phases.<phase>.<signal>` says

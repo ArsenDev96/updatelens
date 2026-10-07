@@ -43,8 +43,28 @@ export default defineConfig( {
 		wpExternals,
 		externalGlobals( WP_GLOBALS ),
 		externals( { development: { externals: WP_GLOBALS } } ),
-		react(),
+		react( {
+			// Babel instead of esbuild strips TypeScript and JSX, because esbuild
+			// drops the `translators:` comments that translate.wordpress.org
+			// extracts from the built bundle.
+			babel: {
+				presets: [
+					'@babel/preset-typescript',
+					[ '@babel/preset-react', { runtime: 'automatic' } ],
+				],
+			},
+		} ),
 	],
+	esbuild: false,
+	build: {
+		// Terser keeps the `translators:` comments; esbuild's minifier cannot.
+		// Third-party notices are in THIRD-PARTY-NOTICES.txt.
+		minify: 'terser',
+		terserOptions: { format: { comments: /translators:/i } },
+		// Source maps stay local (the release ZIP excludes them), so the bundle
+		// does not reference a missing file.
+		sourcemap: 'hidden',
+	},
 	server: {
 		cors: { origin: DEV_CORS_ORIGIN },
 	},

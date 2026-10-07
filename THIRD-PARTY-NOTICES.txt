@@ -1,0 +1,83 @@
+UpdateLens third-party notices
+==============================
+
+UpdateLens is licensed under the GNU General Public License v2 or later (see
+LICENSE). It distributes the following third-party components, all under the
+MIT License, which is compatible with the GPL. The MIT License text is
+reproduced below and applies to each component with its copyright notice.
+
+Bundled in the admin app (assets/admin/dist/assets/*.js)
+--------------------------------------------------------
+
+React 18.3.1 (react, including react/jsx-runtime)
+  Copyright (c) Facebook, Inc. and its affiliates.
+  https://github.com/facebook/react
+
+React DOM 18.3.1 (react-dom)
+  Copyright (c) Facebook, Inc. and its affiliates.
+  https://github.com/facebook/react
+
+Scheduler 0.23.2 (scheduler, a dependency of react-dom)
+  Copyright (c) Facebook, Inc. and its affiliates.
+  https://github.com/facebook/react
+
+clsx 2.1.1
+  Copyright (c) Luke Edwards <luke.edwards05@gmail.com> (lukeed.com)
+  https://github.com/lukeed/clsx
+
+tailwind-merge 2.6.1
+  Copyright (c) 2021 Dany Castillo
+  https://github.com/dcastil/tailwind-merge
+
+Generated into the admin styles (assets/admin/dist/assets/*.css)
+----------------------------------------------------------------
+
+Tailwind CSS 3.4.19 (base styles "Preflight" and utility classes)
+  Copyright (c) Tailwind Labs, Inc.
+  https://github.com/tailwindlabs/tailwindcss
+
+tailwindcss-animate 1.0.7 (animation utilities)
+  Copyright (c) 2020 Jamie Kyle
+  https://github.com/jamiebuilds/tailwindcss-animate
+
+Adapted in the admin source (src/components/ui/, src/lib/utils.ts, src/admin/index.css)
+---------------------------------------------------------------------------------------
+
+shadcn/ui (button, card and skeleton components, the cn() helper and the
+color tokens, adapted for UpdateLens)
+  Copyright (c) 2023 shadcn
+  https://github.com/shadcn-ui/ui
+
+PHP autoloader (vendor/)
+------------------------
+
+Composer autoloader (vendor/autoload.php, vendor/composer/)
+  Copyright (c) Nils Adermann, Jordi Boggiano
+  https://github.com/composer/composer
+  Its license is also included as vendor/composer/LICENSE.
+
+Not distributed: WordPress packages such as @wordpress/api-fetch and
+@wordpress/i18n are provided by WordPress itself and are not bundled. Build
+tools (Vite, Babel, Terser, TypeScript and others) are used only to build the
+admin app and are not part of the plugin.
+
+MIT License
+-----------
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

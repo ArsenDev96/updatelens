@@ -42,12 +42,4 @@
 			</property>
 		</properties>
 	</rule>
-
-	<!-- libs/assets.php is vendored third-party code (kucrut/vite-for-wp); check compatibility only. -->
-	<rule ref="WordPress">
-		<exclude-pattern>/libs/*</exclude-pattern>
-	</rule>
-	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
-		<exclude-pattern>/libs/*</exclude-pattern>
-	</rule>
 </ruleset>

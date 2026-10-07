@@ -109,12 +109,12 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 		( event ) => ! event.is_recurring
 	);
 	const titles = {
-		/* translators: %s: number of WP-Cron events. */
+		/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 		added: sprintf(
 			__( 'Added (%s)', 'updatelens' ),
 			formatCount( phase.added.length )
 		),
-		/* translators: %s: number of WP-Cron events. */
+		/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 		removed: sprintf(
 			__( 'Removed (%s)', 'updatelens' ),
 			formatCount( removed.length )
@@ -124,12 +124,12 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 			__( 'No longer scheduled (%s)', 'updatelens' ),
 			formatCount( gone.length )
 		),
-		/* translators: %s: number of WP-Cron events. */
+		/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 		changed: sprintf(
 			__( 'Changed (%s)', 'updatelens' ),
 			formatCount( phase.changed.length )
 		),
-		/* translators: %s: number of WP-Cron events. */
+		/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 		rescheduled: sprintf(
 			__( 'Rescheduled (%s)', 'updatelens' ),
 			formatCount( phase.rescheduled.length )

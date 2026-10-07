@@ -1,11 +1,11 @@
 <?php
 /**
  * Plugin Name:       UpdateLens
- * Description:       Observe what changes around WordPress plugin updates: options, autoload data and WP-Cron events.
- * Version:           0.2.0-beta.2
+ * Description:       Observe what changes around WordPress plugin updates, including options, autoload data, WP-Cron events and Action Scheduler actions.
+ * Version:           0.2.0
  * Requires at least: 6.2
  * Requires PHP:      7.4
- * Author:            UpdateLens
+ * Author:            Arsen Manukyan
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       updatelens
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'UPDATELENS_VERSION', '0.2.0-beta.2' );
+define( 'UPDATELENS_VERSION', '0.2.0' );
 define( 'UPDATELENS_FILE', __FILE__ );
 define( 'UPDATELENS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'UPDATELENS_URL', plugin_dir_url( __FILE__ ) );
@@ -29,7 +29,7 @@ if ( ! is_readable( UPDATELENS_DIR . 'vendor/autoload.php' ) ) {
 			}
 			printf(
 				'<div class="notice notice-error"><p>%s</p></div>',
-				esc_html__( 'UpdateLens is missing its Composer autoloader. Run "composer install" in the plugin directory.', 'updatelens' )
+				esc_html__( 'UpdateLens cannot run because some of its files are missing. Please reinstall the plugin.', 'updatelens' )
 			);
 		}
 	);

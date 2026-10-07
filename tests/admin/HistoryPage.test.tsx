@@ -21,7 +21,7 @@ function renderHistory( page = 1 ) {
 	const props = {
 		page,
 		reportHref: ( id: number ) =>
-			`/wp-admin/tools.php?page=updatelens&analysis=${ id }`,
+			`/wp-admin/admin.php?page=updatelens&analysis=${ id }`,
 		onOpenReport: vi.fn(),
 		onPageChange: vi.fn(),
 		focusHeading: false,
@@ -50,21 +50,6 @@ describe( 'HistoryPage', () => {
 		).not.toBeNull();
 	} );
 
-	it( 'shows the empty state without pagination', async () => {
-		apiFetchMock.mockResolvedValue( listResponse( [] ) );
-		renderHistory();
-
-		expect(
-			await screen.findByText( 'No plugin updates analyzed yet.' )
-		).toBeInTheDocument();
-		expect(
-			screen.getByText(
-				/automatically analyze supported single-plugin updates/
-			)
-		).toBeInTheDocument();
-		expect( screen.queryByRole( 'navigation' ) ).toBeNull();
-	} );
-
 	it( 'lists analyses with name, versions, status and phase availability', async () => {
 		apiFetchMock.mockResolvedValue(
 			listResponse( [
@@ -86,7 +71,7 @@ describe( 'HistoryPage', () => {
 		const first = links[ 0 ];
 		expect( first ).toHaveAttribute(
 			'href',
-			'/wp-admin/tools.php?page=updatelens&analysis=1'
+			'/wp-admin/admin.php?page=updatelens&analysis=1'
 		);
 		expect( first ).toHaveTextContent( 'UpdateLens Fixture A' );
 		expect( first ).toHaveTextContent( /1\.0\.0\s*→\s*to\s*1\.1\.0/ );
@@ -197,6 +182,8 @@ describe( 'HistoryPage', () => {
 		apiFetchMock.mockResolvedValueOnce(
 			listResponse( [ historyItem( COMPLETED ) ] )
 		);
+		// Monitoring start for the boundary on the (only, so last) page.
+		apiFetchMock.mockResolvedValueOnce( { started_at: null } );
 		renderHistory();
 		const user = userEvent.setup();
 
@@ -214,7 +201,7 @@ describe( 'HistoryPage', () => {
 		expect(
 			await screen.findByRole( 'link', { name: /UpdateLens Fixture A/ } )
 		).toBeInTheDocument();
-		expect( apiFetchMock ).toHaveBeenCalledTimes( 2 );
+		expect( apiFetchMock ).toHaveBeenCalledTimes( 3 );
 	} );
 
 	it( 'explains a permission error', async () => {

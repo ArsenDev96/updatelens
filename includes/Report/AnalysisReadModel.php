@@ -481,10 +481,12 @@ final class AnalysisReadModel {
 	/**
 	 * Stored UTC DATETIME (`Y-m-d H:i:s`) as ISO 8601 UTC, or null.
 	 *
+	 * Shared with MonitoringStart, so every API timestamp has the same format.
+	 *
 	 * @param mixed $value Stored timestamp.
 	 * @return string|null
 	 */
-	private static function timestamp( $value ) {
+	public static function timestamp( $value ) {
 		if ( ! is_string( $value ) || 1 !== preg_match( '/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/D', $value, $parts ) ) {
 			return null;
 		}

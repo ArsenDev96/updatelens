@@ -420,3 +420,26 @@ export interface AnalysesPage {
 	/** X-WP-TotalPages. */
 	totalPages: number;
 }
+
+/** A plugin installed when monitoring started (UpdateLens itself excluded). */
+export interface BaselinePlugin {
+	/** Plugin basename, e.g. `woocommerce/woocommerce.php`. */
+	file: string;
+	name: string;
+	/** Empty if the plugin header had none. */
+	version: string;
+	active: boolean;
+}
+
+/**
+ * GET /updatelens/v1/baseline: when UpdateLens started monitoring and which
+ * plugins were installed then. Null fields are unknown (missing or unreadable
+ * baseline, or a baseline recorded after earlier analyses).
+ */
+export interface MonitoringBaseline {
+	/** UTC ISO 8601. Updates before this point were not observed. */
+	started_at: string | null;
+	plugin_count: number | null;
+	/** Never updated after monitoring started. */
+	plugins: BaselinePlugin[] | null;
+}

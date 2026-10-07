@@ -19,7 +19,9 @@ When you update a single plugin from wp-admin, UpdateLens records which options 
 * After update: until the next wp-admin page you open, within 5 minutes. Other site activity can also appear here.
 * Net result: before the update compared with the end of the observation.
 
-Tools → UpdateLens lists the analyzed updates and shows a report for each one. Reports show observed changes, not proof of what the plugin caused.
+The UpdateLens admin menu lists the analyzed updates and shows a report for each one. Reports show observed changes, not proof of what the plugin caused.
+
+UpdateLens observes updates from the moment it is activated; earlier updates were not observed and are never reconstructed. Before the first analysis, the UpdateLens screen shows when monitoring started and which plugins were installed at that moment.
 
 Analyzed in this beta: manual single-plugin updates from wp-admin (Update now, or Dashboard → Updates with one plugin selected). Not analyzed in this beta: bulk updates of several plugins, automatic/background updates, WP-CLI updates, updates by uploading a ZIP over an installed plugin, themes, core, translations, Multisite and UpdateLens itself.
 
@@ -29,15 +31,15 @@ Known limitations: only options, WP-Cron and Action Scheduler are analyzed; WP-C
 
 UpdateLens never stores raw option values, WP-Cron arguments or Action Scheduler arguments. It compares them through keyed fingerprints (HMAC-SHA256, keyed from the site's salts) that are never shown in reports and are deleted with the temporary snapshots when an analysis finishes. Action Scheduler action IDs, claim IDs and serialized schedules are never stored or shown.
 
-UpdateLens makes no external HTTP requests and has no telemetry. Its data stays in its own database table, `{prefix}updatelens_analyses`, and the `updatelens_db_version` option.
+UpdateLens makes no external HTTP requests and has no telemetry. Its data stays in its own database table, `{prefix}updatelens_analyses`, and the `updatelens_db_version` and `updatelens_monitoring_baseline` options. The monitoring baseline holds only the time monitoring started and the name, version, file and active state of each plugin installed then; it is never updated afterwards.
 
-Deactivating UpdateLens keeps the history. Deleting the plugin from the Plugins screen removes the table and the option.
+Deactivating UpdateLens keeps the history and the monitoring baseline. Deleting the plugin from the Plugins screen removes the table and both options.
 
 == Installation ==
 
 1. Plugins → Add Plugin → Upload Plugin, choose the ZIP, then Install Now and Activate.
-2. Open Tools → UpdateLens.
-3. Update a single plugin from wp-admin, open any wp-admin page, then return to Tools → UpdateLens.
+2. Open UpdateLens in the admin menu.
+3. Update a single plugin from wp-admin, open any wp-admin page, then return to UpdateLens.
 
 == Changelog ==
 

@@ -5,7 +5,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 import { getAnalyses, PER_PAGE } from '../api/analyses';
+import { FirstRun } from '../components/FirstRun';
 import { LoadError } from '../components/LoadError';
+import { MonitoringBoundary } from '../components/MonitoringBoundary';
 import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
@@ -24,6 +26,8 @@ interface HistoryPageProps {
 	onPageChange: ( page: number ) => void;
 	/** Move focus to the heading (after in-app navigation). */
 	focusHeading: boolean;
+	/** Plugins screen URL for the first-run screen; empty if the user cannot open it. */
+	pluginsUrl?: string;
 }
 
 export function HistoryPage( {
@@ -32,16 +36,23 @@ export function HistoryPage( {
 	onOpenReport,
 	onPageChange,
 	focusHeading,
+	pluginsUrl = '',
 }: HistoryPageProps ) {
 	const load = useCallback( () => getAnalyses( page, PER_PAGE ), [ page ] );
 	const [ request, retry ] = useRequest( load );
 	const heading = useRef< HTMLHeadingElement >( null );
+	// Before the first analysis, onboarding replaces the history.
+	const firstRun = request.status === 'ready' && request.data.total === 0;
 
 	useEffect( () => {
 		if ( focusHeading ) {
 			heading.current?.focus();
 		}
-	}, [ focusHeading, page ] );
+	}, [ focusHeading, page, firstRun ] );
+
+	if ( firstRun ) {
+		return <FirstRun pluginsUrl={ pluginsUrl } headingRef={ heading } />;
+	}
 
 	return (
 		<section
@@ -78,18 +89,14 @@ export function HistoryPage( {
 				/>
 			) }
 
-			{ request.status === 'ready' &&
-				request.data.items.length === 0 &&
-				( request.data.total === 0 ? (
-					<EmptyHistory />
-				) : (
-					<p className="text-sm text-muted-foreground">
-						{ __(
-							'There are no analyses on this page.',
-							'updatelens'
-						) }
-					</p>
-				) ) }
+			{ request.status === 'ready' && request.data.items.length === 0 && (
+				<p className="text-sm text-muted-foreground">
+					{ __(
+						'There are no analyses on this page.',
+						'updatelens'
+					) }
+				</p>
+			) }
 
 			{ request.status === 'ready' && request.data.items.length > 0 && (
 				<ul className="divide-y overflow-hidden rounded-lg border bg-card">
@@ -104,6 +111,11 @@ export function HistoryPage( {
 					) ) }
 				</ul>
 			) }
+
+			{ /* The oldest analyses are on the last page: monitoring began before them. */ }
+			{ request.status === 'ready' &&
+				request.data.items.length > 0 &&
+				page >= request.data.totalPages && <MonitoringBoundary /> }
 
 			{ request.status === 'ready' && (
 				<Pagination
@@ -211,22 +223,6 @@ function PhaseChanges( { item }: { item: AnalysisHistoryItem } ) {
 				);
 			} ) }
 		</ul>
-	);
-}
-
-function EmptyHistory() {
-	return (
-		<div className="rounded-lg border border-dashed p-6 text-sm">
-			<p className="font-medium">
-				{ __( 'No plugin updates analyzed yet.', 'updatelens' ) }
-			</p>
-			<p className="mt-1 text-muted-foreground">
-				{ __(
-					'UpdateLens will automatically analyze supported single-plugin updates made from WordPress admin.',
-					'updatelens'
-				) }
-			</p>
-		</div>
 	);
 }
 

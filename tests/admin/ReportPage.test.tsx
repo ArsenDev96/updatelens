@@ -28,7 +28,7 @@ function renderReport( report: AnalysisReport | null, onBack = vi.fn() ) {
 	render(
 		<ReportPage
 			id={ report?.id ?? 1 }
-			historyHref="/wp-admin/tools.php?page=updatelens"
+			historyHref="/wp-admin/admin.php?page=updatelens"
 			onBack={ onBack }
 			focusHeading={ false }
 		/>
@@ -420,7 +420,7 @@ describe( 'ReportPage', () => {
 		const back = screen.getByRole( 'link', { name: /Update History/ } );
 		expect( back ).toHaveAttribute(
 			'href',
-			'/wp-admin/tools.php?page=updatelens'
+			'/wp-admin/admin.php?page=updatelens'
 		);
 		await user.click( back );
 		expect( onBack ).toHaveBeenCalled();

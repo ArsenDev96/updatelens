@@ -249,6 +249,21 @@ class AnalysisRepository {
 	}
 
 	/**
+	 * Start time of the first stored analysis (by primary key), or null if there is none.
+	 *
+	 * @return string|null Stored UTC DATETIME.
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function first_started_at() {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
+		$started_at = $wpdb->get_var( $wpdb->prepare( 'SELECT started_at FROM %i ORDER BY id ASC LIMIT 1', $this->table ) );
+		$this->assert_no_error();
+
+		return null === $started_at ? null : (string) $started_at;
+	}
+
+	/**
 	 * One analysis for a report (REPORT_COLUMNS: no snapshots), by primary key.
 	 *
 	 * @param int $id Analysis ID.

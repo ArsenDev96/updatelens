@@ -6,7 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '@/admin/App';
 import type { AnalysisReport } from '@/admin/types/api';
 
-import { COMPLETED, EXPIRED, historyItem, listResponse } from './fixtures';
+import {
+	BASELINE,
+	COMPLETED,
+	EXPIRED,
+	historyItem,
+	listResponse,
+} from './fixtures';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
@@ -16,6 +22,9 @@ const SECRET = 'sk_test_UPDATE_LENS_UI_SECRET';
 function serveApi( reports: AnalysisReport[] ) {
 	apiFetchMock.mockImplementation( ( async ( options: { path?: string } ) => {
 		const path = options.path ?? '';
+		if ( path.startsWith( '/updatelens/v1/baseline' ) ) {
+			return BASELINE;
+		}
 		const match = path.match( /^\/updatelens\/v1\/analyses\/(\d+)$/ );
 		if ( match ) {
 			const report = reports.find(
@@ -36,7 +45,7 @@ function serveApi( reports: AnalysisReport[] ) {
 }
 
 function visit( search: string ) {
-	window.history.replaceState( null, '', `/wp-admin/tools.php${ search }` );
+	window.history.replaceState( null, '', `/wp-admin/admin.php${ search }` );
 }
 
 describe( 'App navigation', () => {
@@ -114,7 +123,7 @@ describe( 'App navigation', () => {
 		);
 
 		expect( window.location.search ).toBe( '?page=updatelens&paged=2' );
-		expect( apiFetchMock ).toHaveBeenLastCalledWith( {
+		expect( apiFetchMock ).toHaveBeenCalledWith( {
 			path: '/updatelens/v1/analyses?page=2&per_page=20',
 			parse: false,
 		} );

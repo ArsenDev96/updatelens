@@ -18,7 +18,7 @@ Initial snapshot sources:
 - WP-Cron events — implemented and observed in every analysis (`Snapshot\CronSnapshotProvider`, `Diff\CronDiffBuilder`, `Update\CronObservation`), stored in the analyses table and shown in reports next to Options
 - Action Scheduler actions — snapshot and diff engine (`Snapshot\ActionSchedulerSnapshotProvider`, `Diff\ActionSchedulerDiffBuilder`) observed in every analysis (`Update\ActionSchedulerObservation`), stored in the analyses table and shown in reports as the third signal
 
-Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the WP-Cron snapshot and diff engines (observed, stored and reported with every analysis), the Action Scheduler snapshot and diff engines (observed, stored and reported with every analysis), the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), and the admin UI: Update History and Analysis Report screens under Tools → UpdateLens (`src/admin/`).
+Current state: foundation (admin screen + status REST route), the `wp_options` snapshot and diff engines, the WP-Cron snapshot and diff engines (observed, stored and reported with every analysis), the Action Scheduler snapshot and diff engines (observed, stored and reported with every analysis), the plugin update analysis lifecycle (`Update\PluginUpdateTracker` → `Update\PluginUpdateAnalyzer` → `Storage\AnalysisRepository`, table `{prefix}updatelens_analyses`) and the read-only reports API (`Rest\AnalysesController` → `Report\AnalysisReports` → `Report\AnalysisReadModel`; see `docs/rest-api.md`), the monitoring baseline (`BaselineMonitoringBaseline`, `GET /updatelens/v1/baseline` via `RestBaselineController` → `ReportMonitoringStart`), and the admin UI: first-run screen, Update History and Analysis Report screens on the top-level UpdateLens menu (`admin.php?page=updatelens`, `src/admin/`).
 
 ## Architecture boundaries
 
@@ -34,7 +34,8 @@ Current state: foundation (admin screen + status REST route), the `wp_options` s
   - `Snapshot/` – capture safe state; `Diff/` – compare snapshots
   - `Update/` – WordPress updater hooks (`PluginUpdateTracker`) and lifecycle rules (`PluginUpdateAnalyzer`, `CronObservation`, `ActionSchedulerObservation`, `UpdateClassifier`)
   - `Storage/` – schema (`Schema`, `dbDelta`), SQL (`AnalysisRepository`), JSON persistence formats (`*Codec`)
-  - `Report/` – safe read models of stored analyses for REST (`AnalysisReadModel`) and read access with lifecycle maintenance (`AnalysisReports`)
+  - `Report/` – safe read models of stored analyses for REST (`AnalysisReadModel`) and read access with lifecycle maintenance (`AnalysisReports`); the monitoring start (`MonitoringStart`)
+  - `Baseline/` – monitoring baseline: when monitoring started and the plugin inventory then (`PluginInventory` pure, `MonitoringBaseline` option wrapper)
 - The admin app is TypeScript + React + Tailwind + shadcn/ui in `src/admin/`, built by Vite into `assets/admin/dist/`. There is no public/frontend app.
 
 ## WordPress.org compatibility
@@ -128,6 +129,14 @@ The plugin must stay distributable on WordPress.org:
 - Persist only via `Storage\ActionSchedulerSnapshotCodec` (temporary; records + context, never arguments, schedules, logs, claims or IDs) and `Storage\ActionSchedulerDiffCodec` (no fingerprints or context; counts and deltas validated). Reports read only the Action Scheduler diff and reason columns, History only flags of the diff columns; never the snapshot columns.
 - Snapshot diffs cannot see an action that was queued and completed between two captures (it is in neither snapshot).
 
+## Monitoring baseline invariants
+
+- **Never invent old history.** UpdateLens observes from activation on. Updates before it are never reconstructed (no file dates, update transients, changelogs, logs, plugin metadata, Action Scheduler logs or guesses from current state), and no synthetic analyses are created. The UI says earlier updates were not observed.
+- The baseline is an inventory marker, not a snapshot: option `updatelens_monitoring_baseline` (not autoloaded), JSON via `StorageMonitoringBaselineCodec` (`schema`, UTC `started_at`, plugins with only `file`, `name`, `version`, `active`). Never settings, option values, arguments, URIs, update/license data or user data. UpdateLens itself is excluded (its updates are not analyzed). Inventory comes from `get_plugins()`/`is_plugin_active()`.
+- **Written once, never rewritten**: `MonitoringBaseline::ensure()` adds it (`add_option`) on activation and, as a retry or for upgraded sites, on load of the UpdateLens screen; never on other requests. An existing value, even unreadable, is never replaced; updates, activations and new reports never change it; new plugins are not appended. `ensure()` never throws, so activation never fails because of it. Single site only.
+- **Visible start = earlier of baseline time and the first analysis** (`ReportMonitoringStart`). A baseline recorded after existing analyses (sites upgraded from Beta 2) is not shown as the plugins at the start (`plugins: null`). Missing/corrupt baseline → `null` fields (HTTP 200), never an error.
+- Deactivation keeps the baseline; `uninstall.php` deletes it.
+
 ## Update lifecycle invariants
 
 - **UpdateLens observes the WordPress updater; it never owns it.** No custom updater, and never alter packages, files, activation state, update metadata, credentials or responses. Upgrader filters return their input unchanged.
@@ -195,7 +204,9 @@ The plugin must stay distributable on WordPress.org:
   - **Arguments and fingerprints never reach the UI**. With rows listed, the hidden-arguments note and the between-capture note are shown ("Very short-lived actions that are queued and completed between captures may not appear."); the leave-the-queue note only with a no-longer-active action. No notes in the compact no-changes state.
 - **UTC API timestamps are localized only in presentation** (`Intl.DateTimeFormat`, browser time zone); **backend byte counts are formatted only in presentation** (`utils/format.ts`, 1 KB = 1024 B). Never change the values sent by PHP.
 - **No risk classification** (impact levels, "safe"/"dangerous", size thresholds) without an explicitly designed model.
-- Navigation is URL state on the admin page (`&analysis=<id>`, `&paged=<n>`) via the History API; no router dependency.
+- Navigation is URL state on the admin page (`&analysis=<id>`, `&paged=<n>`) via the History API; no router dependency. The screen is a top-level menu page (`add_menu_page()`, `dashicons-visibility`, slug `updatelens`); former `tools.php?page=updatelens` URLs are redirected to `admin.php` with the same `analysis`/`paged` values (`AdminPage::redirect_legacy_url()`).
+- **First run** (no analyses): onboarding replaces the History (`components/FirstRun.tsx`): steps, one "Go to Plugins" link (URL from PHP, only for users who can open it), the three signals (Options & autoload, WP-Cron, Action Scheduler), privacy and observation notes, and the monitoring start with the baseline plugin list (alphabetical, collapsed after 10, Active/Inactive as text). No "scan"/"start" buttons: nothing is started manually. If baseline data is unavailable, a fallback sentence replaces it without an error. Once an analysis exists, onboarding disappears.
+- The History boundary ("Monitoring began on … Updates before this point were not observed by UpdateLens.") appears only on the last History page, after the oldest analysis, and only when the start is known.
 - Frontend tests (Vitest + Testing Library, jsdom) live in `tests/admin/` (not `src/`, which ships in the release ZIP); mock `@wordpress/api-fetch` with API-shaped fixtures.
 
 ## Working rules

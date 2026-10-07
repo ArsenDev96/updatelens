@@ -1,9 +1,12 @@
 /**
  * Screen state kept in the wp-admin URL, so reports can be bookmarked:
  *
- *   tools.php?page=updatelens              History
- *   tools.php?page=updatelens&paged=2      History, page 2
- *   tools.php?page=updatelens&analysis=42  Report 42 (`paged` is kept for the way back)
+ *   admin.php?page=updatelens              History
+ *   admin.php?page=updatelens&paged=2      History, page 2
+ *   admin.php?page=updatelens&analysis=42  Report 42 (`paged` is kept for the way back)
+ *
+ * Former Tools → UpdateLens URLs (tools.php?page=updatelens…) are redirected
+ * to admin.php with the same parameters by AdminAdminPage.
  */
 export type Route =
 	| { view: 'history'; page: number }

@@ -251,7 +251,7 @@ describe( 'defaultPhase', () => {
 } );
 
 describe( 'routes', () => {
-	const base = 'https://example.test/wp-admin/tools.php?page=updatelens';
+	const base = 'https://example.test/wp-admin/admin.php?page=updatelens';
 
 	it( 'parses history and report URLs', () => {
 		expect( parseRoute( '?page=updatelens' ) ).toEqual( {
@@ -280,17 +280,17 @@ describe( 'routes', () => {
 
 	it( 'builds URLs that keep the admin page', () => {
 		expect( routeHref( { view: 'report', id: 42, page: 1 }, base ) ).toBe(
-			'/wp-admin/tools.php?page=updatelens&analysis=42'
+			'/wp-admin/admin.php?page=updatelens&analysis=42'
 		);
 		expect(
 			routeHref( { view: 'history', page: 2 }, `${ base }&analysis=42` )
-		).toBe( '/wp-admin/tools.php?page=updatelens&paged=2' );
+		).toBe( '/wp-admin/admin.php?page=updatelens&paged=2' );
 		expect(
 			routeHref(
 				{ view: 'history', page: 1 },
 				`${ base }&analysis=42&paged=2`
 			)
-		).toBe( '/wp-admin/tools.php?page=updatelens' );
+		).toBe( '/wp-admin/admin.php?page=updatelens' );
 	} );
 } );
 

@@ -2,7 +2,7 @@
 
 A WordPress plugin that will show what changes when a plugin update runs. It will capture site state before and after a single plugin update and report the difference in wp-admin.
 
-**Status:** Private Beta 2 (`0.2.0-beta.2`, see [docs/private-beta.md](docs/private-beta.md) for testers and [docs/private-beta-release.md](docs/private-beta-release.md) for the release checklist). When a single plugin is updated from wp-admin, UpdateLens records the changes it observed during the update request and during the first admin request after it in its own database table, for three signals: **Options** (`wp_options` names, sizes and autoload state, never values), **WP-Cron** (scheduled hooks, timing and recurrence, never event arguments) and **Action Scheduler** (active pending/in-progress actions: hooks, groups, timing and schedules, never arguments; not execution history, and actions queued and completed between two observations are not seen). These are observed changes, not proven causes. **Tools → UpdateLens** shows the update history and a report per analysis (during update, after update, net result), backed by a read-only REST API ([docs/rest-api.md](docs/rest-api.md)).
+**Status:** Private Beta 2 (`0.2.0-beta.2`, see [docs/private-beta.md](docs/private-beta.md) for testers and [docs/private-beta-release.md](docs/private-beta-release.md) for the release checklist). When a single plugin is updated from wp-admin, UpdateLens records the changes it observed during the update request and during the first admin request after it in its own database table, for three signals: **Options** (`wp_options` names, sizes and autoload state, never values), **WP-Cron** (scheduled hooks, timing and recurrence, never event arguments) and **Action Scheduler** (active pending/in-progress actions: hooks, groups, timing and schedules, never arguments; not execution history, and actions queued and completed between two observations are not seen). These are observed changes, not proven causes. The top-level **UpdateLens** admin menu shows the update history and a report per analysis (during update, after update, net result), backed by a read-only REST API ([docs/rest-api.md](docs/rest-api.md)).
 
 ## Requirements
 
@@ -19,7 +19,7 @@ npm install
 composer install
 ```
 
-Activate **UpdateLens** on the Plugins screen and open **Tools → UpdateLens**.
+Activate **UpdateLens** on the Plugins screen and open **UpdateLens** in the admin menu.
 
 ## Development
 
@@ -68,10 +68,10 @@ COMPOSER_BIN="docker run --rm -v $PWD/release/updatelens:/app -w /app composer c
 
 ```text
 updatelens.php           Plugin header, constants, autoloader, activation hooks
-uninstall.php            Data cleanup on plugin deletion (drops the analyses table)
+uninstall.php            Data cleanup on plugin deletion (analyses table, options incl. the monitoring baseline)
 includes/                PHP, PSR-4 namespace UpdateLens\
   Core/                  Plugin (hook wiring), Activator, Deactivator
-  Admin/AdminPage.php    Tools → UpdateLens screen; enqueues the admin app
+  Admin/AdminPage.php    Top-level UpdateLens screen (admin.php?page=updatelens); enqueues the admin app
   Rest/                  REST controllers (namespace updatelens/v1)
   Snapshot/              wp_options, WP-Cron and Action Scheduler snapshots (safe metadata only: fingerprints,
                          sizes, autoload; hooks, groups, timing, schedules — never option values or arguments)
@@ -79,6 +79,7 @@ includes/                PHP, PSR-4 namespace UpdateLens\
                          or fingerprints)
   Update/                Plugin update analysis lifecycle (WordPress updater hooks + rules); WP-Cron and Action
                          Scheduler are observed and stored alongside wp_options as independent signals
+  Baseline/              Monitoring baseline: when monitoring started and the plugins installed then
   Storage/               Analyses table, SQL and JSON persistence formats
   Report/                Safe, provider-aware read models for the report REST endpoints (Options, WP-Cron,
                          Action Scheduler)

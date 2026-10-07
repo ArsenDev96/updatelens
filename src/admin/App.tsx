@@ -10,7 +10,12 @@ import { parseRoute, routeHref, type Route } from './utils/route';
  * (`&analysis=<id>`, `&paged=<n>`). Navigation uses the History API, so
  * reports can be bookmarked and Back/Forward work without page reloads.
  */
-export default function App() {
+export default function App( {
+	pluginsUrl = '',
+}: {
+	/** Plugins screen URL (from the page shell); empty if the user cannot open it. */
+	pluginsUrl?: string;
+} ) {
 	const [ route, setRoute ] = useState< Route >( () =>
 		parseRoute( window.location.search )
 	);
@@ -60,6 +65,7 @@ export default function App() {
 						navigate( { view: 'history', page } )
 					}
 					focusHeading={ navigated }
+					pluginsUrl={ pluginsUrl }
 				/>
 			) : (
 				<ReportPage

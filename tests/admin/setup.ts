@@ -14,6 +14,6 @@ afterEach( () => {
 	window.history.replaceState(
 		null,
 		'',
-		'/wp-admin/tools.php?page=updatelens'
+		'/wp-admin/admin.php?page=updatelens'
 	);
 } );

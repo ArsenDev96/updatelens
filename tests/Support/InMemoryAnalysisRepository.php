@@ -273,6 +273,26 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	}
 
 	/**
+	 * Start time of the row with the lowest ID.
+	 *
+	 * @return string|null
+	 * @throws RuntimeException On failure.
+	 */
+	public function first_started_at() {
+		if ( $this->fail_reads ) {
+			throw new RuntimeException( 'read failed' );
+		}
+		if ( ! $this->rows ) {
+			return null;
+		}
+
+		$rows = $this->rows;
+		ksort( $rows );
+
+		return (string) reset( $rows )['started_at'];
+	}
+
+	/**
 	 * Row projected like REPORT_COLUMNS.
 	 *
 	 * @param int $id ID.

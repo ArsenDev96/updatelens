@@ -13,6 +13,7 @@ import type {
 	AvailableOptionsPhase,
 	CronPhase,
 	HistorySignal,
+	MonitoringBaseline,
 	OptionsPhase,
 	PhaseKey,
 	ReportPhase,
@@ -651,3 +652,42 @@ export function restError( code: string, status: number ) {
 export function pending< T >(): Promise< T > {
 	return new Promise< T >( vi.fn() );
 }
+
+/** GET /updatelens/v1/baseline of a fresh install (UpdateLens itself is never listed). */
+export const BASELINE: MonitoringBaseline = {
+	started_at: '2026-10-07T22:32:00Z',
+	plugin_count: 4,
+	plugins: [
+		{
+			file: 'classic-editor/classic-editor.php',
+			name: 'Classic Editor',
+			version: '1.7.0',
+			active: false,
+		},
+		{
+			file: 'elementor/elementor.php',
+			name: 'Elementor',
+			version: '4.3.4',
+			active: true,
+		},
+		{
+			file: 'newsletter/plugin.php',
+			name: 'Newsletter',
+			version: '9.4.7',
+			active: true,
+		},
+		{
+			file: 'woocommerce/woocommerce.php',
+			name: 'WooCommerce',
+			version: '11.1.2',
+			active: true,
+		},
+	],
+};
+
+/** Baseline fields when no readable baseline exists. */
+export const UNKNOWN_BASELINE: MonitoringBaseline = {
+	started_at: null,
+	plugin_count: null,
+	plugins: null,
+};

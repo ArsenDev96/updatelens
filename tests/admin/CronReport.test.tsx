@@ -27,7 +27,7 @@ function renderReport( report: AnalysisReport ) {
 	render(
 		<ReportPage
 			id={ report.id }
-			historyHref="/wp-admin/tools.php?page=updatelens"
+			historyHref="/wp-admin/admin.php?page=updatelens"
 			onBack={ vi.fn() }
 			focusHeading={ false }
 		/>

@@ -1,10 +1,10 @@
 # UpdateLens REST API (v0.1)
 
-Read-only endpoints for analysis history and reports, namespace `updatelens/v1`. The admin app calls them through `wp.apiFetch` (cookie authentication + `wp_rest` nonce).
+Read-only endpoints for analysis history, reports and the monitoring start, namespace `updatelens/v1`. The admin app calls them through `wp.apiFetch` (cookie authentication + `wp_rest` nonce).
 
 - **Permission:** `manage_options` (`Core\Plugin::CAPABILITY`) on every route. Not logged in → `401 rest_forbidden`; logged in without the capability → `403 rest_forbidden`.
-- **Single site only.** The analysis routes are not registered on Multisite.
-- **Read-only.** Before every read, analyses past their settle deadline are expired (`completed`, `settle_outcome: "expired"`, no settled snapshot), and the analyses table is recreated if it is missing. Nothing else is changed.
+- **Single site only.** The analysis and baseline routes are not registered on Multisite.
+- **Read-only.** Before every history or report read, analyses past their settle deadline are expired (`completed`, `settle_outcome: "expired"`, no settled snapshot), and the analyses table is recreated if it is missing. Nothing else is changed.
 - **Errors:** if storage cannot be read (or the table cannot be recreated): `500 updatelens_reports_unavailable` with a generic message. Database errors are never part of a response.
 - **Types:** IDs, counts, byte sizes and deltas are JSON integers; flags are booleans. Timestamps are UTC ISO 8601 (`2026-10-05T17:46:23Z`) or `null`, never site-local time.
 - **Wording:** phases describe _when_ changes were observed, not what caused them.
@@ -370,3 +370,35 @@ An unavailable `action_scheduler` object has `reason`. `not_installed` is a norm
 | `unknown`                          | An unrecognised stored reason (never reinterpreted).                                       |
 
 Analyses recorded before Action Scheduler observation report `not_captured` in every phase: their Options and WP-Cron data are unchanged.
+
+## `GET /updatelens/v1/baseline`
+
+When UpdateLens started monitoring, and which plugins were installed at that moment. Supportive data for the first-run screen and the History boundary; it is not an analysis and contains no snapshot data.
+
+```json
+{
+  "started_at": "2026-10-07T22:32:00Z",
+  "plugin_count": 2,
+  "plugins": [
+    {
+      "file": "classic-editor/classic-editor.php",
+      "name": "Classic Editor",
+      "version": "1.7.0",
+      "active": false
+    },
+    {
+      "file": "woocommerce/woocommerce.php",
+      "name": "WooCommerce",
+      "version": "11.1.2",
+      "active": true
+    }
+  ]
+}
+```
+
+- `started_at`: UTC ISO 8601, or `null` if unknown. Updates before this point were not observed. It is the earlier of the stored baseline time and the first stored analysis (lowest ID), so sites that ran UpdateLens before the baseline existed start at their first analysis. Nothing is reconstructed from other data.
+- `plugin_count`, `plugins`: the plugins installed when monitoring started, sorted by name; `null` unless the stored baseline is the monitoring start (missing or unreadable baseline, or a baseline recorded after earlier analyses). UpdateLens itself is never listed. Only file, name, version and active state are kept: no settings, plugin URIs, update data, license data or user information. The list is never updated after monitoring started: later installs, updates and activation changes appear only in reports.
+- A missing or unreadable baseline is not an error: its fields are `null` (HTTP 200). If the analyses cannot be read: `500 updatelens_reports_unavailable`.
+- The History boundary requests only the start time, with WordPress's `_fields=started_at`.
+
+Storage: option `updatelens_monitoring_baseline` (not autoloaded), versioned JSON written by `Storage\MonitoringBaselineCodec`: `{"schema":1,"started_at":"2026-10-07 22:32:00","plugins":[{"file":…,"name":…,"version":…,"active":…}]}`. It is written once by `Baseline\MonitoringBaseline::ensure()`: on activation, or, if activation could not write it (e.g. sites upgraded from a version without a baseline), when the UpdateLens screen loads. An existing value, even an unreadable one, is never replaced. Deactivation keeps it; uninstall deletes it.

@@ -260,11 +260,45 @@ describe( 'routes', () => {
 			view: 'history',
 			page: 3,
 		} );
+		// Report URLs from before the detail views still open the overview.
 		expect( parseRoute( '?page=updatelens&analysis=42' ) ).toEqual( {
 			view: 'report',
 			id: 42,
 			page: 1,
+			phase: null,
+			signal: null,
 		} );
+		expect(
+			parseRoute(
+				'?page=updatelens&paged=2&analysis=42&signal=action_scheduler&phase=post_update'
+			)
+		).toEqual( {
+			view: 'report',
+			id: 42,
+			page: 2,
+			phase: 'post_update',
+			signal: 'action_scheduler',
+		} );
+	} );
+
+	it.each( [
+		[ 'signal=Options', { phase: null, signal: null } ],
+		[ 'signal=as', { phase: null, signal: null } ],
+		[ 'phase=net', { phase: null, signal: null } ],
+		[ 'signal=cron&phase=final', { phase: 'final', signal: 'cron' } ],
+	] )(
+		'falls back to the overview and default phase (%s)',
+		( query, view ) => {
+			expect(
+				parseRoute( `?page=updatelens&analysis=42&${ query }` )
+			).toEqual( { view: 'report', id: 42, page: 1, ...view } );
+		}
+	);
+
+	it( 'ignores signal and phase without a report', () => {
+		expect(
+			parseRoute( '?page=updatelens&signal=cron&phase=final' )
+		).toEqual( { view: 'history', page: 1 } );
 	} );
 
 	it.each( [ 'abc', '0', '-1', '1.5', '99999999999999999999' ] )(
@@ -277,9 +311,33 @@ describe( 'routes', () => {
 	);
 
 	it( 'builds URLs that keep the admin page', () => {
-		expect( routeHref( { view: 'report', id: 42, page: 1 }, base ) ).toBe(
+		const report = {
+			view: 'report',
+			id: 42,
+			page: 1,
+			phase: null,
+			signal: null,
+		} as const;
+		expect( routeHref( report, base ) ).toBe(
 			'/wp-admin/admin.php?page=updatelens&analysis=42'
 		);
+		expect(
+			routeHref(
+				{ ...report, signal: 'options', phase: 'during_update' },
+				`${ base }&analysis=7&signal=cron`
+			)
+		).toBe(
+			'/wp-admin/admin.php?page=updatelens&analysis=42&signal=options&phase=during_update'
+		);
+		expect(
+			routeHref( report, `${ base }&analysis=42&signal=cron&phase=final` )
+		).toBe( '/wp-admin/admin.php?page=updatelens&analysis=42' );
+		expect(
+			routeHref(
+				{ view: 'history', page: 1 },
+				`${ base }&analysis=42&signal=cron&phase=final`
+			)
+		).toBe( '/wp-admin/admin.php?page=updatelens' );
 		expect(
 			routeHref( { view: 'history', page: 2 }, `${ base }&analysis=42` )
 		).toBe( '/wp-admin/admin.php?page=updatelens&paged=2' );

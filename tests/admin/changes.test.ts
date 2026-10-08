@@ -12,7 +12,6 @@ import {
 import { formatBytesPair } from '@/admin/utils/format';
 import {
 	changeCountNoun,
-	changeCountText,
 	changeIndicator,
 	defaultPhase,
 	historyPhaseText,
@@ -188,29 +187,27 @@ describe( 'phase and signal wording', () => {
 
 describe( 'change wording', () => {
 	it( 'says how many changes, or none', () => {
-		expect( changeCountText( 0 ) ).toBe( 'no changes' );
-		expect( changeCountText( 1 ) ).toBe( '1 change' );
-		expect( changeCountText( 4 ) ).toBe( '4 changes' );
+		expect( signalStatusText( 0 ) ).toBe( 'No changes' );
+		expect( signalStatusText( 1 ) ).toBe( '1 change' );
+		expect( signalStatusText( 4 ) ).toBe( '4 changes' );
+		expect( signalStatusText( null ) ).toBe( 'Not available' );
 	} );
 
 	it( 'names the changes in phase indicators', () => {
 		expect( changeCountNoun( 0 ) ).toBe( '0 changes' );
 		expect( changeCountNoun( 1 ) ).toBe( '1 change' );
 		expect( changeCountNoun( 2 ) ).toBe( '2 changes' );
-		expect( changeIndicator( 'During update', 1 ) ).toEqual( {
+		expect( changeIndicator( 1 ) ).toEqual( {
 			text: '1 change',
 			tone: 'changes',
-			accessibleName: 'During update, 1 change',
 		} );
-		expect( changeIndicator( 'After update', 0 ) ).toEqual( {
+		expect( changeIndicator( 0 ) ).toEqual( {
 			text: '0 changes',
 			tone: 'none',
-			accessibleName: 'After update, no changes',
 		} );
-		expect( changeIndicator( 'Net result', null ) ).toEqual( {
+		expect( changeIndicator( null ) ).toEqual( {
 			text: 'Not available',
 			tone: 'unavailable',
-			accessibleName: 'Net result, not available',
 		} );
 	} );
 

@@ -1,11 +1,10 @@
 import apiFetch from '@wordpress/api-fetch';
 import { setLocaleData } from '@wordpress/i18n';
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ReportPage } from '@/admin/pages/ReportPage';
-import type { AnalysisReport } from '@/admin/types/api';
+import type { AnalysisReport, Provider } from '@/admin/types/api';
 
 import {
 	AWAITING,
@@ -18,27 +17,33 @@ import {
 	PRE_CRON,
 	T,
 } from './fixtures';
+import {
+	cardTexts,
+	openReport,
+	phasePanel,
+	signalCard,
+	tab,
+} from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
 
-function renderReport( report: AnalysisReport ) {
+/**
+ * Opens a report on the WP-Cron page (or another view).
+ *
+ * @param report Report served by the API.
+ * @param signal Signal page; null for the overview.
+ */
+function renderReport(
+	report: AnalysisReport,
+	signal: Provider | null = 'cron'
+) {
 	apiFetchMock.mockResolvedValue( report );
-	render(
-		<ReportPage
-			id={ report.id }
-			historyHref="/wp-admin/admin.php?page=updatelens"
-			onBack={ vi.fn() }
-			focusHeading={ false }
-		/>
-	);
+	openReport( report.id, { signal: signal ?? undefined } );
 }
 
-const tab = ( name: RegExp ) => screen.getByRole( 'tab', { name } );
-/** The WP-Cron section of the selected phase (signals are stacked, not tabs). */
-const signalPanel = () => screen.getByRole( 'region', { name: /^WP-Cron/ } );
-const optionsSection = () =>
-	screen.getByRole( 'region', { name: /^Options & autoload/ } );
+/** The selected phase of the WP-Cron page. */
+const signalPanel = phasePanel;
 const iso = ( seconds: number ) =>
 	new Date( seconds * 1000 ).toISOString().replace( '.000Z', 'Z' );
 
@@ -54,43 +59,35 @@ describe( 'WP-Cron in reports', () => {
 		apiFetchMock.mockReset();
 	} );
 
-	it( 'stacks every signal of the phase as a section, without signal tabs', async () => {
-		renderReport( COMPLETED );
+	it( 'gives every signal its own page instead of signal tabs', async () => {
+		renderReport( COMPLETED, null );
 		const user = userEvent.setup();
 
 		await screen.findAllByRole( 'tablist' );
-		// The phase selector is the only navigation.
+		// The phase selector is the only tab list.
 		expect(
 			screen
 				.getAllByRole( 'tablist' )
 				.map( ( list ) => list.getAttribute( 'aria-label' ) )
 		).toEqual( [ 'Observation phases' ] );
-		expect(
-			screen.queryByRole( 'tablist', { name: 'Observed signals' } )
-		).toBeNull();
 		expect( screen.queryByRole( 'tab', { name: /^WP-Cron/ } ) ).toBeNull();
 
-		// Options and WP-Cron in full, Action Scheduler as one line, in that order.
-		const sections = [
-			optionsSection(),
-			signalPanel(),
-			screen.getByRole( 'region', { name: /^Action Scheduler/ } ),
-		];
+		// One card per signal, in order, each linking to its page.
+		const links = within(
+			screen.getByRole( 'list', { name: 'Signals' } )
+		).getAllByRole( 'link' );
 		expect(
-			sections.map( ( section ) => section.getAttribute( 'id' ) )
-		).toEqual( [
-			'updatelens-signal-options',
-			'updatelens-signal-cron',
-			'updatelens-signal-action_scheduler',
-		] );
-		expect( sections[ 0 ] ).toHaveAccessibleName(
-			'Options & autoload · 6 changes'
+			links.map( ( link ) =>
+				new URLSearchParams(
+					link.getAttribute( 'href' )!.split( '?' )[ 1 ]
+				).get( 'signal' )
+			)
+		).toEqual( [ 'options', 'cron', 'action_scheduler' ] );
+		expect( cardTexts()[ 1 ] ).toBe(
+			'WP-Cron5 changes Added 2 · No longer present 1 · Rescheduled 2View details →'
 		);
-		expect( sections[ 1 ] ).toHaveAccessibleName( 'WP-Cron · 5 changes' );
-		expect( sections[ 2 ] ).toHaveAccessibleName( 'Action Scheduler' );
-		expect( optionsSection() ).toHaveTextContent( 'ulfx_a_feature_flags' );
-		expect( signalPanel() ).toHaveTextContent( 'ul_fixture_task_1.5.0' );
-		expect( optionsSection() ).not.toHaveTextContent(
+		// No rows of any signal on the overview.
+		expect( document.body ).not.toHaveTextContent(
 			'ul_fixture_task_1.5.0'
 		);
 
@@ -102,38 +99,47 @@ describe( 'WP-Cron in reports', () => {
 			'true'
 		);
 		expect( tab( /After update/ ) ).toHaveFocus();
+
+		// The WP-Cron page shows WP-Cron only.
+		await user.click( screen.getByRole( 'link', { name: 'WP-Cron' } ) );
+		// …in the phase chosen on the overview.
+		expect( tab( /After update/ ) ).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+		expect( signalPanel() ).toHaveTextContent( 'ul_fixture_task_1.5.0' );
+		expect( document.body ).not.toHaveTextContent( 'Total option data' );
 	} );
 
-	it( 'swaps every section when the phase changes', async () => {
+	it( 'swaps the page content when the phase changes', async () => {
 		renderReport( COMPLETED );
 		const user = await openCron( /Net result/ );
 
+		expect( signalPanel() ).toHaveTextContent( 'ul_fixture_task_1.5.0' );
 		await user.click( tab( /During update/ ) );
 		expect( signalPanel() ).toHaveTextContent( 'ul_fixture_update_once' );
-		expect( optionsSection() ).toHaveTextContent(
-			'ulfx_a_needs_migration'
-		);
 		// Nothing of Net result is left behind.
-		expect( document.body ).not.toHaveTextContent( 'ulfx_a_feature_flags' );
 		expect( document.body ).not.toHaveTextContent(
 			'ul_fixture_task_1.5.0'
 		);
+		expect( screen.getAllByRole( 'tabpanel' ) ).toHaveLength( 1 );
 	} );
 
-	it( 'shows WP-Cron in full when only WP-Cron is available', async () => {
-		renderReport( CRON_ONLY );
+	it( 'shows WP-Cron when only WP-Cron is available', async () => {
+		renderReport( CRON_ONLY, null );
 
 		await screen.findAllByRole( 'tablist' );
 		expect( tab( /Net result/ ) ).toHaveAttribute(
 			'aria-selected',
 			'true'
 		);
-		expect( tab( /Net result/ ) ).not.toHaveTextContent( 'not available' );
-		expect( signalPanel() ).toHaveAccessibleName(
-			/^WP-Cron · \d+ changes?$/
+		expect( tab( /Net result/ ) ).not.toHaveTextContent( 'Not available' );
+		expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
+			/^WP-Cron\d+ changes?/
 		);
-		expect( optionsSection() ).toHaveAccessibleName( 'Options & autoload' );
-		expect( optionsSection().querySelector( 'ul' ) ).toBeNull();
+		expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
+			/^Options & autoloadNot available/
+		);
 	} );
 
 	it( 'shows the Cron summary with rescheduled as a separate count', async () => {
@@ -369,12 +375,13 @@ describe( 'WP-Cron in reports', () => {
 		const user = userEvent.setup();
 
 		await screen.findAllByRole( 'tablist' );
-		expect( screen.getByText( 'Analysis completed' ) ).toBeInTheDocument();
-		expect( tab( /Net result/ ) ).not.toHaveTextContent( 'not available' );
-		expect( optionsSection() ).toHaveTextContent( 'ulfx_a_feature_flags' );
-		// Unavailable is one neutral line, in text.
-		expect( signalPanel() ).toHaveAccessibleName( 'WP-Cron' );
+		// The WP-Cron page has no phase with WP-Cron data.
+		expect( tab( /Net result/ ) ).toHaveTextContent( 'Not available' );
+		// Unavailable is a calm empty state, in text.
 		expect( signalPanel().querySelector( 'ul' ) ).toBeNull();
+		expect(
+			within( signalPanel() ).queryByRole( 'definition' )
+		).toBeNull();
 		expect( signalPanel() ).toHaveTextContent(
 			'WP-Cron analysis unavailable'
 		);
@@ -390,6 +397,13 @@ describe( 'WP-Cron in reports', () => {
 				.getAllByText( 'malformed_cron_state' )[ 0 ]
 				.closest( 'details' )
 		).not.toBeNull();
+
+		// Options stay usable: the report keeps its changes.
+		cleanup();
+		renderReport( MALFORMED_CRON, 'options' );
+		await screen.findAllByRole( 'tablist' );
+		expect( tab( /Net result/ ) ).not.toHaveTextContent( 'Not available' );
+		expect( signalPanel() ).toHaveTextContent( 'ulfx_a_feature_flags' );
 	} );
 
 	it( 'keeps each signal’s availability per phase (partial WP-Cron)', async () => {
@@ -399,14 +413,10 @@ describe( 'WP-Cron in reports', () => {
 		expect( signalPanel() ).toHaveTextContent( 'ul_fixture_update_once' );
 
 		await user.click( tab( /After update/ ) );
-		expect( tab( /After update/ ) ).not.toHaveTextContent(
-			'not available'
-		);
-		expect( signalPanel() ).toHaveAccessibleName( 'WP-Cron' );
+		expect( tab( /After update/ ) ).toHaveTextContent( 'Not available' );
 		expect( signalPanel() ).toHaveTextContent(
 			"UpdateLens couldn't capture or read the WP-Cron state this phase needs."
 		);
-		expect( optionsSection() ).toHaveTextContent( 'ulfx_a_api_key' );
 
 		await user.click( tab( /Net result/ ) );
 		expect( signalPanel() ).toHaveTextContent( 'ul_fixture_task_1.5.0' );
@@ -421,6 +431,14 @@ describe( 'WP-Cron in reports', () => {
 		expect( signalPanel() ).toHaveTextContent(
 			'Post-update WP-Cron state was not captured within 10 minutes of the update.'
 		);
+		expect( document.body ).not.toHaveTextContent( '5 minutes' );
+
+		// The overview's status strip uses the same window.
+		await user.click(
+			within(
+				screen.getByRole( 'navigation', { name: 'Breadcrumb' } )
+			).getByRole( 'link', { name: 'UpdateLens Fixture A' } )
+		);
 		expect(
 			within(
 				screen.getByRole( 'region', { name: 'Analysis status' } )
@@ -430,7 +448,7 @@ describe( 'WP-Cron in reports', () => {
 	} );
 
 	it( 'uses the API window in the awaiting notice', async () => {
-		renderReport( { ...AWAITING, observation_window_seconds: 120 } );
+		renderReport( { ...AWAITING, observation_window_seconds: 120 }, null );
 
 		expect(
 			await screen.findByText( /within 2 minutes of the update/ )
@@ -438,10 +456,19 @@ describe( 'WP-Cron in reports', () => {
 	} );
 
 	it( 'renders reports from before WP-Cron observation', async () => {
-		renderReport( PRE_CRON );
+		renderReport( PRE_CRON, null );
 
 		await screen.findAllByRole( 'tablist' );
-		expect( optionsSection() ).toHaveTextContent( 'ulfx_a_feature_flags' );
+		expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
+			'6 changes'
+		);
+		expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
+			'Not available Not captured'
+		);
+		cleanup();
+
+		renderReport( PRE_CRON );
+		await screen.findAllByRole( 'tablist' );
 		expect( signalPanel() ).toHaveTextContent(
 			'WP-Cron was not captured for this phase.'
 		);

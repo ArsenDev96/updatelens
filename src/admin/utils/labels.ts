@@ -148,48 +148,22 @@ export function changeCountNoun( count: number ): string {
 }
 
 /**
- * "1 change", "4 changes" or "no changes", for use inside a phrase
- * (e.g. an accessible tab name).
+ * Indicator after a phase tab label ("4 changes"). The tab's accessible name
+ * is its visible text ("Net result, 4 changes"). A null count means the
+ * phase is unavailable.
  *
- * @param count Number of observed records.
- */
-export function changeCountText( count: number ): string {
-	return count === 0
-		? __( 'no changes', 'updatelens' )
-		: changeCountNoun( count );
-}
-
-/**
- * Indicator after a phase tab label ("4 changes") and the tab's accessible
- * name ("Net result, 4 changes"). A null count means the phase is unavailable.
- *
- * @param label Visible tab label.
  * @param count Change count, or null if unavailable.
  */
-export function changeIndicator(
-	label: string,
-	count: number | null
-): {
+export function changeIndicator( count: number | null ): {
 	text: string;
 	tone: 'changes' | 'none' | 'unavailable';
-	accessibleName: string;
 } {
-	const status =
-		count === null
-			? __( 'not available', 'updatelens' )
-			: changeCountText( count );
 	return {
 		text:
 			count === null
 				? __( 'Not available', 'updatelens' )
 				: changeCountNoun( count ),
 		tone: count === null ? 'unavailable' : count > 0 ? 'changes' : 'none',
-		accessibleName: sprintf(
-			/* translators: 1: tab label, e.g. "Net result". 2: its status, e.g. "4 changes" or "not available". */
-			__( '%1$s, %2$s', 'updatelens' ),
-			label,
-			status
-		),
 	};
 }
 
@@ -229,6 +203,159 @@ export function signalStatusText( count: number | null ): string {
 	return count === 0
 		? __( 'No changes', 'updatelens' )
 		: changeCountNoun( count );
+}
+
+/**
+ * Signal names as a list: "A", "A and B", "A, B and C".
+ *
+ * @param items Signal names (at most three).
+ */
+function listText( items: string[] ): string {
+	if ( items.length === 1 ) {
+		return items[ 0 ];
+	}
+	if ( items.length === 2 ) {
+		return sprintf(
+			/* translators: 1: signal name, e.g. "Options & autoload". 2: signal name, e.g. "WP-Cron". */
+			__( '%1$s and %2$s', 'updatelens' ),
+			items[ 0 ],
+			items[ 1 ]
+		);
+	}
+	return sprintf(
+		/* translators: 1, 2, 3: signal names, e.g. "Options & autoload", "WP-Cron", "Action Scheduler". */
+		__( '%1$s, %2$s and %3$s', 'updatelens' ),
+		items[ 0 ],
+		items[ 1 ],
+		items[ 2 ]
+	);
+}
+
+/**
+ * Plain sentences under a phase headline: in which signals changes were
+ * observed, which were compared without changes and which were not
+ * available. Observational only. Empty when no signal is available (the
+ * signals explain why) or when nothing changed (the headline says so).
+ *
+ * @param counts Change counts of the phase.
+ */
+export function phaseSummarySentences( counts: PhaseChangeCounts ): string[] {
+	const named = ( test: ( count: number | null ) => boolean ) =>
+		PROVIDERS.filter( ( provider ) => test( counts[ provider ] ) ).map(
+			providerLabel
+		);
+	const changed = named( ( count ) => ( count ?? 0 ) > 0 );
+	const unchanged = named( ( count ) => count === 0 );
+	const unavailable = named( ( count ) => count === null );
+
+	if ( counts.total === null ) {
+		return [];
+	}
+	const sentences: string[] = [];
+	if ( changed.length > 0 ) {
+		sentences.push(
+			sprintf(
+				/* translators: %s: one or more signal names, e.g. "Options & autoload and WP-Cron". */
+				__( 'Changes were observed in %s.', 'updatelens' ),
+				listText( changed )
+			)
+		);
+		if ( unchanged.length > 0 ) {
+			sentences.push(
+				sprintf(
+					/* translators: %s: one or more signal names, e.g. "Action Scheduler". */
+					__( 'No changes were observed in %s.', 'updatelens' ),
+					listText( unchanged )
+				)
+			);
+		}
+	}
+	if ( unavailable.length > 0 ) {
+		sentences.push(
+			sprintf(
+				/* translators: %s: one or more signal names, e.g. "Action Scheduler". */
+				_n(
+					'%s was not available for this phase.',
+					'%s were not available for this phase.',
+					unavailable.length,
+					'updatelens'
+				),
+				listText( unavailable )
+			)
+		);
+	}
+	return sentences;
+}
+
+/**
+ * Why a signal is unavailable in a phase, or null if it is available.
+ *
+ * @param provider      Signal.
+ * @param data          Phase data of every signal.
+ * @param windowSeconds Observation window length from the API.
+ */
+export function signalUnavailableText(
+	provider: Provider,
+	data: ReportPhase,
+	windowSeconds: number
+): { title: string; description: string } | null {
+	switch ( provider ) {
+		case 'options':
+			return data.options.available
+				? null
+				: unavailableReasonText( data.options.reason, windowSeconds );
+		case 'cron':
+			return data.cron.available
+				? null
+				: cronUnavailableReasonText( data.cron.reason, windowSeconds );
+		case 'action_scheduler':
+			return data.action_scheduler.available
+				? null
+				: actionSchedulerUnavailableReasonText(
+						data.action_scheduler.reason,
+						windowSeconds
+					);
+	}
+}
+
+/**
+ * Empty state of a signal that was captured without changes in a phase.
+ *
+ * @param provider Signal.
+ */
+export function noChangesText( provider: Provider ): {
+	title: string;
+	description: string;
+} {
+	switch ( provider ) {
+		case 'options':
+			return {
+				title: __( 'No option changes observed', 'updatelens' ),
+				description: __(
+					'UpdateLens captured this phase successfully, but the tracked option state did not change.',
+					'updatelens'
+				),
+			};
+		case 'cron':
+			return {
+				title: __( 'No WP-Cron changes observed', 'updatelens' ),
+				description: __(
+					'UpdateLens captured this phase successfully, but no scheduled events changed.',
+					'updatelens'
+				),
+			};
+		case 'action_scheduler':
+			return {
+				title: __(
+					'No Action Scheduler changes observed',
+					'updatelens'
+				),
+				description: __(
+					'UpdateLens captured this phase successfully, but no active scheduled actions changed.',
+					'updatelens'
+				),
+			};
+	}
 }
 
 /**

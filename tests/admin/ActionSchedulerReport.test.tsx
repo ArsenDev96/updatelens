@@ -1,15 +1,15 @@
 import apiFetch from '@wordpress/api-fetch';
 import { setLocaleData } from '@wordpress/i18n';
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_VISIBLE_DIFF_ROWS } from '@/admin/components/DiffSection';
 import { HistoryPage } from '@/admin/pages/HistoryPage';
-import { ReportPage } from '@/admin/pages/ReportPage';
 import type {
 	ActionSchedulerUnavailableReason,
 	AnalysisReport,
+	Provider,
 	ReportPhase,
 } from '@/admin/types/api';
 import { phaseChangeCounts } from '@/admin/utils/changes';
@@ -43,43 +43,45 @@ import {
 	T,
 	unavailable,
 } from './fixtures';
+import {
+	cardTexts,
+	openReport,
+	phasePanel,
+	signalCard,
+	tab,
+} from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
 
-function renderReport( report: AnalysisReport ) {
+/**
+ * Opens a report on the Action Scheduler page (or another view).
+ *
+ * @param report Report served by the API.
+ * @param signal Signal page; null for the overview.
+ */
+function renderReport(
+	report: AnalysisReport,
+	signal: Provider | null = 'action_scheduler'
+) {
 	apiFetchMock.mockResolvedValue( report );
-	render(
-		<ReportPage
-			id={ report.id }
-			historyHref="/wp-admin/admin.php?page=updatelens"
-			onBack={ vi.fn() }
-			focusHeading={ false }
-		/>
-	);
+	openReport( report.id, { signal: signal ?? undefined } );
 	return screen.findAllByRole( 'tablist' );
 }
 
-const tab = ( name: RegExp ) => screen.getByRole( 'tab', { name } );
 const tabNames = ( list: string ) =>
 	within( screen.getByRole( 'tablist', { name: list } ) )
 		.getAllByRole( 'tab' )
-		.map( ( t ) => t.getAttribute( 'aria-label' ) );
-/** The Action Scheduler section of the selected phase (signals are stacked, not tabs). */
-const signalPanel = () =>
-	screen.getByRole( 'region', { name: /^Action Scheduler/ } );
-/** Accessible names of the stacked signal sections, in order. */
-const sectionNames = () =>
-	[ /^Options & autoload/, /^WP-Cron/, /^Action Scheduler/ ]
-		.map( ( name ) =>
-			screen
-				.getByRole( 'region', { name } )
-				.getAttribute( 'aria-labelledby' )
-		)
-		.map( ( id ) => document.getElementById( id! )!.textContent );
-
+		.map( ( t ) => t.textContent );
+/** The selected phase of the Action Scheduler page. */
+const signalPanel = phasePanel;
 const section = ( name: string | RegExp ) =>
 	within( signalPanel() ).getByRole( 'region', { name } );
+/** The state line of each overview card, in signal order. */
+const cardStates = () =>
+	within( screen.getByRole( 'list', { name: 'Signals' } ) )
+		.getAllByRole( 'listitem' )
+		.map( ( card ) => card.querySelector( 'p > span' )!.textContent );
 /** A number as the UI formats it in the host locale. */
 const num = ( n: number ) => new Intl.NumberFormat().format( n );
 const row = ( hook: string ) =>
@@ -134,15 +136,18 @@ describe( 'Action Scheduler in reports', () => {
 		apiFetchMock.mockReset();
 	} );
 
-	describe( 'signal tabs and counts', () => {
-		it( 'stacks Action Scheduler after Options and WP-Cron, with counts in every phase', async () => {
-			await renderReport( WOOCOMMERCE );
+	describe( 'signal cards and counts', () => {
+		it( 'puts Action Scheduler after Options and WP-Cron, with counts in every phase', async () => {
+			await renderReport( WOOCOMMERCE, null );
 
-			expect( sectionNames() ).toEqual( [
-				'Options & autoload · 6 changes',
-				'WP-Cron · 5 changes',
-				'Action Scheduler · 5 changes',
+			expect( cardStates() ).toEqual( [
+				'6 changes',
+				'5 changes',
+				'5 changes',
 			] );
+			expect( cardTexts()[ 2 ] ).toMatch(
+				/^Action Scheduler5 changes Added \d+/
+			);
 			// Net result: 6 options + 5 WP-Cron + 5 Action Scheduler.
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
 				'During update, 1 change',
@@ -150,11 +155,21 @@ describe( 'Action Scheduler in reports', () => {
 				'Net result, 16 changes',
 			] );
 			expect( screen.getByText( '16 observed changes' ) ).toBeVisible();
+			// Rows are on the Action Scheduler page, not the overview.
+			expect( document.body ).not.toHaveTextContent( 'fetch_patterns' );
+			cleanup();
+
+			await renderReport( WOOCOMMERCE );
+			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'During update, 1 change',
+				'After update, 5 changes',
+				'Net result, 5 changes',
+			] );
 			expect( signalPanel() ).toHaveTextContent( 'fetch_patterns' );
 		} );
 
-		it( 'keeps the phase total equal to the sum of its signal sections', async () => {
-			await renderReport( WOOCOMMERCE );
+		it( 'keeps the phase total equal to the sum of its signal cards', async () => {
+			await renderReport( WOOCOMMERCE, null );
 			const user = userEvent.setup();
 
 			for ( const [ phase, total ] of [
@@ -163,8 +178,8 @@ describe( 'Action Scheduler in reports', () => {
 				[ /Net result/, 16 ],
 			] as const ) {
 				await user.click( tab( phase ) );
-				const sum = sectionNames()
-					.map( ( name ) => /· (\d+) changes?$/.exec( name! ) )
+				const sum = cardStates()
+					.map( ( state ) => /^(\d+) changes?$/.exec( state! ) )
 					.reduce(
 						( acc, match ) =>
 							acc + ( match ? Number( match[ 1 ] ) : 0 ),
@@ -190,23 +205,41 @@ describe( 'Action Scheduler in reports', () => {
 				} ) )
 			);
 
+			// The Action Scheduler page counts Action Scheduler only.
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
-				'During update, no changes',
-				'After update, no changes',
+				'During update, Not available',
+				'After update, 0 changes',
 				'Net result, 5 changes',
 			] );
-			expect( signalPanel() ).toHaveAccessibleName(
-				'Action Scheduler · 5 changes'
-			);
+			expect( signalPanel() ).toHaveTextContent( '5 observed changes' );
 			await user.click( tab( /After update/ ) );
-			expect( signalPanel() ).toHaveAccessibleName( 'Action Scheduler' );
-			expect( signalPanel() ).toHaveTextContent( 'No changes observed.' );
+			expect( signalPanel() ).toHaveTextContent(
+				'No Action Scheduler changes observed'
+			);
 			await user.click( tab( /During update/ ) );
-			expect( signalPanel() ).toHaveAccessibleName( 'Action Scheduler' );
 			expect( signalPanel() ).toHaveTextContent(
 				'Action Scheduler not detected'
 			);
 			expect( signalPanel() ).not.toHaveTextContent( 'No changes' );
+
+			// The overview tabs count every signal.
+			cleanup();
+			await renderReport(
+				asReport( 50, ( association ) => ( {
+					action_scheduler:
+						association === 'update_request'
+							? asUnavailable( association, 'not_installed' )
+							: association === 'observed_after_update'
+								? asPhase( association, {} )
+								: AS_POST,
+				} ) ),
+				null
+			);
+			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'During update, 0 changes',
+				'After update, 0 changes',
+				'Net result, 5 changes',
+			] );
 		} );
 
 		it( 'sums all available signals and skips unavailable ones', () => {
@@ -235,39 +268,50 @@ describe( 'Action Scheduler in reports', () => {
 		} );
 
 		it( 'has no signal tabs to navigate', async () => {
-			await renderReport( WOOCOMMERCE );
+			for ( const signal of [ null, 'action_scheduler' ] as const ) {
+				await renderReport( WOOCOMMERCE, signal );
 
-			expect( screen.getAllByRole( 'tablist' ) ).toHaveLength( 1 );
-			expect( screen.getAllByRole( 'tab' ) ).toHaveLength( 3 );
-			expect(
-				screen.queryByRole( 'tab', { name: /^Action Scheduler/ } )
-			).toBeNull();
+				expect( screen.getAllByRole( 'tablist' ) ).toHaveLength( 1 );
+				expect( screen.getAllByRole( 'tab' ) ).toHaveLength( 3 );
+				expect(
+					screen.queryByRole( 'tab', { name: /^Action Scheduler/ } )
+				).toBeNull();
+				cleanup();
+			}
 		} );
 	} );
 
-	describe( 'stacked signals', () => {
-		it( 'shows Action Scheduler in full when it is the only signal with changes', async () => {
-			await renderReport(
-				asReport( 51, ( association ) => ( {
-					action_scheduler:
-						association === 'net_across_phases'
-							? AS_POST
-							: asPhase( association, {} ),
-				} ) )
-			);
+	describe( 'only signal with changes', () => {
+		it( 'leads to Action Scheduler when it is the only signal with changes', async () => {
+			const report = asReport( 51, ( association ) => ( {
+				action_scheduler:
+					association === 'net_across_phases'
+						? AS_POST
+						: asPhase( association, {} ),
+			} ) );
+			await renderReport( report, null );
 			const user = userEvent.setup();
 
+			expect( phasePanel() ).toHaveTextContent(
+				'Changes were observed in Action Scheduler. No changes were observed in Options & autoload and WP-Cron.'
+			);
+			// The other signals keep their place, without breakdowns.
+			expect( cardStates() ).toEqual( [
+				'No changes',
+				'No changes',
+				'5 changes',
+			] );
+
+			await user.click(
+				screen.getByRole( 'link', { name: 'Action Scheduler' } )
+			);
 			expect( signalPanel() ).toHaveTextContent(
 				'wpforms_admin_notifications_update'
 			);
-			// The other signals stay in their place, as one line each.
-			for ( const name of [ /^Options & autoload/, /^WP-Cron/ ] ) {
-				const section = screen.getByRole( 'region', { name } );
-				expect( section ).toHaveTextContent( 'No changes observed.' );
-				expect( section.querySelector( 'ul' ) ).toBeNull();
-			}
 			await user.click( tab( /During update/ ) );
-			expect( signalPanel() ).toHaveTextContent( 'No changes observed.' );
+			expect( signalPanel() ).toHaveTextContent(
+				'No Action Scheduler changes observed'
+			);
 			expect( document.body ).not.toHaveTextContent(
 				'wpforms_admin_notifications_update'
 			);
@@ -289,7 +333,7 @@ describe( 'Action Scheduler in reports', () => {
 				/error|failed|broken|unreadable|corrupt/i
 			);
 			expect(
-				screen.getByText( 'Analysis completed' )
+				within( screen.getByRole( 'banner' ) ).getByText( 'Completed' )
 			).toBeInTheDocument();
 		} );
 
@@ -352,19 +396,21 @@ describe( 'Action Scheduler in reports', () => {
 		] )(
 			'explains %s while Options and WP-Cron stay usable',
 			async ( reason, title, description ) => {
-				await renderReport( asReasonReport( reason ) );
+				await renderReport( asReasonReport( reason ), null );
 
 				expect( tab( /^Net result/ ) ).toHaveAccessibleName(
 					'Net result, 11 changes'
 				);
-				expect(
-					screen.getByRole( 'region', {
-						name: /^Options & autoload/,
-					} )
-				).toHaveTextContent( 'ulfx_a_feature_flags' );
-				expect( signalPanel() ).toHaveAccessibleName(
-					'Action Scheduler'
+				expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
+					'6 changes'
 				);
+				expect( signalCard( 'Action Scheduler' ) ).toHaveTextContent(
+					`Not available ${ title }`
+				);
+				cleanup();
+
+				await renderReport( asReasonReport( reason ) );
+				await openActionScheduler( /Net result/ );
 				expect( signalPanel() ).toHaveTextContent( title );
 				expect( signalPanel() ).toHaveTextContent( description );
 			}
@@ -392,29 +438,27 @@ describe( 'Action Scheduler in reports', () => {
 				} as AnalysisReport[ 'phases' ],
 			} );
 
-			expect( sectionNames() ).toEqual( [
-				'Options & autoload · 6 changes',
-				'WP-Cron · 5 changes',
-				'Action Scheduler',
-			] );
+			expect( tab( /^Net result/ ) ).toHaveTextContent( 'Not available' );
 			expect( signalPanel() ).toHaveTextContent( 'Not captured' );
 			expect( signalPanel() ).not.toHaveTextContent( 'No changes' );
 		} );
 
 		it( 'isolates a corrupt Action Scheduler phase', async () => {
-			await renderReport( AS_CORRUPT_FINAL );
+			await renderReport( AS_CORRUPT_FINAL, null );
 
 			expect( tab( /^Net result/ ) ).toHaveAccessibleName(
 				'Net result, 11 changes'
 			);
-			expect(
-				screen.getByRole( 'region', { name: /^Options & autoload/ } )
-			).toHaveTextContent( 'ulfx_a_feature_flags' );
+			expect( cardStates() ).toEqual( [
+				'6 changes',
+				'5 changes',
+				'Not available',
+			] );
+			cleanup();
+
+			await renderReport( AS_CORRUPT_FINAL );
 			const user = await openActionScheduler( /Net result/ );
 			expect( signalPanel() ).toHaveTextContent( 'Unreadable' );
-			expect(
-				screen.getByRole( 'region', { name: /^WP-Cron/ } )
-			).toHaveAccessibleName( 'WP-Cron · 5 changes' );
 			await user.click( tab( /After update/ ) );
 			expect( signalPanel() ).toHaveTextContent(
 				'wpforms_admin_notifications_update'
@@ -433,9 +477,8 @@ describe( 'Action Scheduler in reports', () => {
 			);
 			await openActionScheduler( /Net result/ );
 
-			expect( signalPanel() ).toHaveAccessibleName( 'Action Scheduler' );
 			expect( signalPanel() ).toHaveTextContent(
-				/^Action SchedulerNo changes observed\.$/
+				'No Action Scheduler changes observed'
 			);
 			expect( within( signalPanel() ).queryByRole( 'term' ) ).toBeNull();
 			expect(
@@ -447,7 +490,10 @@ describe( 'Action Scheduler in reports', () => {
 		} );
 
 		it( 'shows "No tracked changes" only when every available signal has none', async () => {
-			await renderReport( asReport( 53, () => ( {} ) ) );
+			await renderReport(
+				asReport( 53, () => ( {} ) ),
+				null
+			);
 			expect(
 				screen.getByText(
 					'No tracked changes observed during this phase.'
@@ -482,7 +528,7 @@ describe( 'Action Scheduler in reports', () => {
 			);
 			expect(
 				within( signalPanel() )
-					.getAllByRole( 'heading', { level: 4 } )
+					.getAllByRole( 'heading', { level: 3 } )
 					.map( ( heading ) => heading.textContent )
 			).toEqual( [
 				'Added (1)',
@@ -680,8 +726,8 @@ describe( 'Action Scheduler in reports', () => {
 			await renderReport( largeQueue( 1000 ) );
 			const user = await openActionScheduler( /Net result/ );
 
-			expect( signalPanel() ).toHaveAccessibleName(
-				`Action Scheduler · ${ num( 2000 ) } changes`
+			expect( signalPanel() ).toHaveTextContent(
+				`${ num( 2000 ) } observed changes`
 			);
 			expect(
 				within( signalPanel() ).getAllByRole( 'listitem' )

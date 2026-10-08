@@ -13,8 +13,6 @@ export interface TabItem< K extends string > {
 		text: string;
 		tone: 'changes' | 'none' | 'unavailable';
 	};
-	/** Accessible name, e.g. "Net result, 4 changes" (default: the visible text). */
-	accessibleName?: string;
 }
 
 interface TabsProps< K extends string > {
@@ -93,7 +91,6 @@ export function Tabs< K extends string >( {
 							role="tab"
 							id={ tabId( item.key ) }
 							aria-selected={ isSelected }
-							aria-label={ item.accessibleName }
 							aria-controls={ panelId }
 							tabIndex={ isSelected ? 0 : -1 }
 							onClick={ () => onSelect( item.key ) }
@@ -106,17 +103,20 @@ export function Tabs< K extends string >( {
 						>
 							{ item.label }
 							{ item.indicator && (
-								<span
-									aria-hidden="true"
-									className={ cn(
-										'ml-1.5 inline-block text-xs tabular-nums',
-										item.indicator.tone === 'changes'
-											? 'rounded-full bg-sky-100 px-1.5 font-semibold leading-5 text-sky-900'
-											: 'font-normal text-muted-foreground'
-									) }
-								>
-									{ item.indicator.text }
-								</span>
+								<>
+									{ /* The accessible name is the visible text: "Net result, 4 changes". */ }
+									<span className="sr-only">,</span>{ ' ' }
+									<span
+										className={ cn(
+											'ml-0.5 inline-block text-xs tabular-nums',
+											item.indicator.tone === 'changes'
+												? 'rounded-full bg-sky-100 px-1.5 font-semibold leading-5 text-sky-900'
+												: 'font-normal text-muted-foreground'
+										) }
+									>
+										{ item.indicator.text }
+									</span>
+								</>
 							) }
 						</button>
 					);

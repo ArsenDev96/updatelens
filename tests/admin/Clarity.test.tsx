@@ -1,12 +1,15 @@
 import apiFetch from '@wordpress/api-fetch';
-import { render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_VISIBLE_DIFF_ROWS } from '@/admin/components/DiffSection';
 import { HistoryPage } from '@/admin/pages/HistoryPage';
-import { ReportPage } from '@/admin/pages/ReportPage';
-import type { AnalysisReport, ChangedOption } from '@/admin/types/api';
+import type {
+	AnalysisReport,
+	ChangedOption,
+	Provider,
+} from '@/admin/types/api';
 
 import {
 	CANCELLED,
@@ -31,39 +34,36 @@ import {
 	MALFORMED_CRON,
 	T,
 } from './fixtures';
+import { openReport, phasePanel, signalCard, tab } from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
 
-function renderReport( report: AnalysisReport ) {
+/**
+ * Opens a report's overview, or one signal's details.
+ *
+ * @param report Report served by the API.
+ * @param signal Signal whose details are open.
+ */
+function renderReport( report: AnalysisReport, signal?: Provider ) {
 	apiFetchMock.mockResolvedValue( report );
-	render(
-		<ReportPage
-			id={ report.id }
-			historyHref="/wp-admin/admin.php?page=updatelens"
-			onBack={ vi.fn() }
-			focusHeading={ false }
-		/>
-	);
+	openReport( report.id, { signal } );
 	return screen.findAllByRole( 'tablist' );
 }
 
-const tab = ( name: RegExp ) => screen.getByRole( 'tab', { name } );
 const tabNames = ( list: string ) =>
 	within( screen.getByRole( 'tablist', { name: list } ) )
 		.getAllByRole( 'tab' )
-		.map( ( t ) => t.getAttribute( 'aria-label' ) );
-const phasePanel = () => screen.getByRole( 'tabpanel' );
-/** Signal whose section signalPanel() returns (signals are stacked, not tabs). */
-let signal = /^Options & autoload/;
-const signalPanel = () => screen.getByRole( 'region', { name: signal } );
+		.map( ( t ) => t.textContent );
+/** The selected phase of a signal page. */
+const signalPanel = phasePanel;
 const section = ( name: string | RegExp ) =>
 	within( signalPanel() ).getByRole( 'region', { name } );
-/** Heading texts of the stacked signal sections, in order. */
-const sectionNames = () =>
-	within( phasePanel() )
-		.getAllByRole( 'heading', { level: 3 } )
-		.map( ( heading ) => heading.textContent );
+/** The state line of each overview card, in signal order. */
+const cardStates = () =>
+	within( screen.getByRole( 'list', { name: 'Signals' } ) )
+		.getAllByRole( 'listitem' )
+		.map( ( card ) => card.querySelector( 'p > span' )!.textContent );
 
 /**
  * A report whose Net result Options phase has `n` changed options.
@@ -89,11 +89,10 @@ function withChangedOptions( n: number ): AnalysisReport {
 describe( 'report clarity', () => {
 	beforeEach( () => {
 		apiFetchMock.mockReset();
-		signal = /^Options & autoload/;
 	} );
 
 	describe( 'tab change indicators', () => {
-		it( 'counts both signals per phase and per signal', async () => {
+		it( 'counts every signal per phase and per signal card', async () => {
 			await renderReport( COMPLETED );
 
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
@@ -101,54 +100,51 @@ describe( 'report clarity', () => {
 				'After update, 11 changes',
 				'Net result, 11 changes',
 			] );
-			expect( sectionNames() ).toEqual( [
-				'Options & autoload · 6 changes',
-				'WP-Cron · 5 changes',
-				'Action Scheduler',
-			] );
 			// Phase indicators name the changes; the phase total is the sum of the signals.
 			expect( tab( /^Net result/ ) ).toHaveTextContent(
-				/^Net result11 changes$/
+				/^Net result, 11 changes$/
 			);
 			expect( phasePanel() ).toHaveTextContent( '11 observed changes' );
-			const overview = phasePanel().querySelector(
-				'dl[aria-label="Observed signals"]'
-			);
-			expect( overview ).toHaveTextContent(
-				'Options & autoload6 changesWP-Cron5 changesAction SchedulerNot available'
-			);
+			expect( cardStates() ).toEqual( [
+				'6 changes',
+				'5 changes',
+				'Not available',
+			] );
 		} );
 
 		it( 'shows option-only changes (Elementor style)', async () => {
 			await renderReport( ELEMENTOR );
 
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
-				'During update, no changes',
+				'During update, 0 changes',
 				'After update, 5 changes',
 				'Net result, 5 changes',
 			] );
-			expect( sectionNames() ).toEqual( [
-				'Options & autoload · 5 changes',
-				'WP-Cron',
-				'Action Scheduler',
+			expect( cardStates() ).toEqual( [
+				'5 changes',
+				'No changes',
+				'Not available',
 			] );
+			expect( phasePanel() ).toHaveTextContent(
+				'Changes were observed in Options & autoload. No changes were observed in WP-Cron. Action Scheduler was not available for this phase.'
+			);
 			expect( tab( /^During update/ ) ).toHaveTextContent(
-				/^During update0 changes$/
+				/^During update, 0 changes$/
 			);
 		} );
 
-		it( 'shows WP-Cron-only changes below a one-line Options section', async () => {
+		it( 'shows WP-Cron-only changes and opens them on the WP-Cron page', async () => {
 			await renderReport( CRON_CHANGES_ONLY );
+			const user = userEvent.setup();
 
-			expect( sectionNames() ).toEqual( [
-				'Options & autoload',
-				'WP-Cron · 1 change',
-				'Action Scheduler',
+			expect( cardStates() ).toEqual( [
+				'No changes',
+				'1 change',
+				'Not available',
 			] );
-			expect( signalPanel() ).toHaveTextContent(
-				/^Options & autoloadNo changes observed\.$/
-			);
-			signal = /^WP-Cron/;
+			expect( phasePanel() ).not.toHaveTextContent( 'cron_only_once' );
+
+			await user.click( screen.getByRole( 'link', { name: 'WP-Cron' } ) );
 			expect( signalPanel() ).toHaveTextContent( 'cron_only_once' );
 		} );
 
@@ -156,9 +152,9 @@ describe( 'report clarity', () => {
 			await renderReport( RANK_MATH );
 
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
-				'During update, no changes',
-				'After update, no changes',
-				'Net result, no changes',
+				'During update, 0 changes',
+				'After update, 0 changes',
+				'Net result, 0 changes',
 			] );
 		} );
 
@@ -168,13 +164,17 @@ describe( 'report clarity', () => {
 			expect( tab( /^Net result/ ) ).toHaveAccessibleName(
 				'Net result, 6 changes'
 			);
-			signal = /^WP-Cron/;
-			expect( signalPanel() ).toHaveAccessibleName( 'WP-Cron' );
+			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
+				/^WP-CronNot available WP-Cron analysis unavailable/
+			);
+			cleanup();
+
+			await renderReport( MALFORMED_CRON, 'cron' );
+			expect( tab( /^Net result/ ) ).toHaveAccessibleName(
+				'Net result, Not available'
+			);
 			expect( signalPanel() ).toHaveTextContent(
 				'WP-Cron analysis unavailable'
-			);
-			expect( phasePanel() ).toHaveTextContent(
-				/WP-Cron\s*Not available/
 			);
 		} );
 
@@ -183,30 +183,33 @@ describe( 'report clarity', () => {
 
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
 				'During update, 2 changes',
-				'After update, not available',
-				'Net result, not available',
+				'After update, Not available',
+				'Net result, Not available',
 			] );
 		} );
 	} );
 
 	describe( 'defaults', () => {
-		it( 'opens Net result and Options when both have changes', async () => {
-			await renderReport( COMPLETED );
-
-			expect( tab( /^Net result/ ) ).toHaveAttribute(
-				'aria-selected',
-				'true'
-			);
-			// Options comes first and is shown in full.
-			expect( sectionNames()[ 0 ] ).toBe(
-				'Options & autoload · 6 changes'
-			);
-			expect( signalPanel() ).toHaveTextContent( 'ulfx_a_feature_flags' );
+		it( 'opens Net result when it has changes, on the overview and every page', async () => {
+			for ( const signal of [ undefined, 'options', 'cron' ] as const ) {
+				await renderReport( COMPLETED, signal );
+				expect( tab( /^Net result/ ) ).toHaveAttribute(
+					'aria-selected',
+					'true'
+				);
+				cleanup();
+			}
 		} );
 
 		it( 'opens the phase with changes instead of an empty Net result', async () => {
 			await renderReport( CANCELLED );
 
+			expect( tab( /^After update/ ) ).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
+			cleanup();
+			await renderReport( CANCELLED, 'options' );
 			expect( tab( /^After update/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
@@ -224,17 +227,32 @@ describe( 'report clarity', () => {
 			expect( phasePanel() ).toHaveTextContent(
 				'No tracked changes observed during this phase.'
 			);
-			// The signal list would only repeat the sections below.
-			expect( within( phasePanel() ).queryByRole( 'term' ) ).toBeNull();
+			expect( cardStates() ).toEqual( [
+				'No changes',
+				'No changes',
+				'Not available',
+			] );
+			// No breakdowns on cards without changes.
+			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
+				/^Options & autoloadNo changes View details →$/
+			);
+		} );
+
+		it( 'shows a calm empty state on a signal page without changes', async () => {
+			await renderReport( RANK_MATH, 'options' );
+
 			expect( signalPanel() ).toHaveTextContent(
-				/^Options & autoloadNo changes observed\.$/
+				'No option changes observed'
+			);
+			expect( signalPanel() ).toHaveTextContent(
+				'UpdateLens captured this phase successfully, but the tracked option state did not change.'
 			);
 			// No zero counts, empty lists or notes.
 			expect(
 				within( signalPanel() ).queryByRole( 'definition' )
 			).toBeNull();
 			expect(
-				within( signalPanel() ).queryByRole( 'heading', { level: 4 } )
+				within( signalPanel() ).queryByRole( 'heading' )
 			).toBeNull();
 			expect( signalPanel() ).not.toHaveTextContent(
 				'No added options.'
@@ -242,10 +260,14 @@ describe( 'report clarity', () => {
 			expect( signalPanel() ).not.toHaveTextContent(
 				'without storing the option values'
 			);
+			cleanup();
 
-			signal = /^WP-Cron/;
+			await renderReport( RANK_MATH, 'cron' );
 			expect( signalPanel() ).toHaveTextContent(
-				/^WP-CronNo changes observed\.$/
+				'No WP-Cron changes observed'
+			);
+			expect( signalPanel() ).toHaveTextContent(
+				'UpdateLens captured this phase successfully, but no scheduled events changed.'
 			);
 			expect( signalPanel() ).not.toHaveTextContent( 'arguments' );
 			expect( signalPanel() ).not.toHaveTextContent(
@@ -259,23 +281,27 @@ describe( 'report clarity', () => {
 			expect( phasePanel() ).not.toHaveTextContent(
 				'No tracked changes observed'
 			);
-			signal = /^WP-Cron/;
-			expect( signalPanel() ).toHaveTextContent( 'No changes observed.' );
+			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
+				/^WP-CronNo changes View details →$/
+			);
+			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
+				'5 changes'
+			);
+			cleanup();
+
+			await renderReport( ELEMENTOR, 'cron' );
+			expect( signalPanel() ).toHaveTextContent(
+				'No WP-Cron changes observed'
+			);
 			expect(
 				within( signalPanel() ).queryByRole( 'definition' )
 			).toBeNull();
-			// The changed signal stays in full next to it.
-			signal = /^Options & autoload/;
-			expect( signalPanel() ).toHaveAccessibleName(
-				'Options & autoload · 5 changes'
-			);
 		} );
 	} );
 
 	describe( 'WP-Cron disappearances', () => {
 		it( 'says a one-time job is no longer scheduled, never that it ran or was deleted', async () => {
-			await renderReport( MIXED_WOOCOMMERCE );
-			signal = /^WP-Cron/;
+			await renderReport( MIXED_WOOCOMMERCE, 'cron' );
 
 			const gone = section( 'No longer scheduled (1)' );
 			const row = within( gone ).getByRole( 'listitem' );
@@ -295,8 +321,7 @@ describe( 'report clarity', () => {
 		} );
 
 		it( 'keeps "Removed" for recurring events', async () => {
-			await renderReport( MIXED_WOOCOMMERCE );
-			signal = /^WP-Cron/;
+			await renderReport( MIXED_WOOCOMMERCE, 'cron' );
 
 			const removed = section( 'Removed (1)' );
 			expect( removed ).toHaveTextContent( 'acme_legacy_sync' );
@@ -306,8 +331,7 @@ describe( 'report clarity', () => {
 		} );
 
 		it( 'counts recurring and one-time disappearances together as "No longer present"', async () => {
-			await renderReport( MIXED_WOOCOMMERCE );
-			signal = /^WP-Cron/;
+			await renderReport( MIXED_WOOCOMMERCE, 'cron' );
 
 			const terms = within( signalPanel() )
 				.getAllByRole( 'term' )
@@ -325,25 +349,30 @@ describe( 'report clarity', () => {
 		} );
 
 		it( 'never labels only one-time disappearances "Removed"', async () => {
-			await renderReport( {
-				...WORDFENCE,
-				phases: {
-					...WORDFENCE.phases,
-					final: {
-						...WORDFENCE.phases.final,
-						cron: cronPhase( 'net_across_phases', {
-							removed: [
-								oneTime(
-									'wordfence_completeCoreUpdateNotification',
-									T + 60
-								),
-								oneTime( 'wordfence_version_check', T + 120 ),
-							],
-						} ),
+			await renderReport(
+				{
+					...WORDFENCE,
+					phases: {
+						...WORDFENCE.phases,
+						final: {
+							...WORDFENCE.phases.final,
+							cron: cronPhase( 'net_across_phases', {
+								removed: [
+									oneTime(
+										'wordfence_completeCoreUpdateNotification',
+										T + 60
+									),
+									oneTime(
+										'wordfence_version_check',
+										T + 120
+									),
+								],
+							} ),
+						},
 					},
 				},
-			} );
-			signal = /^WP-Cron/;
+				'cron'
+			);
 
 			const terms = within( signalPanel() ).getAllByRole( 'term' );
 			expect( terms[ 1 ] ).toHaveTextContent( 'No longer present' );
@@ -355,8 +384,7 @@ describe( 'report clarity', () => {
 
 	describe( 'conditional WP-Cron notes', () => {
 		it( 'explains hidden arguments when rows exist, but no one-time notes without one-time movement', async () => {
-			await renderReport( WORDFENCE );
-			signal = /^WP-Cron/;
+			await renderReport( WORDFENCE, 'cron' );
 
 			expect( signalPanel() ).toHaveTextContent(
 				'WP-Cron event arguments are fingerprinted for matching but are never stored or shown.'
@@ -375,21 +403,26 @@ describe( 'report clarity', () => {
 		} );
 
 		it( 'explains a moved one-time event only when there is one', async () => {
-			await renderReport( {
-				...WORDFENCE,
-				phases: {
-					...WORDFENCE.phases,
-					final: {
-						...WORDFENCE.phases.final,
-						cron: cronPhase( 'net_across_phases', {
-							rescheduled: [
-								moved( oneTime( 'acme_once', T + 60 ), 600 ),
-							],
-						} ),
+			await renderReport(
+				{
+					...WORDFENCE,
+					phases: {
+						...WORDFENCE.phases,
+						final: {
+							...WORDFENCE.phases.final,
+							cron: cronPhase( 'net_across_phases', {
+								rescheduled: [
+									moved(
+										oneTime( 'acme_once', T + 60 ),
+										600
+									),
+								],
+							} ),
+						},
 					},
 				},
-			} );
-			signal = /^WP-Cron/;
+				'cron'
+			);
 
 			expect( signalPanel() ).toHaveTextContent(
 				'A moved one-time event may represent a reschedule or a new equivalent event after execution.'
@@ -399,7 +432,7 @@ describe( 'report clarity', () => {
 
 	describe( 'changed option density', () => {
 		it( 'shows a value-only change on one line', async () => {
-			await renderReport( ELEMENTOR );
+			await renderReport( ELEMENTOR, 'options' );
 
 			const version = within( signalPanel() )
 				.getByText( 'elementor_version' )
@@ -412,7 +445,7 @@ describe( 'report clarity', () => {
 		} );
 
 		it( 'shows a size change with the exact delta', async () => {
-			await renderReport( ELEMENTOR );
+			await renderReport( ELEMENTOR, 'options' );
 
 			const history = within( signalPanel() )
 				.getByText( 'elementor_install_history' )
@@ -432,18 +465,21 @@ describe( 'report clarity', () => {
 				after_is_autoloaded: true,
 				autoload_behavior_changed: true,
 			};
-			await renderReport( {
-				...ELEMENTOR,
-				phases: {
-					...ELEMENTOR.phases,
-					final: {
-						...ELEMENTOR.phases.final,
-						options: optionsPhase( 'net_across_phases', {
-							changed: [ flipped ],
-						} ),
+			await renderReport(
+				{
+					...ELEMENTOR,
+					phases: {
+						...ELEMENTOR.phases,
+						final: {
+							...ELEMENTOR.phases.final,
+							options: optionsPhase( 'net_across_phases', {
+								changed: [ flipped ],
+							} ),
+						},
 					},
 				},
-			} );
+				'options'
+			);
 
 			const row = within( signalPanel() )
 				.getByText( 'acme_cache' )
@@ -458,7 +494,7 @@ describe( 'report clarity', () => {
 		} );
 
 		it( 'adds precision when rounded totals would look identical', async () => {
-			await renderReport( ELEMENTOR );
+			await renderReport( ELEMENTOR, 'options' );
 
 			expect( signalPanel() ).toHaveTextContent(
 				/Autoloaded data\s*5[.,]98 KB\s*→\s*to\s*6[.,]04 KB\s*\(\+58 B\)/
@@ -468,7 +504,7 @@ describe( 'report clarity', () => {
 
 	describe( 'long lists', () => {
 		it( `shows the first ${ DEFAULT_VISIBLE_DIFF_ROWS } rows and expands and collapses`, async () => {
-			await renderReport( STRESS );
+			await renderReport( STRESS, 'options' );
 			const user = userEvent.setup();
 
 			const added = section( 'Added (470)' );
@@ -507,7 +543,8 @@ describe( 'report clarity', () => {
 
 		it( 'collapses one row over the threshold, with a singular label', async () => {
 			await renderReport(
-				withChangedOptions( DEFAULT_VISIBLE_DIFF_ROWS + 1 )
+				withChangedOptions( DEFAULT_VISIBLE_DIFF_ROWS + 1 ),
+				'options'
 			);
 
 			const changed = section( /^Changed/ );
@@ -524,7 +561,7 @@ describe( 'report clarity', () => {
 		it.each( [ DEFAULT_VISIBLE_DIFF_ROWS, DEFAULT_VISIBLE_DIFF_ROWS - 3 ] )(
 			'shows %i rows without a button',
 			async ( n ) => {
-				await renderReport( withChangedOptions( n ) );
+				await renderReport( withChangedOptions( n ), 'options' );
 
 				const changed = section( `Changed (${ n })` );
 				expect(
@@ -535,8 +572,7 @@ describe( 'report clarity', () => {
 		);
 
 		it( 'collapses repeated Cron hooks too, keeping the total', async () => {
-			await renderReport( STRESS );
-			signal = /^WP-Cron/;
+			await renderReport( STRESS, 'cron' );
 
 			const added = section( 'Added (300)' );
 			expect(
@@ -555,7 +591,7 @@ describe( 'report clarity', () => {
 
 	describe( 'observed data is never hidden', () => {
 		it( 'shows unrelated and cache-like records next to the plugin’s own', async () => {
-			await renderReport( MIXED_WOOCOMMERCE );
+			await renderReport( MIXED_WOOCOMMERCE, 'options' );
 
 			for ( const name of [
 				'woocommerce_version',
@@ -564,7 +600,8 @@ describe( 'report clarity', () => {
 			] ) {
 				expect( signalPanel() ).toHaveTextContent( name );
 			}
-			signal = /^WP-Cron/;
+			cleanup();
+			await renderReport( MIXED_WOOCOMMERCE, 'cron' );
 			expect( signalPanel() ).toHaveTextContent(
 				'action_scheduler_run_queue'
 			);

@@ -1,99 +1,79 @@
 import { __, sprintf } from '@wordpress/i18n';
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-	type MouseEvent,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 import { getAnalysis } from '../api/analyses';
-import { ActionSchedulerChanges } from '../components/ActionSchedulerDiff';
-import { CronDiffList, CronSummary } from '../components/CronDiff';
+import { AppLink } from '../components/AppLink';
 import { LoadError } from '../components/LoadError';
-import { OptionDiffList } from '../components/OptionDiffList';
-import { OptionsSummary } from '../components/PhaseSummary';
 import { PhaseTabs } from '../components/PhaseTabs';
+import { ReportOverview } from '../components/ReportOverview';
+import { SignalDetail } from '../components/SignalDetail';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { useRequest } from '../hooks/use-request';
-import type {
-	AnalysisReport,
-	PhaseKey,
-	Provider,
-	ReportPhase,
-} from '../types/api';
-import { reportChangeCounts, type PhaseChangeCounts } from '../utils/changes';
+import type { AnalysisReport, PhaseKey, Provider } from '../types/api';
+import { reportChangeCounts } from '../utils/changes';
 import { formatDateTime } from '../utils/format';
 import {
-	actionSchedulerUnavailableReasonText,
-	changeCountNoun,
-	cronPhaseNote,
-	cronUnavailableReasonText,
 	defaultPhase,
-	observedChangesText,
 	PHASE_KEYS,
 	phaseLabel,
-	phaseNote,
-	PROVIDERS,
 	providerLabel,
 	reportNotice,
-	signalStatusText,
-	unavailableReasonText,
 } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
+import type { ReportRoute, Route } from '../utils/route';
 import { TONE_STRIP } from '../utils/tone';
 
 interface ReportPageProps {
-	id: number;
-	historyHref: string;
-	onBack: () => void;
+	/** Report, phase and signal from the URL. */
+	route: ReportRoute;
+	/** Link target of a route. */
+	href: ( route: Route ) => string;
+	/** In-app navigation; `replace` keeps the current history entry. */
+	onNavigate: ( route: Route, replace?: boolean ) => void;
 	/** Move focus to the title once loaded (after in-app navigation). */
 	focusHeading: boolean;
 }
 
+const LINK =
+	'rounded font-medium text-primary no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/**
+ * One report: its overview, or one signal's details (`&signal=`). Both
+ * views share the loaded report and the selected phase.
+ *
+ * @param props Props.
+ */
 export function ReportPage( {
-	id,
-	historyHref,
-	onBack,
+	route,
+	href,
+	onNavigate,
 	focusHeading,
 }: ReportPageProps ) {
+	const { id } = route;
 	const load = useCallback( () => getAnalysis( id ), [ id ] );
 	const [ request, reload ] = useRequest( load );
-
-	const onBackClick = ( event: MouseEvent< HTMLAnchorElement > ) => {
-		if (
-			event.button !== 0 ||
-			event.metaKey ||
-			event.ctrlKey ||
-			event.shiftKey ||
-			event.altKey
-		) {
-			return;
-		}
-		event.preventDefault();
-		onBack();
-	};
-
-	const backLink = (
-		<a
-			href={ historyHref }
-			onClick={ onBackClick }
-			className="inline-flex items-center gap-1 rounded text-sm font-medium text-primary no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-		>
-			<span aria-hidden="true">←</span>
-			{ __( 'Update History', 'updatelens' ) }
-		</a>
-	);
+	const history: Route = { view: 'history', page: route.page };
 
 	return (
 		<div className="space-y-5">
-			{ backLink }
+			{ ( request.status !== 'ready' || route.signal === null ) && (
+				<AppLink
+					href={ href( history ) }
+					onNavigate={ () => onNavigate( history ) }
+					className={ cn(
+						LINK,
+						'inline-flex items-center gap-1 text-sm'
+					) }
+				>
+					<span aria-hidden="true">←</span>
+					{ __( 'Update History', 'updatelens' ) }
+				</AppLink>
+			) }
 			{ request.status === 'loading' && <ReportSkeleton /> }
 			{ request.status === 'error' && (
 				<LoadError
@@ -108,6 +88,9 @@ export function ReportPage( {
 			{ request.status === 'ready' && (
 				<Report
 					report={ request.data }
+					route={ route }
+					href={ href }
+					onNavigate={ onNavigate }
 					onRefresh={ reload }
 					focusHeading={ focusHeading }
 				/>
@@ -118,89 +101,225 @@ export function ReportPage( {
 
 function Report( {
 	report,
+	route,
+	href,
+	onNavigate,
 	onRefresh,
 	focusHeading,
-}: {
+}: Omit< ReportPageProps, 'route' > & {
 	report: AnalysisReport;
+	route: ReportRoute;
 	onRefresh: () => void;
-	focusHeading: boolean;
 } ) {
 	const heading = useRef< HTMLHeadingElement >( null );
-	const [ chosen, setChosen ] = useState< PhaseKey | null >( null );
 	// Counts come from the summaries only; computed once per loaded report.
 	const counts = useMemo(
 		() => reportChangeCounts( report.phases ),
 		[ report.phases ]
 	);
+	// The default phase is the report's, so overview and details agree.
 	const initial = defaultPhase( report.phases, counts );
-	const selected = chosen ?? initial;
+	const selected = initial === null ? null : ( route.phase ?? initial );
+	const { signal } = route;
 
+	// After in-app navigation (also between overview and details), focus
+	// moves to the view's title. Switching phases keeps focus on the tab.
 	useEffect( () => {
 		if ( focusHeading ) {
 			heading.current?.focus();
 		}
-	}, [ focusHeading ] );
+	}, [ focusHeading, signal ] );
 
-	const updated = formatDateTime( report.timestamps.started_at );
+	const at = ( next: Partial< ReportRoute > ): ReportRoute => ( {
+		...route,
+		...next,
+	} );
+	const selectPhase = ( phase: PhaseKey ) =>
+		onNavigate( at( { phase } ), true );
+
+	if ( signal !== null ) {
+		const overview = at( { signal: null } );
+		const history: Route = { view: 'history', page: route.page };
+		return (
+			<div className="space-y-5">
+				<nav aria-label={ __( 'Breadcrumb', 'updatelens' ) }>
+					<ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+						<li className="flex items-center gap-2">
+							<AppLink
+								href={ href( history ) }
+								onNavigate={ () => onNavigate( history ) }
+								className={ LINK }
+							>
+								{ __( 'Update History', 'updatelens' ) }
+							</AppLink>
+							<span
+								aria-hidden="true"
+								className="text-muted-foreground"
+							>
+								›
+							</span>
+						</li>
+						<li className="flex min-w-0 items-center gap-2">
+							<AppLink
+								href={ href( overview ) }
+								onNavigate={ () => onNavigate( overview ) }
+								className={ cn( LINK, 'break-words' ) }
+							>
+								{ pluginName( report.plugin ) }
+							</AppLink>
+							<span
+								aria-hidden="true"
+								className="text-muted-foreground"
+							>
+								›
+							</span>
+						</li>
+						<li
+							aria-current="page"
+							className="text-muted-foreground"
+						>
+							{ providerLabel( signal ) }
+						</li>
+					</ol>
+				</nav>
+				<article
+					aria-labelledby="updatelens-signal-title"
+					className="space-y-6"
+				>
+					<header className="space-y-1.5">
+						<h2
+							id="updatelens-signal-title"
+							ref={ heading }
+							tabIndex={ -1 }
+							className="text-2xl font-semibold outline-none"
+						>
+							{ providerLabel( signal ) }
+						</h2>
+						<p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+							<span className="break-words font-medium text-foreground">
+								{ pluginName( report.plugin ) }
+							</span>
+							<span className="font-mono">
+								<Versions plugin={ report.plugin } />
+							</span>
+							<StatusBadge status={ report.status } />
+						</p>
+					</header>
+					{ selected ? (
+						<PhaseTabs
+							counts={ {
+								during_update: counts.during_update[ signal ],
+								post_update: counts.post_update[ signal ],
+								final: counts.final[ signal ],
+							} }
+							selected={ selected }
+							onSelect={ selectPhase }
+						>
+							<SignalDetail
+								provider={ signal }
+								phase={ selected }
+								data={ report.phases[ selected ] }
+								count={ counts[ selected ][ signal ] }
+								windowSeconds={
+									report.observation_window_seconds
+								}
+							/>
+						</PhaseTabs>
+					) : (
+						<Notice report={ report } onRefresh={ onRefresh } />
+					) }
+					<TechnicalDetails report={ report } signal={ signal } />
+				</article>
+			</div>
+		);
+	}
 
 	return (
 		<article
 			aria-labelledby="updatelens-report-title"
-			className="space-y-5"
+			className="space-y-6"
 		>
-			<header className="space-y-1">
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-					<h2
-						id="updatelens-report-title"
-						ref={ heading }
-						tabIndex={ -1 }
-						className="break-words text-2xl font-semibold outline-none"
-					>
-						{ pluginName( report.plugin ) }
-					</h2>
-					<StatusBadge status={ report.status } />
-				</div>
-				<p className="font-mono text-base font-medium">
-					<Versions plugin={ report.plugin } />
-				</p>
-				{ updated && (
-					<p className="text-sm text-muted-foreground">
-						{ sprintf(
-							/* translators: %s: date and time of the update. */
-							__( 'Updated %s', 'updatelens' ),
-							updated
-						) }
-					</p>
-				) }
-				{ report.plugin.file && (
-					<p className="break-all font-mono text-xs text-muted-foreground">
-						{ report.plugin.file }
-					</p>
-				) }
-			</header>
-
-			<Notice report={ report } onRefresh={ onRefresh } />
-
+			<ReportHeader report={ report } heading={ heading } />
 			{ selected && (
 				<PhaseTabs
-					counts={ counts }
+					counts={ {
+						during_update: counts.during_update.total,
+						post_update: counts.post_update.total,
+						final: counts.final.total,
+					} }
 					selected={ selected }
-					onSelect={ setChosen }
+					onSelect={ selectPhase }
 				>
-					<PhasePanel
+					<ReportOverview
 						phase={ selected }
 						data={ report.phases[ selected ] }
 						counts={ counts[ selected ] }
 						windowSeconds={ report.observation_window_seconds }
+						signalHref={ ( provider: Provider ) =>
+							href( at( { signal: provider } ) )
+						}
+						onOpenSignal={ ( provider: Provider ) =>
+							onNavigate( at( { signal: provider } ) )
+						}
 					/>
 				</PhaseTabs>
 			) }
-
-			<TechnicalDetails report={ report } />
+			<Notice report={ report } onRefresh={ onRefresh } />
+			<TechnicalDetails report={ report } signal={ null } />
 		</article>
 	);
 }
 
+function ReportHeader( {
+	report,
+	heading,
+}: {
+	report: AnalysisReport;
+	heading: RefObject< HTMLHeadingElement >;
+} ) {
+	const updated = formatDateTime( report.timestamps.started_at );
+
+	return (
+		<header className="space-y-1">
+			<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+				<h2
+					id="updatelens-report-title"
+					ref={ heading }
+					tabIndex={ -1 }
+					className="break-words text-2xl font-semibold outline-none"
+				>
+					{ pluginName( report.plugin ) }
+				</h2>
+				<StatusBadge status={ report.status } />
+			</div>
+			<p className="font-mono text-base font-medium">
+				<Versions plugin={ report.plugin } />
+			</p>
+			{ updated && (
+				<p className="text-sm text-muted-foreground">
+					{ sprintf(
+						/* translators: %s: date and time of the update. */
+						__( 'Updated %s', 'updatelens' ),
+						updated
+					) }
+				</p>
+			) }
+			{ report.plugin.file && (
+				<p className="break-all font-mono text-xs text-muted-foreground">
+					{ report.plugin.file }
+				</p>
+			) }
+		</header>
+	);
+}
+
+/**
+ * The analysis status as a compact strip: secondary to the results.
+ *
+ * @param props           Props.
+ * @param props.report    Report.
+ * @param props.onRefresh Reloads the report (open analyses).
+ */
 function Notice( {
 	report,
 	onRefresh,
@@ -236,216 +355,21 @@ function Notice( {
 	);
 }
 
-function PhasePanel( {
-	phase,
-	data,
-	counts,
-	windowSeconds,
-}: {
-	phase: PhaseKey;
-	data: ReportPhase;
-	counts: PhaseChangeCounts;
-	windowSeconds: number;
-} ) {
-	return (
-		<div className="space-y-6">
-			<PhaseOverview phase={ phase } counts={ counts } />
-			{ PROVIDERS.map( ( provider ) => (
-				<SignalSection
-					key={ provider }
-					provider={ provider }
-					data={ data }
-					count={ counts[ provider ] }
-					windowSeconds={ windowSeconds }
-				/>
-			) ) }
-		</div>
-	);
-}
-
 /**
- * What the phase covers, its total of observed changes (the tab's count) and,
- * when there are changes, each signal's state. Without changes the compact
- * signal sections say the rest.
+ * Raw codes and timestamps, collapsed. On a signal's details only that
+ * signal's phase reasons are listed.
  *
  * @param props        Props.
- * @param props.phase  Phase.
- * @param props.counts Change counts of the phase.
+ * @param props.report Report.
+ * @param props.signal Signal of the detail view; null on the overview.
  */
-function PhaseOverview( {
-	phase,
-	counts,
+function TechnicalDetails( {
+	report,
+	signal,
 }: {
-	phase: PhaseKey;
-	counts: PhaseChangeCounts;
+	report: AnalysisReport;
+	signal: Provider | null;
 } ) {
-	return (
-		<div className="space-y-2">
-			<p className="text-sm text-muted-foreground">
-				{ phaseNote( phase ) }
-			</p>
-			<p
-				className={ cn(
-					'tabular-nums',
-					( counts.total ?? 0 ) > 0
-						? 'text-2xl font-semibold'
-						: 'text-base font-medium'
-				) }
-			>
-				{ observedChangesText( counts.total ) }
-			</p>
-			{ ( counts.total ?? 0 ) > 0 && (
-				<dl
-					aria-label={ __( 'Observed signals', 'updatelens' ) }
-					className="flex flex-wrap gap-x-6 gap-y-1 text-sm"
-				>
-					{ PROVIDERS.map( ( provider ) => (
-						<div
-							key={ provider }
-							className="flex items-baseline gap-1.5"
-						>
-							<dt className="text-muted-foreground">
-								{ providerLabel( provider ) }
-							</dt>
-							<dd
-								className={
-									( counts[ provider ] ?? 0 ) > 0
-										? 'font-medium'
-										: 'text-muted-foreground'
-								}
-							>
-								{ signalStatusText( counts[ provider ] ) }
-							</dd>
-						</div>
-					) ) }
-				</dl>
-			) }
-		</div>
-	);
-}
-
-/**
- * One signal of the phase as a section: in full with its changes, or as a
- * single muted line without changes or when unavailable.
- *
- * @param props               Props.
- * @param props.provider      Signal.
- * @param props.data          Phase data of every signal.
- * @param props.count         Change count of the signal, null if unavailable.
- * @param props.windowSeconds Observation window length from the API.
- */
-function SignalSection( {
-	provider,
-	data,
-	count,
-	windowSeconds,
-}: {
-	provider: Provider;
-	data: ReportPhase;
-	count: number | null;
-	windowSeconds: number;
-} ) {
-	const headingId = `updatelens-signal-${ provider }-heading`;
-	const label = providerLabel( provider );
-
-	if ( count === null || count === 0 ) {
-		const reason =
-			count === null
-				? unavailableText( provider, data, windowSeconds )
-				: null;
-		return (
-			<section
-				id={ `updatelens-signal-${ provider }` }
-				aria-labelledby={ headingId }
-				className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-t pt-3 text-sm"
-			>
-				<h3 id={ headingId } className="font-medium">
-					{ label }
-				</h3>
-				<p className="text-muted-foreground">
-					{ reason ? (
-						<>
-							<span className="font-medium">
-								{ reason.title }
-							</span>
-							{ ' · ' }
-							<span>{ reason.description }</span>
-						</>
-					) : (
-						__( 'No changes observed.', 'updatelens' )
-					) }
-				</p>
-			</section>
-		);
-	}
-
-	return (
-		<section
-			id={ `updatelens-signal-${ provider }` }
-			aria-labelledby={ headingId }
-			className="space-y-4 border-t pt-5"
-		>
-			<h3 id={ headingId } className="text-lg font-semibold">
-				{ label }{ ' ' }
-				<span className="font-normal text-muted-foreground">
-					· { changeCountNoun( count ) }
-				</span>
-			</h3>
-			{ provider === 'options' && data.options.available && (
-				<>
-					<OptionsSummary summary={ data.options.summary } />
-					<OptionDiffList phase={ data.options } />
-				</>
-			) }
-			{ provider === 'cron' && data.cron.available && (
-				<>
-					<CronSummary summary={ data.cron.summary } />
-					<p className="text-xs text-muted-foreground">
-						{ cronPhaseNote() }
-					</p>
-					<CronDiffList phase={ data.cron } />
-				</>
-			) }
-			{ provider === 'action_scheduler' &&
-				data.action_scheduler.available && (
-					<ActionSchedulerChanges phase={ data.action_scheduler } />
-				) }
-		</section>
-	);
-}
-
-/**
- * Why a signal is unavailable in this phase.
- *
- * @param provider      Signal.
- * @param data          Phase data.
- * @param windowSeconds Observation window length from the API.
- */
-function unavailableText(
-	provider: Provider,
-	data: ReportPhase,
-	windowSeconds: number
-): { title: string; description: string } | null {
-	switch ( provider ) {
-		case 'options':
-			return data.options.available
-				? null
-				: unavailableReasonText( data.options.reason, windowSeconds );
-		case 'cron':
-			return data.cron.available
-				? null
-				: cronUnavailableReasonText( data.cron.reason, windowSeconds );
-		case 'action_scheduler':
-			return data.action_scheduler.available
-				? null
-				: actionSchedulerUnavailableReasonText(
-						data.action_scheduler.reason,
-						windowSeconds
-					);
-	}
-}
-
-function TechnicalDetails( { report }: { report: AnalysisReport } ) {
 	const rows: Array< [ string, string | null, string | null ] > = [
 		[ __( 'Analysis ID', 'updatelens' ), String( report.id ), null ],
 		[ __( 'Plugin file', 'updatelens' ), report.plugin.file, null ],
@@ -471,30 +395,37 @@ function TechnicalDetails( { report }: { report: AnalysisReport } ) {
 			formatDateTime( report.timestamps.completed_at ),
 			report.timestamps.completed_at,
 		],
-		...PHASE_KEYS.map( ( phase ): [ string, string | null, null ] => {
-			const cron = report.phases[ phase ].cron;
-			return [
-				sprintf(
-					/* translators: %s: observation phase, e.g. "Net result". */
-					__( 'WP-Cron reason (%s)', 'updatelens' ),
-					phaseLabel( phase )
-				),
-				cron.available ? null : cron.reason,
-				null,
-			];
-		} ),
-		...PHASE_KEYS.map( ( phase ): [ string, string | null, null ] => {
-			const actionScheduler = report.phases[ phase ].action_scheduler;
-			return [
-				sprintf(
-					/* translators: %s: observation phase, e.g. "Net result". */
-					__( 'Action Scheduler reason (%s)', 'updatelens' ),
-					phaseLabel( phase )
-				),
-				actionScheduler.available ? null : actionScheduler.reason,
-				null,
-			];
-		} ),
+		...( signal === null || signal === 'cron'
+			? PHASE_KEYS.map( ( phase ): [ string, string | null, null ] => {
+					const cron = report.phases[ phase ].cron;
+					return [
+						sprintf(
+							/* translators: %s: observation phase, e.g. "Net result". */
+							__( 'WP-Cron reason (%s)', 'updatelens' ),
+							phaseLabel( phase )
+						),
+						cron.available ? null : cron.reason,
+						null,
+					];
+				} )
+			: [] ),
+		...( signal === null || signal === 'action_scheduler'
+			? PHASE_KEYS.map( ( phase ): [ string, string | null, null ] => {
+					const actionScheduler =
+						report.phases[ phase ].action_scheduler;
+					return [
+						sprintf(
+							/* translators: %s: observation phase, e.g. "Net result". */
+							__( 'Action Scheduler reason (%s)', 'updatelens' ),
+							phaseLabel( phase )
+						),
+						actionScheduler.available
+							? null
+							: actionScheduler.reason,
+						null,
+					];
+				} )
+			: [] ),
 	];
 
 	return (
@@ -531,9 +462,9 @@ function ReportSkeleton() {
 			<Skeleton className="h-6 w-56" />
 			<Skeleton className="h-4 w-32" />
 			<Skeleton className="h-16 w-full" />
-			<div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-				{ [ 0, 1, 2, 3 ].map( ( n ) => (
-					<Skeleton key={ n } className="h-16" />
+			<div className="grid gap-3 sm:grid-cols-3">
+				{ [ 0, 1, 2 ].map( ( n ) => (
+					<Skeleton key={ n } className="h-24" />
 				) ) }
 			</div>
 		</div>

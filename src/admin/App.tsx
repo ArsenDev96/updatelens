@@ -6,9 +6,11 @@ import { ReportPage } from './pages/ReportPage';
 import { parseRoute, routeHref, type Route } from './utils/route';
 
 /**
- * Two screens, History and Report, selected by the wp-admin URL
- * (`&analysis=<id>`, `&paged=<n>`). Navigation uses the History API, so
- * reports can be bookmarked and Back/Forward work without page reloads.
+ * History, a report's overview and its signal details, selected by the
+ * wp-admin URL (`&analysis=<id>`, `&signal=<signal>`, `&phase=<phase>`,
+ * `&paged=<n>`). Navigation uses the History API, so reports can be
+ * bookmarked and Back/Forward work without page reloads. Switching phases
+ * replaces the current entry instead of adding one.
  */
 export default function App( {
 	pluginsUrl = '',
@@ -31,14 +33,15 @@ export default function App( {
 		return () => window.removeEventListener( 'popstate', onPopState );
 	}, [] );
 
-	const navigate = useCallback( ( next: Route ) => {
-		window.history.pushState(
-			null,
-			'',
-			routeHref( next, window.location.href )
-		);
+	const navigate = useCallback( ( next: Route, replace = false ) => {
+		const url = routeHref( next, window.location.href );
+		if ( replace ) {
+			window.history.replaceState( null, '', url );
+		} else {
+			window.history.pushState( null, '', url );
+			setNavigated( true );
+		}
 		setRoute( next );
-		setNavigated( true );
 	}, [] );
 
 	const href = ( next: Route ) => routeHref( next, window.location.href );
@@ -56,10 +59,22 @@ export default function App( {
 				<HistoryPage
 					page={ route.page }
 					reportHref={ ( id ) =>
-						href( { view: 'report', id, page: route.page } )
+						href( {
+							view: 'report',
+							id,
+							page: route.page,
+							phase: null,
+							signal: null,
+						} )
 					}
 					onOpenReport={ ( id ) =>
-						navigate( { view: 'report', id, page: route.page } )
+						navigate( {
+							view: 'report',
+							id,
+							page: route.page,
+							phase: null,
+							signal: null,
+						} )
 					}
 					onPageChange={ ( page ) =>
 						navigate( { view: 'history', page } )
@@ -70,14 +85,9 @@ export default function App( {
 			) : (
 				<ReportPage
 					key={ route.id }
-					id={ route.id }
-					historyHref={ href( {
-						view: 'history',
-						page: route.page,
-					} ) }
-					onBack={ () =>
-						navigate( { view: 'history', page: route.page } )
-					}
+					route={ route }
+					href={ href }
+					onNavigate={ navigate }
 					focusHeading={ navigated }
 				/>
 			) }

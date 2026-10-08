@@ -1,5 +1,5 @@
 import apiFetch from '@wordpress/api-fetch';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -129,6 +129,125 @@ describe( 'App navigation', () => {
 		} );
 	} );
 
+	it( 'opens signal details from the overview and comes back', async () => {
+		serveApi( [ COMPLETED ] );
+		visit( '?page=updatelens&paged=2&analysis=1' );
+		render( <App /> );
+		const user = userEvent.setup();
+		const entries = window.history.length;
+
+		await screen.findAllByRole( 'tablist' );
+		await user.click(
+			screen.getByRole( 'tab', { name: /During update/ } )
+		);
+		// Choosing a phase replaces the entry; it never adds one.
+		expect( window.history.length ).toBe( entries );
+		expect( window.location.search ).toBe(
+			'?page=updatelens&paged=2&analysis=1&phase=during_update'
+		);
+
+		await user.click( screen.getByRole( 'link', { name: 'WP-Cron' } ) );
+		expect( window.location.search ).toBe(
+			'?page=updatelens&paged=2&analysis=1&signal=cron&phase=during_update'
+		);
+		expect(
+			screen.getByRole( 'heading', { level: 2, name: 'WP-Cron' } )
+		).toHaveFocus();
+		// Same report, same phase, no second request.
+		expect(
+			screen.getByRole( 'tab', { name: /During update/ } )
+		).toHaveAttribute( 'aria-selected', 'true' );
+		expect( apiFetchMock ).toHaveBeenCalledTimes( 1 );
+		expect( screen.queryByRole( 'list', { name: 'Signals' } ) ).toBeNull();
+
+		// A phase chosen on the details is kept on the overview.
+		await user.click( screen.getByRole( 'tab', { name: /After update/ } ) );
+		const breadcrumb = screen.getByRole( 'navigation', {
+			name: 'Breadcrumb',
+		} );
+		await user.click(
+			within( breadcrumb ).getByRole( 'link', {
+				name: 'UpdateLens Fixture A',
+			} )
+		);
+		expect( window.location.search ).toBe(
+			'?page=updatelens&paged=2&analysis=1&phase=post_update'
+		);
+		expect(
+			screen.getByRole( 'heading', {
+				level: 2,
+				name: 'UpdateLens Fixture A',
+			} )
+		).toHaveFocus();
+		expect(
+			screen.getByRole( 'tab', { name: /After update/ } )
+		).toHaveAttribute( 'aria-selected', 'true' );
+
+		// Browser Back returns to the details, Forward to the overview.
+		await act( async () => {
+			window.history.back();
+			await new Promise( ( resolve ) =>
+				window.addEventListener( 'popstate', resolve, { once: true } )
+			);
+		} );
+		expect( window.location.search ).toBe(
+			'?page=updatelens&paged=2&analysis=1&signal=cron&phase=post_update'
+		);
+		expect(
+			screen.getByRole( 'heading', { level: 2, name: 'WP-Cron' } )
+		).toHaveFocus();
+
+		// The breadcrumb's first link returns to the same History page.
+		await user.click(
+			within(
+				screen.getByRole( 'navigation', { name: 'Breadcrumb' } )
+			).getByRole( 'link', { name: 'Update History' } )
+		);
+		expect( window.location.search ).toBe( '?page=updatelens&paged=2' );
+	} );
+
+	it( 'loads a details URL directly', async () => {
+		serveApi( [ COMPLETED ] );
+		visit(
+			'?page=updatelens&analysis=1&signal=action_scheduler&phase=final'
+		);
+		render( <App /> );
+
+		expect(
+			await screen.findByRole( 'heading', {
+				level: 2,
+				name: 'Action Scheduler',
+			} )
+		).not.toHaveFocus();
+		expect( screen.getByRole( 'tabpanel' ) ).toHaveTextContent(
+			'Action Scheduler not detected'
+		);
+	} );
+
+	it.each( [
+		[ '&signal=autoload', 'UpdateLens Fixture A' ],
+		[ '&signal=', 'UpdateLens Fixture A' ],
+		[ '&phase=later', 'UpdateLens Fixture A' ],
+	] )(
+		'keeps old and unknown report URLs working (%s)',
+		async ( extra, title ) => {
+			serveApi( [ COMPLETED ] );
+			visit( `?page=updatelens&analysis=1${ extra }` );
+			render( <App /> );
+
+			expect(
+				await screen.findByRole( 'heading', { level: 2, name: title } )
+			).toBeInTheDocument();
+			// The default phase and the overview.
+			expect(
+				screen.getByRole( 'tab', { name: /Net result/ } )
+			).toHaveAttribute( 'aria-selected', 'true' );
+			expect(
+				screen.getByRole( 'list', { name: 'Signals' } )
+			).toBeInTheDocument();
+		}
+	);
+
 	it( 'puts the history page in the URL', async () => {
 		apiFetchMock.mockImplementation( ( async () =>
 			listResponse(
@@ -186,7 +305,7 @@ describe( 'privacy', () => {
 		return value;
 	}
 
-	it( 'renders only contract fields in History and every phase', async () => {
+	it( 'renders only contract fields in History, the overview and every signal and phase', async () => {
 		const report = leakEverywhere( COMPLETED ) as AnalysisReport;
 		serveApi( [ report ] );
 		render( <App /> );
@@ -217,22 +336,40 @@ describe( 'privacy', () => {
 			screen.getByRole( 'link', { name: /UpdateLens Fixture A/ } )
 		);
 		await screen.findAllByRole( 'tablist' );
-		await user.click( screen.getByText( 'Technical details' ) );
-		for ( const name of [
-			/During update/,
-			/After update/,
-			/Net result/,
-		] ) {
-			await user.click( screen.getByRole( 'tab', { name } ) );
-			// Every signal of the phase is rendered at once (stacked sections).
-			for ( const button of screen.queryAllByRole( 'button', {
-				expanded: false,
-			} ) ) {
-				await user.click( button );
+		const everyPhase = async () => {
+			await user.click( screen.getByText( 'Technical details' ) );
+			for ( const name of [
+				/During update/,
+				/After update/,
+				/Net result/,
+			] ) {
+				await user.click( screen.getByRole( 'tab', { name } ) );
+				for ( const button of screen.queryAllByRole( 'button', {
+					expanded: false,
+				} ) ) {
+					await user.click( button );
+				}
+				check();
 			}
-			check();
+		};
+		await everyPhase();
+
+		for ( const signal of [
+			'Options & autoload',
+			'WP-Cron',
+			'Action Scheduler',
+		] ) {
+			await user.click( screen.getByRole( 'link', { name: signal } ) );
+			await everyPhase();
+			if ( signal === 'WP-Cron' ) {
+				// The Cron hooks themselves are shown.
+				expect( document.body ).toHaveTextContent(
+					'ul_fixture_cleanup'
+				);
+			}
+			await user.click(
+				screen.getByRole( 'link', { name: 'UpdateLens Fixture A' } )
+			);
 		}
-		// The Cron hooks themselves are shown.
-		expect( document.body ).toHaveTextContent( 'ul_fixture_cleanup' );
 	} );
 } );

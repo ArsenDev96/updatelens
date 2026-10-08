@@ -48,7 +48,7 @@ export function DiffSection< T >( {
 
 	return (
 		<section aria-labelledby={ headingId } className="space-y-2">
-			<h4
+			<h3
 				id={ headingId }
 				className={ cn(
 					'text-sm',
@@ -58,7 +58,7 @@ export function DiffSection< T >( {
 				) }
 			>
 				{ title }
-			</h4>
+			</h3>
 			<ul
 				id={ listId }
 				className="divide-y overflow-hidden rounded-lg border bg-card"

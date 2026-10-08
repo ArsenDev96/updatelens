@@ -94,7 +94,7 @@ The After update phase ends at the next wp-admin page you open within 5 minutes 
 = 0.2.0 =
 * First public release.
 * Analyzes options and autoload data, WP-Cron events and Action Scheduler actions around manual single-plugin updates from wp-admin.
-* Reports each update in three phases: During update, After update and Net result, with all signals of a phase on one page.
+* Reports each update in three phases: During update, After update and Net result. Each report opens with an overview of the observed changes; Options & autoload, WP-Cron and Action Scheduler each have their own detail page.
 * The UpdateLens menu shows each administrator how many new reports were added since their last visit.
 * Shows when monitoring began and which plugins were installed then (first-run monitoring baseline); earlier updates are never reconstructed.
 * Privacy-safe matching: option values and WP-Cron and Action Scheduler arguments are compared through keyed fingerprints and never stored or shown.

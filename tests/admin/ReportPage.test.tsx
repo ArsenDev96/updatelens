@@ -46,6 +46,9 @@ function renderReport( report: AnalysisReport | null, signal?: Provider ) {
 }
 
 const panel = phasePanel;
+/** The collapsed technical details of a report. */
+const technicalDetails = () =>
+	screen.getByText( 'Technical details' ).closest( 'details' )!;
 
 describe( 'ReportPage', () => {
 	beforeEach( () => {
@@ -86,19 +89,17 @@ describe( 'ReportPage', () => {
 			expect(
 				within( header ).getByText( /^Updated / )
 			).toBeInTheDocument();
+			// Completed: the header badge says so; no status section repeats
+			// it. How the observation ended is in the technical details.
 			expect(
-				screen.getByText( 'Analysis completed' )
-			).toBeInTheDocument();
-			expect(
-				screen.getByText(
-					'UpdateLens captured changes during the update and shortly afterward.'
-				)
-			).toBeInTheDocument();
-			expect(
-				screen.getByText(
-					'Observation completed on the next admin request.'
-				)
-			).toBeInTheDocument();
+				screen.queryByRole( 'region', { name: 'Analysis status' } )
+			).toBeNull();
+			expect( document.body ).not.toHaveTextContent(
+				'Analysis completed'
+			);
+			expect( technicalDetails() ).toHaveTextContent(
+				'ObservationObservation completed on the next admin request.'
+			);
 			expect( document.body ).not.toHaveTextContent(
 				/lifecycle|eligible/
 			);
@@ -121,17 +122,21 @@ describe( 'ReportPage', () => {
 				within( panel() ).getByText( '11 observed changes' )
 			).toBeVisible();
 			expect( panel() ).toHaveTextContent(
-				'Net difference between the state before the update and the end of the observation window.'
-			);
-			expect( panel() ).toHaveTextContent(
 				'Changes were observed in Options & autoload and WP-Cron. Action Scheduler was not available for this phase.'
+			);
+			// The selected tab names the phase; its description is technical
+			// detail, not a second block in the summary.
+			expect( panel() ).not.toHaveTextContent( 'Observation period' );
+			expect( panel() ).not.toHaveTextContent( 'Net difference' );
+			expect( technicalDetails() ).toHaveTextContent(
+				'Selected phaseNet result: Net difference between the state before the update and the end of the observation window.'
 			);
 
 			// One card per signal, in order, as links to their details.
 			expect( cardTexts() ).toEqual( [
-				'Options & autoload6 changes Added 2 · Removed 1 · Changed 3View details →',
-				'WP-Cron5 changes Added 2 · No longer present 1 · Rescheduled 2View details →',
-				'Action SchedulerNot available Action Scheduler not detectedView details →',
+				'Options & autoloadStored settings in wp_options, including autoloaded data.6 changes Added 2 · Removed 1 · Changed 3View details',
+				'WP-CronEvents scheduled with WordPress cron.5 changes Added 2 · No longer present 1 · Rescheduled 2View details',
+				'Action SchedulerPending and in-progress background actions.Not available Action Scheduler not detectedView details',
 			] );
 			const options = screen.getByRole( 'link', {
 				name: 'Options & autoload',
@@ -180,8 +185,8 @@ describe( 'ReportPage', () => {
 				'aria-selected',
 				'true'
 			);
-			expect( panel() ).toHaveTextContent(
-				'Changes observed while WordPress was performing this plugin update.'
+			expect( technicalDetails() ).toHaveTextContent(
+				'During update: Changes observed while WordPress was performing this plugin update.'
 			);
 			expect( panel() ).toHaveTextContent( '2 observed changes' );
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
@@ -204,7 +209,7 @@ describe( 'ReportPage', () => {
 				'true'
 			);
 			expect( tab( /After update/ ) ).toHaveFocus();
-			expect( panel() ).toHaveTextContent(
+			expect( technicalDetails() ).toHaveTextContent(
 				'Other site activity may also contribute.'
 			);
 
@@ -271,6 +276,44 @@ describe( 'ReportPage', () => {
 			expect( panel() ).not.toHaveTextContent( 'settle_expired' );
 		} );
 
+		it( 'labels an expired observation a partial report on the overview and every signal page', async () => {
+			for ( const signal of [
+				undefined,
+				'options',
+				'cron',
+				'action_scheduler',
+			] as const ) {
+				renderReport( EXPIRED, signal );
+
+				const header = await screen.findByRole( 'banner' );
+				expect( header ).toHaveTextContent( 'Partial report' );
+				expect( header ).not.toHaveTextContent( 'Completed' );
+				// The amber explanation stays.
+				expect(
+					screen.getByText( 'Post-update observation expired' )
+				).toBeInTheDocument();
+				cleanup();
+			}
+		} );
+
+		it.each( [
+			[ 'completed', COMPLETED, 'Completed' ],
+			[ 'observing', AWAITING, 'Observing' ],
+			[ 'failed', FAILED, 'Failed' ],
+		] )(
+			'keeps the %s badge on the overview and signal pages',
+			async ( _name, report, label ) => {
+				for ( const signal of [ undefined, 'cron' ] as const ) {
+					renderReport( report, signal );
+
+					const header = await screen.findByRole( 'banner' );
+					expect( header ).toHaveTextContent( label );
+					expect( header ).not.toHaveTextContent( 'Partial report' );
+					cleanup();
+				}
+			}
+		);
+
 		it( 'renders a failed report without phases', async () => {
 			renderReport( FAILED );
 
@@ -333,9 +376,7 @@ describe( 'ReportPage', () => {
 			renderReport( CORRUPT_POST );
 			const user = userEvent.setup();
 
-			expect(
-				await screen.findByText( 'Analysis completed' )
-			).toBeInTheDocument();
+			await screen.findAllByRole( 'tablist' );
 			expect( tab( /Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
@@ -347,10 +388,10 @@ describe( 'ReportPage', () => {
 			// Options is unreadable here; WP-Cron keeps its count.
 			await user.click( tab( /After update/ ) );
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-				/^Options & autoloadNot available/
+				/^Options & autoloadStored settings in wp_options, including autoloaded data\.Not available/
 			);
 			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-				/WP-Cron\d+ changes?/
+				/WP-Cron[^\d]*\d+ changes?/
 			);
 			expect( panel() ).toHaveTextContent(
 				'Changes were observed in WP-Cron. Options & autoload and Action Scheduler were not available for this phase.'
@@ -383,9 +424,18 @@ describe( 'ReportPage', () => {
 			await user.click(
 				screen.getByRole( 'button', { name: 'Refresh' } )
 			);
+			// Once completed, the status section with Refresh is gone.
 			expect(
-				await screen.findByText( 'Analysis completed' )
+				await screen.findByText(
+					'Observation completed on the next admin request.'
+				)
 			).toBeInTheDocument();
+			expect(
+				screen.queryByRole( 'region', { name: 'Analysis status' } )
+			).toBeNull();
+			expect(
+				screen.queryByRole( 'button', { name: 'Refresh' } )
+			).toBeNull();
 			expect( apiFetchMock ).toHaveBeenCalledTimes( 2 );
 		} );
 
@@ -393,7 +443,7 @@ describe( 'ReportPage', () => {
 			renderReport( COMPLETED );
 			const user = userEvent.setup();
 
-			await screen.findByText( 'Analysis completed' );
+			await screen.findAllByRole( 'tablist' );
 			const back = screen.getByRole( 'link', { name: /Update History/ } );
 			expect( back ).toHaveAttribute(
 				'href',
@@ -436,9 +486,13 @@ describe( 'ReportPage', () => {
 				'After update, 7 changes',
 				'Net result, 6 changes',
 			] );
-			expect( panel() ).toHaveTextContent( '6 observed changes' );
+			expect( panel() ).toHaveTextContent( '6 observed option changes' );
 
-			// Counts first (the autoloaded data change because it is not 0 B), then totals.
+			// Counts first (the autoloaded data change because it is not 0 B);
+			// the site totals are quiet statistics after the lists.
+			expect( panel() ).toHaveTextContent(
+				/^Net result6 observed option changesAdded2.*Changed \(3\).*Site totals/
+			);
 			const metrics = within( panel() ).getAllByRole( 'definition' );
 			expect(
 				within( panel() )
@@ -597,12 +651,18 @@ describe( 'ReportPage', () => {
 			const version = screen
 				.getByText( 'plugin_db_version' )
 				.closest( 'li' )!;
-			expect( version ).toHaveTextContent( /Value unchanged\s*·\s*5 B/ );
+			// Only the stored autoload setting changed, not the value.
+			expect( version ).toHaveTextContent(
+				/Autoload setting changed\s*·\s*5 B/
+			);
+			expect( version ).not.toHaveTextContent( 'Value' );
 			expect( version ).not.toHaveTextContent( '→ to 5 B' );
 			expect( version ).not.toHaveTextContent( '+0' );
 			// The raw value changed but the behavior did not.
 			expect( version ).toHaveTextContent( /yes\s*→\s*to\s*on/ );
-			expect( version ).toHaveTextContent( 'On (no effective change)' );
+			expect( version ).toHaveTextContent(
+				/Effective behavior\s*On \(unchanged\)/
+			);
 		} );
 
 		it( 'renders added and removed options with effective autoload, without repeating it', async () => {
@@ -621,6 +681,49 @@ describe( 'ReportPage', () => {
 			expect( removed ).toHaveTextContent( '2 KB' );
 			expect( removed ).toHaveTextContent( /Autoload: Off$/ );
 			expect( removed ).not.toHaveTextContent( '(off)' );
+		} );
+
+		it( 'wraps long option names after separators without changing them', async () => {
+			const options = COMPLETED.phases.final
+				.options as AvailableOptionsPhase;
+			const names = [
+				'woocommerce_marketplace_suggestions_last_fetch_timestamp',
+				'_leading__double-dash_',
+				'nosplit',
+			];
+			renderReport(
+				{
+					...COMPLETED,
+					phases: {
+						...COMPLETED.phases,
+						final: {
+							...COMPLETED.phases.final,
+							options: {
+								...options,
+								added: names.map( ( name ) => ( {
+									name,
+									size: 3,
+									autoload: 'auto',
+									is_autoloaded: true,
+								} ) ),
+							},
+						},
+					},
+				},
+				'options'
+			);
+
+			for ( const name of names ) {
+				const code = await screen.findByText( name );
+				expect( code.tagName ).toBe( 'CODE' );
+				expect( code.textContent ).toBe( name );
+			}
+			expect(
+				screen.getByText( names[ 0 ] ).querySelectorAll( 'wbr' )
+			).toHaveLength( 5 );
+			expect(
+				screen.getByText( 'nosplit' ).querySelectorAll( 'wbr' )
+			).toHaveLength( 0 );
 		} );
 
 		it( 'keeps stored autoload values that say more than On/Off', async () => {

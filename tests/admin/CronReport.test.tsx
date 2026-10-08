@@ -84,7 +84,7 @@ describe( 'WP-Cron in reports', () => {
 			)
 		).toEqual( [ 'options', 'cron', 'action_scheduler' ] );
 		expect( cardTexts()[ 1 ] ).toBe(
-			'WP-Cron5 changes Added 2 · No longer present 1 · Rescheduled 2View details →'
+			'WP-CronEvents scheduled with WordPress cron.5 changes Added 2 · No longer present 1 · Rescheduled 2View details'
 		);
 		// No rows of any signal on the overview.
 		expect( document.body ).not.toHaveTextContent(
@@ -135,10 +135,10 @@ describe( 'WP-Cron in reports', () => {
 		);
 		expect( tab( /Net result/ ) ).not.toHaveTextContent( 'Not available' );
 		expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-			/^WP-Cron\d+ changes?/
+			/^WP-CronEvents scheduled with WordPress cron\.\d+ changes?/
 		);
 		expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-			/^Options & autoloadNot available/
+			/^Options & autoloadStored settings in wp_options, including autoloaded data\.Not available/
 		);
 	} );
 
@@ -146,6 +146,11 @@ describe( 'WP-Cron in reports', () => {
 		renderReport( COMPLETED );
 		await openCron( /Net result/ );
 
+		// The phase, the headline and the counts first; lists, then the
+		// site totals as quiet statistics.
+		expect( signalPanel() ).toHaveTextContent(
+			/^Net result5 observed WP-Cron changesAdded2No longer present1Changed0Rescheduled2.*Added \(2\).*Site totals/
+		);
 		const metrics = within( signalPanel() ).getAllByRole( 'definition' );
 		expect(
 			within( signalPanel() )

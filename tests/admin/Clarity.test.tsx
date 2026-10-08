@@ -165,7 +165,7 @@ describe( 'report clarity', () => {
 				'Net result, 6 changes'
 			);
 			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-				/^WP-CronNot available WP-Cron analysis unavailable/
+				/^WP-CronEvents scheduled with WordPress cron\.Not available WP-Cron analysis unavailable/
 			);
 			cleanup();
 
@@ -234,7 +234,7 @@ describe( 'report clarity', () => {
 			] );
 			// No breakdowns on cards without changes.
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-				/^Options & autoloadNo changes View details →$/
+				/^Options & autoloadStored settings in wp_options, including autoloaded data\.No changes View details$/
 			);
 		} );
 
@@ -282,7 +282,7 @@ describe( 'report clarity', () => {
 				'No tracked changes observed'
 			);
 			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-				/^WP-CronNo changes View details →$/
+				/^WP-CronEvents scheduled with WordPress cron\.No changes View details$/
 			);
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
 				'5 changes'
@@ -484,12 +484,16 @@ describe( 'report clarity', () => {
 			const row = within( signalPanel() )
 				.getByText( 'acme_cache' )
 				.closest( 'li' )!;
-			expect( row ).toHaveTextContent( /Value unchanged\s*·\s*2 KB/ );
+			// The value did not change: the row says what did.
+			expect( row ).toHaveTextContent(
+				/^acme_cacheAutoload setting changed\s*·\s*2 KB/
+			);
+			expect( row ).not.toHaveTextContent( 'Value' );
 			expect( row ).toHaveTextContent(
 				/Autoload setting\s*off\s*→\s*to\s*on/
 			);
 			expect( row ).toHaveTextContent(
-				/Autoload behavior\s*Off\s*→\s*to\s*On\s*\(behavior changed\)/
+				/Effective behavior\s*Off\s*→\s*to\s*On\s*\(behavior changed\)/
 			);
 		} );
 

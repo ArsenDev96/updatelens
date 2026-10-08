@@ -7,6 +7,8 @@ import type {
 	ActionScheduleType,
 	AvailableActionSchedulerPhase,
 	ChangedAction,
+	PhaseKey,
+	ReportPhase,
 	RescheduledAction,
 } from '../types/api';
 import {
@@ -18,13 +20,25 @@ import {
 import {
 	actionSchedulerPhaseNote,
 	actionScheduleTypeLabel,
+	noChangesText,
+	phaseLabel,
+	signalUnavailableText,
 } from '../utils/labels';
-import { Details, HookName, Time, To } from './DiffRow';
+import { Time, TimeRange, To } from './DiffRow';
 import { DiffSection } from './DiffSection';
-import { ChangeCounts, Total, Totals } from './PhaseSummary';
+import {
+	ChangeMark,
+	ChangeRow,
+	RowDetails,
+	SignalEmptyState,
+	SignalNote,
+	SignalSummary,
+	SignalTotals,
+	StatePill,
+} from './SignalParts';
 
 /*
- * Action Scheduler changes of one phase: a diff of active (pending or
+ * The Action Scheduler page of one phase: a diff of active (pending or
  * in-progress) actions between two observation points, not execution
  * history. Only hooks, groups, statuses, times and normalized schedules
  * exist in the API: arguments are never stored, so they are never shown.
@@ -34,93 +48,131 @@ import { ChangeCounts, Total, Totals } from './PhaseSummary';
  */
 
 /**
- * Summary, note and lists of an available Action Scheduler phase with changes.
+ * Action Scheduler in one phase: summary, action lists, notes and site
+ * totals, or one calm empty or unavailable state.
  *
- * @param props       Props.
- * @param props.phase Available Action Scheduler phase with at least one change.
+ * @param props               Props.
+ * @param props.phase         Phase.
+ * @param props.data          Phase data of every signal.
+ * @param props.count         Action Scheduler change count, null if unavailable.
+ * @param props.windowSeconds Observation window length from the API.
  */
-export function ActionSchedulerChanges( {
+export function ActionSchedulerDetail( {
 	phase,
+	data,
+	count,
+	windowSeconds,
 }: {
-	phase: AvailableActionSchedulerPhase;
+	phase: PhaseKey;
+	data: ReportPhase;
+	count: number | null;
+	windowSeconds: number;
 } ) {
+	const actions = data.action_scheduler;
+	if ( count === null || count === 0 || ! actions.available ) {
+		const unavailable = count === null;
+		const text = unavailable
+			? signalUnavailableText( 'action_scheduler', data, windowSeconds )
+			: noChangesText( 'action_scheduler' );
+		return (
+			<SignalEmptyState
+				icon={ unavailable ? 'info' : 'action_scheduler' }
+				title={ text?.title ?? '' }
+				description={ text?.description ?? '' }
+			/>
+		);
+	}
+
+	const summary = actions.summary;
 	return (
-		<div className="space-y-4">
-			<ActionSchedulerSummary summary={ phase.summary } />
-			<p className="text-xs text-muted-foreground">
-				{ actionSchedulerPhaseNote() }
-			</p>
-			<ActionSchedulerDiffList phase={ phase } />
+		<div className="space-y-8">
+			<SignalSummary
+				id="updatelens-as-summary"
+				eyebrow={ phaseLabel( phase ) }
+				headline={ sprintf(
+					/* translators: %s: number of observed Action Scheduler changes in a phase. */
+					_n(
+						'%s observed Action Scheduler change',
+						'%s observed Action Scheduler changes',
+						count,
+						'updatelens'
+					),
+					formatCount( count )
+				) }
+				counts={ [
+					{
+						kind: 'added',
+						label: __( 'Added', 'updatelens' ),
+						value: formatCount( summary.added_count ),
+						quiet: summary.added_count === 0,
+					},
+					{
+						kind: 'gone',
+						/* translators: Summary count of Action Scheduler actions active before and not active after (ran, canceled or otherwise left the queue). */
+						label: __( 'No longer active', 'updatelens' ),
+						value: formatCount( summary.removed_count ),
+						quiet: summary.removed_count === 0,
+					},
+					{
+						kind: 'changed',
+						label: __( 'Changed', 'updatelens' ),
+						value: formatCount( summary.changed_count ),
+						quiet: summary.changed_count === 0,
+					},
+					{
+						kind: 'rescheduled',
+						label: __( 'Rescheduled', 'updatelens' ),
+						value: formatCount( summary.rescheduled_count ),
+						// Recurring actions move whenever they run: never emphasized.
+						quiet: true,
+					},
+				] }
+				note={ actionSchedulerPhaseNote() }
+			/>
+			<ActionSchedulerDiffList phase={ actions } />
+			<SignalTotals
+				id="updatelens-as-totals"
+				label={ __( 'Action Scheduler totals', 'updatelens' ) }
+				items={ totals( summary ) }
+			/>
 		</div>
 	);
 }
 
 /**
- * Added, no longer active, changed and rescheduled counts, then before →
- * after totals of active actions.
+ * Active actions of the site before → after, with deltas.
  *
- * @param props         Props.
- * @param props.summary Action Scheduler phase summary.
+ * @param summary Action Scheduler phase summary.
  */
-export function ActionSchedulerSummary( {
-	summary,
-}: {
-	summary: ActionSchedulerDiffSummary;
-} ) {
-	return (
-		<div className="space-y-2">
-			<ChangeCounts
-				items={ [
-					{
-						label: __( 'Added', 'updatelens' ),
-						value: formatCount( summary.added_count ),
-					},
-					{
-						/* translators: Summary count of Action Scheduler actions active before and not active after (ran, canceled or otherwise left the queue). */
-						label: __( 'No longer active', 'updatelens' ),
-						value: formatCount( summary.removed_count ),
-					},
-					{
-						label: __( 'Changed', 'updatelens' ),
-						value: formatCount( summary.changed_count ),
-					},
-					{
-						label: __( 'Rescheduled', 'updatelens' ),
-						value: formatCount( summary.rescheduled_count ),
-						quiet: true,
-					},
-				] }
-			/>
-			<Totals label={ __( 'Action Scheduler totals', 'updatelens' ) }>
-				<Total
-					label={ __( 'Active actions', 'updatelens' ) }
-					before={ formatCount( summary.before_action_count ) }
-					after={ formatCount( summary.after_action_count ) }
-					delta={ formatCountDelta( summary.action_count_delta ) }
-				/>
-				<Total
-					label={ __( 'Recurring', 'updatelens' ) }
-					before={ formatCount( summary.before_recurring_count ) }
-					after={ formatCount( summary.after_recurring_count ) }
-					delta={ formatCountDelta( summary.recurring_count_delta ) }
-				/>
-				<Total
-					label={ __( 'One-time', 'updatelens' ) }
-					before={ formatCount( summary.before_single_count ) }
-					after={ formatCount( summary.after_single_count ) }
-					delta={ formatCountDelta( summary.single_count_delta ) }
-				/>
-				<Total
-					label={ __( 'Unique hooks', 'updatelens' ) }
-					before={ formatCount( summary.before_unique_hook_count ) }
-					after={ formatCount( summary.after_unique_hook_count ) }
-					delta={ formatCountDelta(
-						summary.unique_hook_count_delta
-					) }
-				/>
-			</Totals>
-		</div>
-	);
+function totals(
+	summary: ActionSchedulerDiffSummary
+): Array< [ string, string, string, string ] > {
+	return [
+		[
+			__( 'Active actions', 'updatelens' ),
+			formatCount( summary.before_action_count ),
+			formatCount( summary.after_action_count ),
+			formatCountDelta( summary.action_count_delta ),
+		],
+		[
+			__( 'Recurring', 'updatelens' ),
+			formatCount( summary.before_recurring_count ),
+			formatCount( summary.after_recurring_count ),
+			formatCountDelta( summary.recurring_count_delta ),
+		],
+		[
+			__( 'One-time', 'updatelens' ),
+			formatCount( summary.before_single_count ),
+			formatCount( summary.after_single_count ),
+			formatCountDelta( summary.single_count_delta ),
+		],
+		[
+			__( 'Unique hooks', 'updatelens' ),
+			formatCount( summary.before_unique_hook_count ),
+			formatCount( summary.after_unique_hook_count ),
+			formatCountDelta( summary.unique_hook_count_delta ),
+		],
+	];
 }
 
 /**
@@ -131,7 +183,7 @@ export function ActionSchedulerSummary( {
  * @param props       Props.
  * @param props.phase Available Action Scheduler phase with at least one change.
  */
-export function ActionSchedulerDiffList( {
+function ActionSchedulerDiffList( {
 	phase,
 }: {
 	phase: AvailableActionSchedulerPhase;
@@ -140,10 +192,12 @@ export function ActionSchedulerDiffList( {
 		`${ action.hook }-${ action.group }-${ index }`;
 
 	return (
-		<div className="space-y-5">
+		<div className="space-y-6">
 			{ phase.added.length > 0 && (
 				<DiffSection
 					id="updatelens-as-added"
+					appearance="card"
+					icon={ <ChangeMark kind="added" /> }
 					title={ sprintf(
 						/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 						__( 'Added (%s)', 'updatelens' ),
@@ -174,6 +228,8 @@ export function ActionSchedulerDiffList( {
 			{ phase.removed.length > 0 && (
 				<DiffSection
 					id="updatelens-as-removed"
+					appearance="card"
+					icon={ <ChangeMark kind="gone" /> }
 					title={ sprintf(
 						/* translators: %s: number of Action Scheduler actions that left the active queue. */
 						__( 'No longer active (%s)', 'updatelens' ),
@@ -207,6 +263,8 @@ export function ActionSchedulerDiffList( {
 			{ phase.changed.length > 0 && (
 				<DiffSection
 					id="updatelens-as-changed"
+					appearance="card"
+					icon={ <ChangeMark kind="changed" /> }
 					title={ sprintf(
 						/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 						__( 'Changed (%s)', 'updatelens' ),
@@ -240,6 +298,8 @@ export function ActionSchedulerDiffList( {
 			{ phase.rescheduled.length > 0 && (
 				<DiffSection
 					id="updatelens-as-rescheduled"
+					appearance="card"
+					icon={ <ChangeMark kind="rescheduled" /> }
 					title={ sprintf(
 						/* translators: %s: number of listed items (options, WP-Cron events or Action Scheduler actions). */
 						__( 'Rescheduled (%s)', 'updatelens' ),
@@ -271,49 +331,43 @@ export function ActionSchedulerDiffList( {
 					quiet
 				/>
 			) }
-			<div className="space-y-1 text-xs text-muted-foreground">
-				<p>
+			<div className="space-y-2">
+				<SignalNote>
 					{ __(
 						'Action arguments are fingerprinted for matching but are never stored or shown. Similar-looking rows may represent different argument sets.',
 						'updatelens'
 					) }
-				</p>
+				</SignalNote>
 				{ phase.removed.length > 0 && (
-					<p>
+					<SignalNote>
 						{ __(
 							'An action may leave the active queue because it ran, was canceled, or otherwise changed state.',
 							'updatelens'
 						) }
-					</p>
+					</SignalNote>
 				) }
-				<p>
+				<SignalNote>
 					{ __(
 						'UpdateLens compares active Action Scheduler state at observation points. Very short-lived actions that are queued and completed between captures may not appear.',
 						'updatelens'
 					) }
-				</p>
+				</SignalNote>
 			</div>
 		</div>
 	);
 }
 
 /**
- * Hook in monospace and, when the action has one, its group as secondary
- * metadata (observed, not ownership).
+ * An action's group as secondary metadata (observed, never ownership), or
+ * nothing for actions without a group.
  *
- * @param props        Props.
- * @param props.action Action.
+ * @param group Group slug, '' for none.
  */
-function ActionName( { action }: { action: { hook: string; group: string } } ) {
-	return (
+function groupLine( group: string ): ReactNode {
+	return group === '' ? undefined : (
 		<>
-			<HookName hook={ action.hook } />
-			{ action.group !== '' && (
-				<p className="break-all text-xs text-muted-foreground">
-					{ __( 'Group:', 'updatelens' ) }{ ' ' }
-					<span className="font-mono">{ action.group }</span>
-				</p>
-			) }
+			{ __( 'Group:', 'updatelens' ) }{ ' ' }
+			<span className="font-mono">{ group }</span>
 		</>
 	);
 }
@@ -334,14 +388,14 @@ function everyText( interval: number | null ): string | null {
 }
 
 /**
- * A cron expression in monospace.
+ * A cron expression in monospace, exactly as stored.
  *
  * @param props            Props.
  * @param props.expression Normalized cron expression.
  */
 function Expression( { expression }: { expression: string } ) {
 	return (
-		<code className="m-0 break-all bg-transparent p-0 font-mono text-[13px]">
+		<code className="m-0 bg-transparent p-0 font-mono text-[12px] [overflow-wrap:anywhere]">
 			{ expression }
 		</code>
 	);
@@ -409,16 +463,21 @@ function statusText( status: ActionSchedulerActionState[ 'status' ] ): string {
  */
 function AddedActionRow( { action }: { action: ActionSchedulerActionState } ) {
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-emerald-400 px-4 py-3">
-			<ActionName action={ action } />
-			<p className="text-sm">
-				<Schedule
-					type={ action.schedule_type }
-					interval={ action.interval }
-					expression={ action.cron_expression }
-				/>
-			</p>
-			<Details
+		<ChangeRow
+			kind="added"
+			name={ action.hook }
+			meta={ groupLine( action.group ) }
+			facts={
+				<StatePill>
+					<Schedule
+						type={ action.schedule_type }
+						interval={ action.interval }
+						expression={ action.cron_expression }
+					/>
+				</StatePill>
+			}
+		>
+			<RowDetails
 				rows={ [
 					[
 						timeLabel( action.is_recurring ),
@@ -430,7 +489,7 @@ function AddedActionRow( { action }: { action: ActionSchedulerActionState } ) {
 					],
 				] }
 			/>
-		</li>
+		</ChangeRow>
 	);
 }
 
@@ -448,32 +507,44 @@ function InactiveActionRow( {
 	action: ActionSchedulerActionState;
 } ) {
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-slate-300 px-4 py-3">
-			<ActionName action={ action } />
-			<p className="text-sm">
-				{ __( 'No longer active', 'updatelens' ) } ·{ ' ' }
-				<Schedule
-					type={ action.schedule_type }
-					interval={ action.interval }
-					expression={ action.cron_expression }
-				/>
-			</p>
-			<p className="text-sm text-muted-foreground">
-				{ __( 'Previously scheduled for', 'updatelens' ) }{ ' ' }
-				<Time timestamp={ action.timestamp } />
-				{ action.status === 'in-progress' && (
-					<>
-						{ ' · ' }
-						{ __( 'was in progress', 'updatelens' ) }
-					</>
-				) }
-			</p>
-		</li>
+		<ChangeRow
+			kind="gone"
+			name={ action.hook }
+			meta={ groupLine( action.group ) }
+			facts={
+				<StatePill muted>
+					{ __( 'No longer active', 'updatelens' ) } ·{ ' ' }
+					<Schedule
+						type={ action.schedule_type }
+						interval={ action.interval }
+						expression={ action.cron_expression }
+					/>
+				</StatePill>
+			}
+		>
+			<RowDetails
+				rows={ [
+					[
+						__( 'Previously scheduled for', 'updatelens' ),
+						<span key="t">
+							<Time timestamp={ action.timestamp } />
+							{ action.status === 'in-progress' && (
+								<>
+									{ ' · ' }
+									{ __( 'was in progress', 'updatelens' ) }
+								</>
+							) }
+						</span>,
+					],
+				] }
+			/>
+		</ChangeRow>
 	);
 }
 
 /**
- * The same action (hook, group and arguments) with another schedule.
+ * The same action (hook, group and arguments) with another schedule. Only
+ * the schedule fields that differ are listed, then the scheduled time.
  *
  * @param props        Props.
  * @param props.action Action.
@@ -523,11 +594,10 @@ function ChangedActionRow( { action }: { action: ChangedAction } ) {
 	rows.push( [
 		__( 'Scheduled time', 'updatelens' ),
 		action.timestamp_changed ? (
-			<>
-				<Time timestamp={ action.before_timestamp } />
-				<To />
-				<Time timestamp={ action.after_timestamp } />
-			</>
+			<TimeRange
+				from={ action.before_timestamp }
+				to={ action.after_timestamp }
+			/>
 		) : (
 			<>
 				<Time timestamp={ action.after_timestamp } />{ ' ' }
@@ -539,13 +609,18 @@ function ChangedActionRow( { action }: { action: ChangedAction } ) {
 	] );
 
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-sky-300 px-4 py-3">
-			<ActionName action={ action } />
-			<p className="text-sm font-medium">
-				{ __( 'Schedule changed', 'updatelens' ) }
-			</p>
-			<Details rows={ rows } />
-		</li>
+		<ChangeRow
+			kind="changed"
+			name={ action.hook }
+			meta={ groupLine( action.group ) }
+			facts={
+				<span className="font-medium text-slate-800">
+					{ __( 'Schedule changed', 'updatelens' ) }
+				</span>
+			}
+		>
+			<RowDetails boxed rows={ rows } />
+		</ChangeRow>
 	);
 }
 
@@ -560,26 +635,39 @@ function RescheduledActionRow( { action }: { action: RescheduledAction } ) {
 	const delta = formatDurationDelta( action.timestamp_delta );
 
 	return (
-		<li className="space-y-1 border-l-2 border-l-slate-200 px-4 py-3 text-muted-foreground">
-			<ActionName action={ action } />
-			<p className="text-sm">
-				<Time timestamp={ action.before_timestamp } />
-				<To />
-				<Time timestamp={ action.after_timestamp } />
-				{ delta && (
-					<>
-						{ ' ' }
-						<span className="ml-1 tabular-nums">({ delta })</span>
-					</>
-				) }
-			</p>
-			<p className="text-sm">
-				<Schedule
-					type={ action.schedule_type }
-					interval={ action.interval }
-					expression={ action.cron_expression }
-				/>
-			</p>
-		</li>
+		<ChangeRow
+			kind="rescheduled"
+			name={ action.hook }
+			meta={ groupLine( action.group ) }
+			quiet
+			facts={
+				<StatePill muted>
+					<Schedule
+						type={ action.schedule_type }
+						interval={ action.interval }
+						expression={ action.cron_expression }
+					/>
+				</StatePill>
+			}
+		>
+			<RowDetails
+				rows={ [
+					[
+						timeLabel( action.is_recurring ),
+						<span key="t" className="tabular-nums">
+							<TimeRange
+								from={ action.before_timestamp }
+								to={ action.after_timestamp }
+							/>
+							{ delta && (
+								<span className="ml-1.5 text-muted-foreground">
+									({ delta })
+								</span>
+							) }
+						</span>,
+					],
+				] }
+			/>
+		</ChangeRow>
 	);
 }

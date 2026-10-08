@@ -76,6 +76,7 @@ describe( 'HistoryPage', () => {
 		expect( first ).toHaveTextContent( 'UpdateLens Fixture A' );
 		expect( first ).toHaveTextContent( /1\.0\.0\s*→\s*to\s*1\.1\.0/ );
 		expect( first ).toHaveTextContent( 'Completed' );
+		expect( first ).not.toHaveTextContent( 'Partial report' );
 		expect( first ).toHaveTextContent( 'View report' );
 		expect(
 			within( first )
@@ -90,6 +91,9 @@ describe( 'HistoryPage', () => {
 
 		const expired = links[ 1 ];
 		expect( expired ).toHaveTextContent( 'Second Plugin' );
+		// The update succeeded, but the post-update state was not captured.
+		expect( expired ).toHaveTextContent( 'Partial report' );
+		expect( expired ).not.toHaveTextContent( 'Completed' );
 		expect(
 			within( expired )
 				.getAllByRole( 'listitem' )
@@ -102,6 +106,7 @@ describe( 'HistoryPage', () => {
 
 		const failed = links[ 2 ];
 		expect( failed ).toHaveTextContent( 'Failed' );
+		expect( failed ).not.toHaveTextContent( 'Partial report' );
 		expect( failed ).toHaveTextContent( /Net result:\s*Not available/ );
 		expect( failed ).toHaveTextContent(
 			/1\.0\.0\s*→\s*to\s*–\s*unknown version/

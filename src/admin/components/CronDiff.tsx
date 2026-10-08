@@ -6,6 +6,8 @@ import type {
 	ChangedCronEvent,
 	CronDiffSummary,
 	CronEventState,
+	PhaseKey,
+	ReportPhase,
 	RescheduledCronEvent,
 } from '../types/api';
 import {
@@ -14,12 +16,27 @@ import {
 	formatDuration,
 	formatDurationDelta,
 } from '../utils/format';
-import { Details, HookName, Time, To } from './DiffRow';
+import {
+	cronPhaseNote,
+	noChangesText,
+	phaseLabel,
+	signalUnavailableText,
+} from '../utils/labels';
+import { Time, To } from './DiffRow';
 import { DiffSection } from './DiffSection';
-import { ChangeCounts, Total, Totals } from './PhaseSummary';
+import {
+	ChangeMark,
+	ChangeRow,
+	RowDetails,
+	SignalEmptyState,
+	SignalNote,
+	SignalSummary,
+	SignalTotals,
+	StatePill,
+} from './SignalParts';
 
 /*
- * WP-Cron changes of one phase. Only hooks, timing and recurrence exist in
+ * The WP-Cron page of one phase. Only hooks, timing and recurrence exist in
  * the API: event arguments are never stored, so they are never shown.
  * Rescheduling is shown with less emphasis than additions, removals and
  * recurrence changes, because normal WP-Cron runs move recurring events.
@@ -28,69 +45,131 @@ import { ChangeCounts, Total, Totals } from './PhaseSummary';
  */
 
 /**
- * Added, no longer present, changed and rescheduled counts, then before →
- * after totals. "No longer present" covers every event of the backend's
- * `removed` category, recurring ("Removed") and one-time ("No longer
- * scheduled") alike.
+ * WP-Cron in one phase: summary, event lists, notes and site totals, or one
+ * calm empty or unavailable state.
  *
- * @param props         Props.
- * @param props.summary Cron phase summary.
+ * @param props               Props.
+ * @param props.phase         Phase.
+ * @param props.data          Phase data of every signal.
+ * @param props.count         WP-Cron change count, null if unavailable.
+ * @param props.windowSeconds Observation window length from the API.
  */
-export function CronSummary( { summary }: { summary: CronDiffSummary } ) {
+export function CronDetail( {
+	phase,
+	data,
+	count,
+	windowSeconds,
+}: {
+	phase: PhaseKey;
+	data: ReportPhase;
+	count: number | null;
+	windowSeconds: number;
+} ) {
+	const cron = data.cron;
+	if ( count === null || count === 0 || ! cron.available ) {
+		const unavailable = count === null;
+		const text = unavailable
+			? signalUnavailableText( 'cron', data, windowSeconds )
+			: noChangesText( 'cron' );
+		return (
+			<SignalEmptyState
+				icon={ unavailable ? 'info' : 'cron' }
+				title={ text?.title ?? '' }
+				description={ text?.description ?? '' }
+			/>
+		);
+	}
+
+	const summary = cron.summary;
 	return (
-		<div className="space-y-2">
-			<ChangeCounts
-				items={ [
+		<div className="space-y-8">
+			<SignalSummary
+				id="updatelens-cron-summary"
+				eyebrow={ phaseLabel( phase ) }
+				headline={ sprintf(
+					/* translators: %s: number of observed WP-Cron changes in a phase. */
+					_n(
+						'%s observed WP-Cron change',
+						'%s observed WP-Cron changes',
+						count,
+						'updatelens'
+					),
+					formatCount( count )
+				) }
+				counts={ [
 					{
+						kind: 'added',
 						label: __( 'Added', 'updatelens' ),
 						value: formatCount( summary.added_count ),
+						quiet: summary.added_count === 0,
 					},
 					{
+						kind: 'removed',
 						/* translators: Summary count of WP-Cron events present before and absent after (removed or no longer scheduled). */
 						label: __( 'No longer present', 'updatelens' ),
 						value: formatCount( summary.removed_count ),
+						quiet: summary.removed_count === 0,
 					},
 					{
+						kind: 'changed',
 						label: __( 'Changed', 'updatelens' ),
 						value: formatCount( summary.changed_count ),
+						quiet: summary.changed_count === 0,
 					},
 					{
+						kind: 'rescheduled',
 						label: __( 'Rescheduled', 'updatelens' ),
 						value: formatCount( summary.rescheduled_count ),
+						// Often a normal run: never emphasized.
 						quiet: true,
 					},
 				] }
+				note={ cronPhaseNote() }
 			/>
-			<Totals label={ __( 'WP-Cron totals', 'updatelens' ) }>
-				<Total
-					label={ __( 'Events', 'updatelens' ) }
-					before={ formatCount( summary.before_event_count ) }
-					after={ formatCount( summary.after_event_count ) }
-					delta={ formatCountDelta( summary.event_count_delta ) }
-				/>
-				<Total
-					label={ __( 'Recurring', 'updatelens' ) }
-					before={ formatCount( summary.before_recurring_count ) }
-					after={ formatCount( summary.after_recurring_count ) }
-					delta={ formatCountDelta( summary.recurring_count_delta ) }
-				/>
-				<Total
-					label={ __( 'One-time', 'updatelens' ) }
-					before={ formatCount( summary.before_single_count ) }
-					after={ formatCount( summary.after_single_count ) }
-					delta={ formatCountDelta( summary.single_count_delta ) }
-				/>
-				<Total
-					label={ __( 'Unique hooks', 'updatelens' ) }
-					before={ formatCount( summary.before_unique_hook_count ) }
-					after={ formatCount( summary.after_unique_hook_count ) }
-					delta={ formatCountDelta(
-						summary.unique_hook_count_delta
-					) }
-				/>
-			</Totals>
+			<CronDiffList phase={ cron } />
+			<SignalTotals
+				id="updatelens-cron-totals"
+				label={ __( 'WP-Cron totals', 'updatelens' ) }
+				items={ totals( summary ) }
+			/>
 		</div>
 	);
+}
+
+/**
+ * All WP-Cron events of the site before → after, with deltas.
+ *
+ * @param summary Cron phase summary.
+ */
+function totals(
+	summary: CronDiffSummary
+): Array< [ string, string, string, string ] > {
+	return [
+		[
+			__( 'Events', 'updatelens' ),
+			formatCount( summary.before_event_count ),
+			formatCount( summary.after_event_count ),
+			formatCountDelta( summary.event_count_delta ),
+		],
+		[
+			__( 'Recurring', 'updatelens' ),
+			formatCount( summary.before_recurring_count ),
+			formatCount( summary.after_recurring_count ),
+			formatCountDelta( summary.recurring_count_delta ),
+		],
+		[
+			__( 'One-time', 'updatelens' ),
+			formatCount( summary.before_single_count ),
+			formatCount( summary.after_single_count ),
+			formatCountDelta( summary.single_count_delta ),
+		],
+		[
+			__( 'Unique hooks', 'updatelens' ),
+			formatCount( summary.before_unique_hook_count ),
+			formatCount( summary.after_unique_hook_count ),
+			formatCountDelta( summary.unique_hook_count_delta ),
+		],
+	];
 }
 
 /**
@@ -102,7 +181,7 @@ export function CronSummary( { summary }: { summary: CronDiffSummary } ) {
  * @param props       Props.
  * @param props.phase Available Cron phase with at least one change.
  */
-export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
+function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 	const removed = phase.removed.filter( ( event ) => event.is_recurring );
 	const gone = phase.removed.filter( ( event ) => ! event.is_recurring );
 	const movedOnce = phase.rescheduled.some(
@@ -139,10 +218,12 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 		`${ event.hook }-${ index }`;
 
 	return (
-		<div className="space-y-5">
+		<div className="space-y-6">
 			{ phase.added.length > 0 && (
 				<DiffSection
 					id="updatelens-cron-added"
+					appearance="card"
+					icon={ <ChangeMark kind="added" /> }
 					title={ titles.added }
 					items={ phase.added }
 					renderItem={ ( event, index ) => (
@@ -169,6 +250,8 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 			{ removed.length > 0 && (
 				<DiffSection
 					id="updatelens-cron-removed"
+					appearance="card"
+					icon={ <ChangeMark kind="removed" /> }
 					title={ titles.removed }
 					items={ removed }
 					renderItem={ ( event, index ) => (
@@ -198,6 +281,8 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 			{ gone.length > 0 && (
 				<DiffSection
 					id="updatelens-cron-gone"
+					appearance="card"
+					icon={ <ChangeMark kind="gone" /> }
 					title={ titles.gone }
 					items={ gone }
 					renderItem={ ( event, index ) => (
@@ -227,6 +312,8 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 			{ phase.changed.length > 0 && (
 				<DiffSection
 					id="updatelens-cron-changed"
+					appearance="card"
+					icon={ <ChangeMark kind="changed" /> }
 					title={ titles.changed }
 					items={ phase.changed }
 					renderItem={ ( event, index ) => (
@@ -256,6 +343,8 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 			{ phase.rescheduled.length > 0 && (
 				<DiffSection
 					id="updatelens-cron-rescheduled"
+					appearance="card"
+					icon={ <ChangeMark kind="rescheduled" /> }
 					title={ titles.rescheduled }
 					items={ phase.rescheduled }
 					renderItem={ ( event, index ) => (
@@ -283,28 +372,28 @@ export function CronDiffList( { phase }: { phase: AvailableCronPhase } ) {
 					quiet
 				/>
 			) }
-			<div className="space-y-1 text-xs text-muted-foreground">
-				<p>
+			<div className="space-y-2">
+				<SignalNote>
 					{ __(
 						'WP-Cron event arguments are fingerprinted for matching but are never stored or shown. Events with the same hook may therefore represent different argument sets.',
 						'updatelens'
 					) }
-				</p>
+				</SignalNote>
 				{ gone.length > 0 && (
-					<p>
+					<SignalNote>
 						{ __(
 							'One-time jobs may disappear because they ran or were unscheduled.',
 							'updatelens'
 						) }
-					</p>
+					</SignalNote>
 				) }
 				{ movedOnce && (
-					<p>
+					<SignalNote>
 						{ __(
 							'UpdateLens observes scheduled state. A moved one-time event may represent a reschedule or a new equivalent event after execution.',
 							'updatelens'
 						) }
-					</p>
+					</SignalNote>
 				) }
 			</div>
 		</div>
@@ -354,13 +443,17 @@ function AddedEventRow( { event }: { event: CronEventState } ) {
 	}
 
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-emerald-400 px-4 py-3">
-			<HookName hook={ event.hook } />
-			<p className="text-sm">
-				{ recurrence( event.schedule, event.is_recurring ) }
-			</p>
-			<Details rows={ rows } />
-		</li>
+		<ChangeRow
+			kind="added"
+			name={ event.hook }
+			facts={
+				<StatePill>
+					{ recurrence( event.schedule, event.is_recurring ) }
+				</StatePill>
+			}
+		>
+			<RowDetails rows={ rows } />
+		</ChangeRow>
 	);
 }
 
@@ -372,16 +465,24 @@ function AddedEventRow( { event }: { event: CronEventState } ) {
  */
 function RemovedEventRow( { event }: { event: CronEventState } ) {
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-rose-300 px-4 py-3">
-			<HookName hook={ event.hook } />
-			<p className="text-sm">
-				{ recurrence( event.schedule, event.is_recurring ) }
-			</p>
-			<p className="text-sm text-muted-foreground">
-				{ __( 'Was scheduled for', 'updatelens' ) }{ ' ' }
-				<Time timestamp={ event.timestamp } />
-			</p>
-		</li>
+		<ChangeRow
+			kind="removed"
+			name={ event.hook }
+			facts={
+				<StatePill>
+					{ recurrence( event.schedule, event.is_recurring ) }
+				</StatePill>
+			}
+		>
+			<RowDetails
+				rows={ [
+					[
+						__( 'Was scheduled for', 'updatelens' ),
+						<Time key="t" timestamp={ event.timestamp } />,
+					],
+				] }
+			/>
+		</ChangeRow>
 	);
 }
 
@@ -394,17 +495,25 @@ function RemovedEventRow( { event }: { event: CronEventState } ) {
  */
 function GoneEventRow( { event }: { event: CronEventState } ) {
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-slate-300 px-4 py-3">
-			<HookName hook={ event.hook } />
-			<p className="text-sm">
-				{ __( 'One-time', 'updatelens' ) } ·{ ' ' }
-				{ __( 'No longer scheduled', 'updatelens' ) }
-			</p>
-			<p className="text-sm text-muted-foreground">
-				{ __( 'Previously scheduled for', 'updatelens' ) }{ ' ' }
-				<Time timestamp={ event.timestamp } />
-			</p>
-		</li>
+		<ChangeRow
+			kind="gone"
+			name={ event.hook }
+			facts={
+				<StatePill muted>
+					{ __( 'One-time', 'updatelens' ) } ·{ ' ' }
+					{ __( 'No longer scheduled', 'updatelens' ) }
+				</StatePill>
+			}
+		>
+			<RowDetails
+				rows={ [
+					[
+						__( 'Previously scheduled for', 'updatelens' ),
+						<Time key="t" timestamp={ event.timestamp } />,
+					],
+				] }
+			/>
+		</ChangeRow>
 	);
 }
 
@@ -473,13 +582,17 @@ function ChangedEventRow( { event }: { event: ChangedCronEvent } ) {
 	] );
 
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-sky-300 px-4 py-3">
-			<HookName hook={ event.hook } />
-			<p className="text-sm font-medium">
-				{ __( 'Schedule changed', 'updatelens' ) }
-			</p>
-			<Details rows={ rows } />
-		</li>
+		<ChangeRow
+			kind="changed"
+			name={ event.hook }
+			facts={
+				<span className="font-medium text-slate-800">
+					{ __( 'Schedule changed', 'updatelens' ) }
+				</span>
+			}
+		>
+			<RowDetails boxed rows={ rows } />
+		</ChangeRow>
 	);
 }
 
@@ -494,22 +607,33 @@ function RescheduledEventRow( { event }: { event: RescheduledCronEvent } ) {
 	const delta = formatDurationDelta( event.timestamp_delta );
 
 	return (
-		<li className="space-y-1 border-l-2 border-l-slate-200 px-4 py-3 text-muted-foreground">
-			<HookName hook={ event.hook } />
-			<p className="text-sm">
-				<Time timestamp={ event.before_timestamp } />
-				<To />
-				<Time timestamp={ event.after_timestamp } />
-				{ delta && (
-					<>
-						{ ' ' }
-						<span className="ml-1 tabular-nums">({ delta })</span>
-					</>
-				) }
-			</p>
-			<p className="text-sm">
-				{ recurrence( event.schedule, event.is_recurring ) }
-			</p>
-		</li>
+		<ChangeRow
+			kind="rescheduled"
+			name={ event.hook }
+			quiet
+			facts={
+				<StatePill muted>
+					{ recurrence( event.schedule, event.is_recurring ) }
+				</StatePill>
+			}
+		>
+			<RowDetails
+				rows={ [
+					[
+						__( 'Next run', 'updatelens' ),
+						<span key="t" className="tabular-nums">
+							<Time timestamp={ event.before_timestamp } />
+							<To />
+							<Time timestamp={ event.after_timestamp } />
+							{ delta && (
+								<span className="ml-1.5 text-muted-foreground">
+									({ delta })
+								</span>
+							) }
+						</span>,
+					],
+				] }
+			/>
+		</ChangeRow>
 	);
 }

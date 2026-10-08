@@ -13,6 +13,7 @@ import { ReportOverview } from '../components/ReportOverview';
 import { SignalDetail } from '../components/SignalDetail';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
+import { Icon, type IconName } from '../components/Icon';
 import { useRequest } from '../hooks/use-request';
 import type { AnalysisReport, PhaseKey, Provider } from '../types/api';
 import { reportChangeCounts } from '../utils/changes';
@@ -21,12 +22,16 @@ import {
 	defaultPhase,
 	PHASE_KEYS,
 	phaseLabel,
+	phaseNote,
 	providerLabel,
 	reportNotice,
+	settleOutcomeText,
+	type ReportNotice,
+	type Tone,
 } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
 import type { ReportRoute, Route } from '../utils/route';
-import { TONE_STRIP } from '../utils/tone';
+import { TONE_ICON } from '../utils/tone';
 
 interface ReportPageProps {
 	/** Report, phase and signal from the URL. */
@@ -38,9 +43,6 @@ interface ReportPageProps {
 	/** Move focus to the title once loaded (after in-app navigation). */
 	focusHeading: boolean;
 }
-
-const LINK =
-	'rounded font-medium text-primary no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 /**
  * One report: its overview, or one signal's details (`&signal=`). Both
@@ -65,12 +67,12 @@ export function ReportPage( {
 				<AppLink
 					href={ href( history ) }
 					onNavigate={ () => onNavigate( history ) }
-					className={ cn(
-						LINK,
-						'inline-flex items-center gap-1 text-sm'
-					) }
+					className="group -ml-1 inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-sm font-medium text-slate-600 no-underline transition-colors hover:text-primary focus:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				>
-					<span aria-hidden="true">←</span>
+					<Icon
+						name="arrow-left"
+						className="size-4 transition-transform duration-150 group-hover:-translate-x-0.5"
+					/>
 					{ __( 'Update History', 'updatelens' ) }
 				</AppLink>
 			) }
@@ -138,101 +140,29 @@ function Report( {
 		onNavigate( at( { phase } ), true );
 
 	if ( signal !== null ) {
-		const overview = at( { signal: null } );
-		const history: Route = { view: 'history', page: route.page };
 		return (
-			<div className="space-y-5">
-				<nav aria-label={ __( 'Breadcrumb', 'updatelens' ) }>
-					<ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-						<li className="flex items-center gap-2">
-							<AppLink
-								href={ href( history ) }
-								onNavigate={ () => onNavigate( history ) }
-								className={ LINK }
-							>
-								{ __( 'Update History', 'updatelens' ) }
-							</AppLink>
-							<span
-								aria-hidden="true"
-								className="text-muted-foreground"
-							>
-								›
-							</span>
-						</li>
-						<li className="flex min-w-0 items-center gap-2">
-							<AppLink
-								href={ href( overview ) }
-								onNavigate={ () => onNavigate( overview ) }
-								className={ cn( LINK, 'break-words' ) }
-							>
-								{ pluginName( report.plugin ) }
-							</AppLink>
-							<span
-								aria-hidden="true"
-								className="text-muted-foreground"
-							>
-								›
-							</span>
-						</li>
-						<li
-							aria-current="page"
-							className="text-muted-foreground"
-						>
-							{ providerLabel( signal ) }
-						</li>
-					</ol>
-				</nav>
-				<article
-					aria-labelledby="updatelens-signal-title"
-					className="space-y-6"
-				>
-					<header className="space-y-1.5">
-						<h2
-							id="updatelens-signal-title"
-							ref={ heading }
-							tabIndex={ -1 }
-							className="text-2xl font-semibold outline-none"
-						>
-							{ providerLabel( signal ) }
-						</h2>
-						<p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-							<span className="break-words font-medium text-foreground">
-								{ pluginName( report.plugin ) }
-							</span>
-							<span className="font-mono">
-								<Versions plugin={ report.plugin } />
-							</span>
-							<StatusBadge status={ report.status } />
-						</p>
-					</header>
-					{ selected ? (
-						<PhaseTabs
-							counts={ {
-								during_update: counts.during_update[ signal ],
-								post_update: counts.post_update[ signal ],
-								final: counts.final[ signal ],
-							} }
-							selected={ selected }
-							onSelect={ selectPhase }
-						>
-							<SignalDetail
-								provider={ signal }
-								phase={ selected }
-								data={ report.phases[ selected ] }
-								count={ counts[ selected ][ signal ] }
-								windowSeconds={
-									report.observation_window_seconds
-								}
-							/>
-						</PhaseTabs>
-					) : (
-						<Notice report={ report } onRefresh={ onRefresh } />
-					) }
-					<TechnicalDetails report={ report } signal={ signal } />
-				</article>
-			</div>
+			<RefinedSignalView
+				report={ report }
+				signal={ signal }
+				selected={ selected }
+				counts={ counts }
+				heading={ heading }
+				historyRoute={ { view: 'history', page: route.page } }
+				overviewRoute={ at( { signal: null } ) }
+				href={ href }
+				onNavigate={ onNavigate }
+				onSelectPhase={ selectPhase }
+				onRefresh={ onRefresh }
+			/>
 		);
 	}
+
+	// An open, failed, expired or otherwise incomplete analysis explains the
+	// results (and offers Refresh) before them. A completed one needs no
+	// status section: the header badge says so, and how the observation ended
+	// is in the technical details.
+	const notice = reportNotice( report );
+	const showStatus = notice.open || notice.tone !== 'positive';
 
 	return (
 		<article
@@ -240,6 +170,9 @@ function Report( {
 			className="space-y-6"
 		>
 			<ReportHeader report={ report } heading={ heading } />
+			{ showStatus && (
+				<StatusLine notice={ notice } onRefresh={ onRefresh } />
+			) }
 			{ selected && (
 				<PhaseTabs
 					counts={ {
@@ -251,7 +184,6 @@ function Report( {
 					onSelect={ selectPhase }
 				>
 					<ReportOverview
-						phase={ selected }
 						data={ report.phases[ selected ] }
 						counts={ counts[ selected ] }
 						windowSeconds={ report.observation_window_seconds }
@@ -264,9 +196,160 @@ function Report( {
 					/>
 				</PhaseTabs>
 			) }
-			<Notice report={ report } onRefresh={ onRefresh } />
-			<TechnicalDetails report={ report } signal={ null } />
+			<TechnicalDetails
+				report={ report }
+				signal={ null }
+				phase={ selected }
+			/>
 		</article>
+	);
+}
+
+/**
+ * A signal's page in the redesigned look (Options & autoload, WP-Cron):
+ * breadcrumb, the signal as title with the report's context, the phases
+ * with this signal's counts, and its details.
+ *
+ * @param props               Props.
+ * @param props.report        Report.
+ * @param props.signal        Signal of the page.
+ * @param props.selected      Selected phase, null if no phase is available.
+ * @param props.counts        Change counts of the report.
+ * @param props.heading       Ref of the page title (focus after navigation).
+ * @param props.historyRoute  Route of the History.
+ * @param props.overviewRoute Route of the report's overview.
+ * @param props.href          Link target of a route.
+ * @param props.onNavigate    In-app navigation.
+ * @param props.onSelectPhase Selects a phase (keeps the signal).
+ * @param props.onRefresh     Reloads the report (open analyses).
+ */
+function RefinedSignalView( {
+	report,
+	signal,
+	selected,
+	counts,
+	heading,
+	historyRoute,
+	overviewRoute,
+	href,
+	onNavigate,
+	onSelectPhase,
+	onRefresh,
+}: {
+	report: AnalysisReport;
+	signal: Provider;
+	selected: PhaseKey | null;
+	counts: ReturnType< typeof reportChangeCounts >;
+	heading: RefObject< HTMLHeadingElement >;
+	historyRoute: Route;
+	overviewRoute: Route;
+	href: ( route: Route ) => string;
+	onNavigate: ( route: Route, replace?: boolean ) => void;
+	onSelectPhase: ( phase: PhaseKey ) => void;
+	onRefresh: () => void;
+} ) {
+	const notice = reportNotice( report );
+	const crumb =
+		'rounded font-medium text-primary no-underline hover:underline focus:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+	const separator = (
+		<span aria-hidden="true" className="text-slate-300">
+			›
+		</span>
+	);
+
+	return (
+		<div className="space-y-5">
+			<nav aria-label={ __( 'Breadcrumb', 'updatelens' ) }>
+				<ol className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+					<li className="flex items-center gap-2">
+						<AppLink
+							href={ href( historyRoute ) }
+							onNavigate={ () => onNavigate( historyRoute ) }
+							className={ crumb }
+						>
+							{ __( 'Update History', 'updatelens' ) }
+						</AppLink>
+						{ separator }
+					</li>
+					<li className="flex min-w-0 items-center gap-2">
+						<AppLink
+							href={ href( overviewRoute ) }
+							onNavigate={ () => onNavigate( overviewRoute ) }
+							className={ cn( crumb, 'break-words' ) }
+						>
+							{ pluginName( report.plugin ) }
+						</AppLink>
+						{ separator }
+					</li>
+					<li
+						aria-current="page"
+						className="font-medium text-slate-700"
+					>
+						{ providerLabel( signal ) }
+					</li>
+				</ol>
+			</nav>
+			<article
+				aria-labelledby="updatelens-signal-title"
+				className="space-y-6"
+			>
+				<header className="flex items-start gap-4">
+					<span className="hidden size-12 shrink-0 place-items-center rounded-xl border border-tint-border bg-tint text-primary sm:grid">
+						<Icon name={ signal } className="size-6" />
+					</span>
+					<div className="min-w-0 flex-1">
+						<h2
+							id="updatelens-signal-title"
+							ref={ heading }
+							tabIndex={ -1 }
+							className="text-[1.75rem] font-semibold leading-tight tracking-tight text-slate-900 outline-none"
+						>
+							{ providerLabel( signal ) }
+						</h2>
+						<p className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-muted-foreground">
+							<span className="break-words font-medium text-slate-800">
+								{ pluginName( report.plugin ) }
+							</span>
+							<span className="tabular-nums text-slate-600 [&>[aria-hidden=true]]:mx-0.5 [&>[aria-hidden=true]]:text-slate-400">
+								<Versions plugin={ report.plugin } />
+							</span>
+							<StatusBadge
+								status={ report.status }
+								settleOutcome={ report.settle_outcome }
+								dot
+							/>
+						</p>
+					</div>
+				</header>
+				{ ( notice.open || notice.tone !== 'positive' ) && (
+					<StatusLine notice={ notice } onRefresh={ onRefresh } />
+				) }
+				{ selected && (
+					<PhaseTabs
+						counts={ {
+							during_update: counts.during_update[ signal ],
+							post_update: counts.post_update[ signal ],
+							final: counts.final[ signal ],
+						} }
+						selected={ selected }
+						onSelect={ onSelectPhase }
+					>
+						<SignalDetail
+							provider={ signal }
+							phase={ selected }
+							data={ report.phases[ selected ] }
+							count={ counts[ selected ][ signal ] }
+							windowSeconds={ report.observation_window_seconds }
+						/>
+					</PhaseTabs>
+				) }
+				<TechnicalDetails
+					report={ report }
+					signal={ signal }
+					phase={ selected }
+				/>
+			</article>
+		</div>
 	);
 }
 
@@ -280,74 +363,101 @@ function ReportHeader( {
 	const updated = formatDateTime( report.timestamps.started_at );
 
 	return (
-		<header className="space-y-1">
-			<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-				<h2
-					id="updatelens-report-title"
-					ref={ heading }
-					tabIndex={ -1 }
-					className="break-words text-2xl font-semibold outline-none"
-				>
-					{ pluginName( report.plugin ) }
-				</h2>
-				<StatusBadge status={ report.status } />
+		<header className="flex items-start gap-4">
+			{ /* A generic plugin glyph, never a plugin's own logo. */ }
+			<span className="hidden size-12 shrink-0 place-items-center rounded-xl border border-tint-border bg-tint text-primary sm:grid">
+				<Icon name="plugin" className="size-6" />
+			</span>
+			<div className="min-w-0 flex-1">
+				<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+					<h2
+						id="updatelens-report-title"
+						ref={ heading }
+						tabIndex={ -1 }
+						className="break-words text-[1.75rem] font-semibold leading-tight tracking-tight text-slate-900 outline-none"
+					>
+						{ pluginName( report.plugin ) }
+					</h2>
+					<StatusBadge
+						status={ report.status }
+						settleOutcome={ report.settle_outcome }
+						dot
+					/>
+				</div>
+				<p className="mt-1.5 text-[1.0625rem] font-medium tabular-nums text-slate-800 [&>[aria-hidden=true]]:mx-0.5 [&>[aria-hidden=true]]:text-slate-400">
+					<Versions plugin={ report.plugin } />
+				</p>
+				{ ( updated || report.plugin.file ) && (
+					<p className="mt-1.5 flex flex-col gap-y-0.5 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
+						{ updated && (
+							<span>
+								{ sprintf(
+									/* translators: %s: date and time of the update. */
+									__( 'Updated %s', 'updatelens' ),
+									updated
+								) }
+							</span>
+						) }
+						{ updated && report.plugin.file && (
+							<span
+								aria-hidden="true"
+								className="hidden text-slate-300 sm:inline"
+							>
+								·
+							</span>
+						) }
+						{ report.plugin.file && (
+							<span className="break-all font-mono text-[13px]">
+								{ report.plugin.file }
+							</span>
+						) }
+					</p>
+				) }
 			</div>
-			<p className="font-mono text-base font-medium">
-				<Versions plugin={ report.plugin } />
-			</p>
-			{ updated && (
-				<p className="text-sm text-muted-foreground">
-					{ sprintf(
-						/* translators: %s: date and time of the update. */
-						__( 'Updated %s', 'updatelens' ),
-						updated
-					) }
-				</p>
-			) }
-			{ report.plugin.file && (
-				<p className="break-all font-mono text-xs text-muted-foreground">
-					{ report.plugin.file }
-				</p>
-			) }
 		</header>
 	);
 }
 
 /**
- * The analysis status as a compact strip: secondary to the results.
+ * The analysis status on the overview: one restrained line with an icon,
+ * and Refresh while the analysis is open.
  *
  * @param props           Props.
- * @param props.report    Report.
+ * @param props.notice    Report notice.
  * @param props.onRefresh Reloads the report (open analyses).
  */
-function Notice( {
-	report,
+function StatusLine( {
+	notice,
 	onRefresh,
 }: {
-	report: AnalysisReport;
+	notice: ReportNotice;
 	onRefresh: () => void;
 } ) {
-	const notice = reportNotice( report );
-
 	return (
 		<section
 			aria-label={ __( 'Analysis status', 'updatelens' ) }
-			className={ cn(
-				'flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border-l-4 bg-muted/50 px-3 py-2 text-sm',
-				TONE_STRIP[ notice.tone ]
-			) }
+			className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border bg-card/70 px-4 py-3"
 		>
-			<div className="min-w-0 flex-1 space-y-0.5">
-				<p className="font-medium">{ notice.title }</p>
-				<p className="text-muted-foreground">
-					<span>{ notice.description }</span>
-					{ notice.details.map( ( detail ) => (
-						<span key={ detail }> { detail }</span>
-					) ) }
-				</p>
+			<div className="flex min-w-0 flex-1 basis-64 gap-3">
+				<Icon
+					name={ TONE_ICON_NAME[ notice.tone ] }
+					className={ cn( 'mt-0.5', TONE_ICON[ notice.tone ] ) }
+				/>
+				<div className="min-w-0 space-y-0.5 text-sm">
+					<p className="font-semibold text-slate-900">
+						{ notice.title }
+					</p>
+					<p className="leading-relaxed text-muted-foreground">
+						<span>{ notice.description }</span>
+						{ notice.details.map( ( detail ) => (
+							<span key={ detail }> { detail }</span>
+						) ) }
+					</p>
+				</div>
 			</div>
 			{ notice.open && (
-				<Button variant="outline" size="sm" onClick={ onRefresh }>
+				<Button variant="outline" onClick={ onRefresh }>
+					<Icon name="progress" className="size-4" />
 					{ __( 'Refresh', 'updatelens' ) }
 				</Button>
 			) }
@@ -355,20 +465,33 @@ function Notice( {
 	);
 }
 
+const TONE_ICON_NAME: Record< Tone, IconName > = {
+	neutral: 'info',
+	positive: 'check',
+	progress: 'progress',
+	caution: 'caution',
+	negative: 'failure',
+};
+
 /**
  * Raw codes and timestamps, collapsed. On a signal's details only that
- * signal's phase reasons are listed.
+ * signal's phase reasons are listed. On the overview and the redesigned
+ * signal pages, the selected phase's description and how the observation
+ * ended come first, in plain words.
  *
  * @param props        Props.
  * @param props.report Report.
  * @param props.signal Signal of the detail view; null on the overview.
+ * @param props.phase  Selected phase of the overview, if any.
  */
 function TechnicalDetails( {
 	report,
 	signal,
+	phase = null,
 }: {
 	report: AnalysisReport;
 	signal: Provider | null;
+	phase?: PhaseKey | null;
 } ) {
 	const rows: Array< [ string, string | null, string | null ] > = [
 		[ __( 'Analysis ID', 'updatelens' ), String( report.id ), null ],
@@ -428,28 +551,91 @@ function TechnicalDetails( {
 			: [] ),
 	];
 
+	const visible = rows.filter(
+		( [ , value ] ) => value !== null && value !== ''
+	);
+
+	const outcome = settleOutcomeText(
+		report.settle_outcome,
+		report.observation_window_seconds
+	);
+	const plain: Array< [ string, string ] > = [];
+	if ( phase ) {
+		plain.push( [
+			__( 'Selected phase', 'updatelens' ),
+			sprintf(
+				/* translators: 1: observation phase, e.g. "Net result". 2: what the phase covers. */
+				__( '%1$s: %2$s', 'updatelens' ),
+				phaseLabel( phase ),
+				phaseNote( phase )
+			),
+		] );
+	}
+	if ( outcome ) {
+		plain.push( [ __( 'Observation', 'updatelens' ), outcome ] );
+	}
+
 	return (
-		<details className="group rounded-lg border px-4 py-2 text-sm">
-			<summary className="cursor-pointer select-none rounded font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+		<details className="group rounded-xl border bg-card/70 text-sm">
+			<summary className="flex cursor-pointer select-none list-none items-center gap-2 rounded-xl px-4 py-3 font-medium text-slate-600 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+				<Icon
+					name="chevron-down"
+					className="size-4 -rotate-90 text-slate-400 transition-transform duration-150 group-open:rotate-0"
+				/>
 				{ __( 'Technical details', 'updatelens' ) }
 			</summary>
-			<dl className="mt-2 grid gap-x-6 gap-y-1 pb-1 sm:grid-cols-[auto_minmax(0,1fr)]">
-				{ rows
-					.filter( ( [ , value ] ) => value !== null && value !== '' )
-					.map( ( [ label, value, iso ] ) => (
-						<div key={ label } className="contents">
-							<dt className="text-muted-foreground">{ label }</dt>
-							<dd className="break-all font-mono text-xs leading-5">
-								{ iso ? (
-									<time dateTime={ iso }>{ value }</time>
-								) : (
-									value
-								) }
-							</dd>
-						</div>
-					) ) }
-			</dl>
+			<TechnicalRows
+				plain={ plain }
+				rows={ visible }
+				className="mx-4 gap-x-8 gap-y-1.5 border-t py-3"
+			/>
 		</details>
+	);
+}
+
+/**
+ * Rows of the technical details.
+ *
+ * @param props           Props.
+ * @param props.plain     Label and sentence per row, before the codes.
+ * @param props.rows      Label, display value and ISO timestamp per row.
+ * @param props.className Spacing.
+ */
+function TechnicalRows( {
+	plain = [],
+	rows,
+	className,
+}: {
+	plain?: Array< [ string, string ] >;
+	rows: Array< [ string, string | null, string | null ] >;
+	className: string;
+} ) {
+	return (
+		<dl
+			className={ cn(
+				'grid sm:grid-cols-[auto_minmax(0,1fr)]',
+				className
+			) }
+		>
+			{ plain.map( ( [ label, text ] ) => (
+				<div key={ label } className="contents">
+					<dt className="text-muted-foreground">{ label }</dt>
+					<dd className="leading-5 text-slate-700">{ text }</dd>
+				</div>
+			) ) }
+			{ rows.map( ( [ label, value, iso ] ) => (
+				<div key={ label } className="contents">
+					<dt className="text-muted-foreground">{ label }</dt>
+					<dd className="break-all font-mono text-xs leading-5">
+						{ iso ? (
+							<time dateTime={ iso }>{ value }</time>
+						) : (
+							value
+						) }
+					</dd>
+				</div>
+			) ) }
+		</dl>
 	);
 }
 
@@ -459,12 +645,13 @@ function ReportSkeleton() {
 			<span role="status" className="sr-only">
 				{ __( 'Loading report…', 'updatelens' ) }
 			</span>
-			<Skeleton className="h-6 w-56" />
-			<Skeleton className="h-4 w-32" />
-			<Skeleton className="h-16 w-full" />
-			<div className="grid gap-3 sm:grid-cols-3">
+			<Skeleton className="h-8 w-64" />
+			<Skeleton className="h-4 w-40" />
+			<Skeleton className="h-11 w-full max-w-md rounded-xl" />
+			<Skeleton className="h-44 w-full rounded-xl" />
+			<div className="grid gap-4 md:grid-cols-3">
 				{ [ 0, 1, 2 ].map( ( n ) => (
-					<Skeleton key={ n } className="h-24" />
+					<Skeleton key={ n } className="h-44 rounded-xl" />
 				) ) }
 			</div>
 		</div>

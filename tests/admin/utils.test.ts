@@ -10,6 +10,7 @@ import {
 	formatDuration,
 	formatDurationDelta,
 	formatUnixDateTime,
+	formatUnixRangeEnd,
 	unixToIso,
 } from '@/admin/utils/format';
 import {
@@ -121,6 +122,20 @@ describe( 'labels', () => {
 	] )( 'status %s → %s', ( status, label, tone ) => {
 		expect( statusLabel( status ) ).toBe( label );
 		expect( statusTone( status ) ).toBe( tone );
+	} );
+
+	it.each( [
+		[ 'completed', 'expired', 'Partial report', 'caution' ],
+		[ 'completed', 'admin_shutdown', 'Completed', 'positive' ],
+		[ 'completed', 'next_update', 'Completed', 'positive' ],
+		[ 'awaiting_settle', null, 'Observing', 'progress' ],
+		[ 'failed', 'not_applicable', 'Failed', 'negative' ],
+		// Only a completed analysis can be partial.
+		[ 'failed', 'expired', 'Failed', 'negative' ],
+		[ 'abandoned', 'expired', 'Incomplete', 'neutral' ],
+	] )( 'status %s with outcome %s → %s', ( status, outcome, label, tone ) => {
+		expect( statusLabel( status, outcome ) ).toBe( label );
+		expect( statusTone( status, outcome ) ).toBe( tone );
 	} );
 
 	it( 'names phases observationally', () => {
@@ -440,6 +455,26 @@ describe( 'durations', () => {
 			} )
 		);
 		expect( unixToIso( T ) ).toBe( '2026-10-06T10:00:00Z' );
+	} );
+
+	it( 'shortens a range end to the time only on the same local day', () => {
+		const utc = { locale: 'en-US', timeZone: 'UTC' };
+		// 10:00 → 10:05 the same day: the date is not repeated.
+		expect( formatUnixRangeEnd( T, T + 300, utc ) ).toBe( '10:05 AM' );
+		// Across midnight: the full date stays.
+		expect( formatUnixRangeEnd( T, T + 86400, utc ) ).toBe(
+			formatUnixDateTime( T + 86400, utc )
+		);
+		// The same UTC day can be two local days: 22:00 → 02:00 UTC+3.
+		const istanbul = { locale: 'en-US', timeZone: 'Europe/Istanbul' };
+		const evening = T + 12 * 3600; // 22:00 UTC = 01:00 local, next day.
+		expect( formatUnixRangeEnd( T + 9 * 3600, evening, istanbul ) ).toBe(
+			formatUnixDateTime( evening, istanbul )
+		);
+		// Invalid input falls back to the full formatter.
+		expect( formatUnixRangeEnd( NaN, T, utc ) ).toBe(
+			formatUnixDateTime( T, utc )
+		);
 	} );
 } );
 

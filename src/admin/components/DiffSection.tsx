@@ -18,7 +18,11 @@ export const DEFAULT_VISIBLE_DIFF_ROWS = 10;
  * @param props.renderItem Row for one record (an `li`).
  * @param props.moreLabel  Button text for the hidden rows, e.g. "Show 37 more changed options".
  * @param props.lessLabel  Button text to collapse, e.g. "Show fewer changed options".
- * @param props.quiet      Less emphasis (WP-Cron rescheduling).
+ * @param props.quiet      Less emphasis (rescheduling).
+ * @param props.appearance `card`: the signal pages (a raised list with the
+ *                         button as its footer); `default`: a plain list
+ *                         (the first-run plugin list).
+ * @param props.icon       Decorative mark before the title (`card` only).
  */
 export function DiffSection< T >( {
 	id,
@@ -28,6 +32,8 @@ export function DiffSection< T >( {
 	moreLabel,
 	lessLabel,
 	quiet = false,
+	appearance = 'default',
+	icon,
 }: {
 	id: string;
 	title: string;
@@ -36,6 +42,8 @@ export function DiffSection< T >( {
 	moreLabel: ( hidden: number ) => string;
 	lessLabel: string;
 	quiet?: boolean;
+	appearance?: 'default' | 'card';
+	icon?: ReactNode;
 } ) {
 	const [ expanded, setExpanded ] = useState( false );
 	const listId = useId();
@@ -45,6 +53,50 @@ export function DiffSection< T >( {
 		expanded || hidden <= 0
 			? items
 			: items.slice( 0, DEFAULT_VISIBLE_DIFF_ROWS );
+	const toggle = hidden > 0 && (
+		<Button
+			type="button"
+			variant={ appearance === 'card' ? 'ghost' : 'outline' }
+			size="sm"
+			aria-expanded={ expanded }
+			aria-controls={ listId }
+			onClick={ () => setExpanded( ! expanded ) }
+			className={
+				appearance === 'card'
+					? 'h-11 w-full rounded-none border-t text-sm text-primary hover:bg-tint hover:text-primary focus-visible:ring-inset focus-visible:ring-offset-0'
+					: undefined
+			}
+		>
+			{ expanded ? lessLabel : moreLabel( hidden ) }
+		</Button>
+	);
+
+	if ( appearance === 'card' ) {
+		return (
+			<section aria-labelledby={ headingId } className="space-y-3">
+				<div className="flex items-center gap-2.5">
+					{ icon }
+					<h3
+						id={ headingId }
+						className={ cn(
+							'text-base',
+							quiet
+								? 'font-medium text-slate-600'
+								: 'font-semibold text-slate-900'
+						) }
+					>
+						{ title }
+					</h3>
+				</div>
+				<div className="overflow-hidden rounded-xl border bg-card shadow-surface">
+					<ul id={ listId } className="divide-y">
+						{ visible.map( renderItem ) }
+					</ul>
+					{ toggle }
+				</div>
+			</section>
+		);
+	}
 
 	return (
 		<section aria-labelledby={ headingId } className="space-y-2">
@@ -65,18 +117,7 @@ export function DiffSection< T >( {
 			>
 				{ visible.map( renderItem ) }
 			</ul>
-			{ hidden > 0 && (
-				<Button
-					type="button"
-					variant="outline"
-					size="sm"
-					aria-expanded={ expanded }
-					aria-controls={ listId }
-					onClick={ () => setExpanded( ! expanded ) }
-				>
-					{ expanded ? lessLabel : moreLabel( hidden ) }
-				</Button>
-			) }
+			{ toggle }
 		</section>
 	);
 }

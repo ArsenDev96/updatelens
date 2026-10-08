@@ -27,6 +27,37 @@ interface TabsProps< K extends string > {
 	children: ReactNode;
 }
 
+/*
+ * A segmented control: the selected tab is filled in the accent color;
+ * labels and counts stack on phones.
+ */
+const TAB = {
+	list: 'grid grid-cols-3 gap-1 rounded-xl border bg-card p-1 shadow-surface sm:inline-grid sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none',
+	tab: 'flex min-h-11 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-center text-sm font-medium leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:flex-row sm:gap-2 sm:px-4',
+	selected: 'bg-primary text-primary-foreground shadow-sm',
+	idle: 'text-slate-600 hover:bg-slate-100 hover:text-foreground',
+};
+
+/**
+ * Classes of a tab's indicator.
+ *
+ * @param tone       Indicator tone.
+ * @param isSelected Whether the tab is selected.
+ */
+function indicatorClassName(
+	tone: 'changes' | 'none' | 'unavailable',
+	isSelected: boolean
+): string {
+	return cn(
+		'inline-block whitespace-nowrap rounded-full px-2 text-xs leading-5 tabular-nums',
+		isSelected && 'bg-white/20 font-semibold',
+		! isSelected &&
+			( tone === 'changes'
+				? 'bg-tint-strong font-semibold text-tint-foreground'
+				: 'font-normal text-muted-foreground' )
+	);
+}
+
 /**
  * Tabs (WAI-ARIA tabs pattern, automatic activation): arrow keys, Home and
  * End move between tabs; only the selected tab is in the tab order.
@@ -72,12 +103,12 @@ export function Tabs< K extends string >( {
 	};
 
 	return (
-		<div className="space-y-5">
+		<div className="space-y-6">
 			<div
 				role="tablist"
 				aria-label={ label }
 				onKeyDown={ onKeyDown }
-				className="inline-flex max-w-full flex-wrap gap-1 rounded-lg border bg-muted/60 p-1"
+				className={ TAB.list }
 			>
 				{ items.map( ( item ) => {
 					const isSelected = item.key === selected;
@@ -95,10 +126,8 @@ export function Tabs< K extends string >( {
 							tabIndex={ isSelected ? 0 : -1 }
 							onClick={ () => onSelect( item.key ) }
 							className={ cn(
-								'rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-								isSelected
-									? 'bg-background text-foreground shadow-sm ring-1 ring-border'
-									: 'text-muted-foreground hover:text-foreground'
+								TAB.tab,
+								isSelected ? TAB.selected : TAB.idle
 							) }
 						>
 							{ item.label }
@@ -107,11 +136,9 @@ export function Tabs< K extends string >( {
 									{ /* The accessible name is the visible text: "Net result, 4 changes". */ }
 									<span className="sr-only">,</span>{ ' ' }
 									<span
-										className={ cn(
-											'ml-0.5 inline-block text-xs tabular-nums',
-											item.indicator.tone === 'changes'
-												? 'rounded-full bg-sky-100 px-1.5 font-semibold leading-5 text-sky-900'
-												: 'font-normal text-muted-foreground'
+										className={ indicatorClassName(
+											item.indicator.tone,
+											isSelected
 										) }
 									>
 										{ item.indicator.text }

@@ -164,7 +164,10 @@ function HistoryRow( {
 					<span className="break-words font-medium">
 						{ pluginName( item.plugin ) }
 					</span>
-					<StatusBadge status={ item.status } />
+					<StatusBadge
+						status={ item.status }
+						settleOutcome={ item.settle_outcome }
+					/>
 				</div>
 				<p className="font-mono text-xs text-muted-foreground">
 					<Versions plugin={ item.plugin } />

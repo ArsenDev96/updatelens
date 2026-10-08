@@ -248,6 +248,41 @@ export function formatUnixDateTime(
 }
 
 /**
+ * The end of a time range (e.g. a rescheduled run) after its start: only the
+ * local time ("5:51 PM") when both fall on the same local calendar day, so
+ * the date is not repeated; else the full date and time. The day is
+ * compared in the same time zone the times are shown in.
+ *
+ * @param start   Unix timestamp of the start.
+ * @param end     Unix timestamp of the end.
+ * @param options Locale and time zone (default: the browser's).
+ */
+export function formatUnixRangeEnd(
+	start: number,
+	end: number,
+	options: { locale?: string; timeZone?: string } = {}
+): string | null {
+	const from = new Date( start * 1000 );
+	const to = new Date( end * 1000 );
+	if ( Number.isNaN( from.getTime() ) || Number.isNaN( to.getTime() ) ) {
+		return formatUnixDateTime( end, options );
+	}
+	const day = new Intl.DateTimeFormat( options.locale, {
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		timeZone: options.timeZone,
+	} );
+	if ( day.format( from ) !== day.format( to ) ) {
+		return formatUnixDateTime( end, options );
+	}
+	return new Intl.DateTimeFormat( options.locale, {
+		timeStyle: 'short',
+		timeZone: options.timeZone,
+	} ).format( to );
+}
+
+/**
  * Unix timestamp as the ISO string for a `<time dateTime>` attribute.
  *
  * @param seconds Unix timestamp.

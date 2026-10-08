@@ -26,7 +26,34 @@ import { formatCount, formatDuration } from './format';
 
 export type Tone = 'neutral' | 'positive' | 'progress' | 'caution' | 'negative';
 
-export function statusLabel( status: AnalysisStatus | string ): string {
+/**
+ * Whether the update succeeded but the post-update state was never captured
+ * (the API's completed analysis with an expired observation window).
+ *
+ * @param status        Analysis status.
+ * @param settleOutcome Settle outcome.
+ */
+function isPartial(
+	status: AnalysisStatus | string,
+	settleOutcome: SettleOutcome | string | null
+): boolean {
+	return status === 'completed' && settleOutcome === 'expired';
+}
+
+/**
+ * Badge text of an analysis.
+ *
+ * @param status        Analysis status.
+ * @param settleOutcome Settle outcome; an expired observation of a completed
+ *                      analysis is a "Partial report".
+ */
+export function statusLabel(
+	status: AnalysisStatus | string,
+	settleOutcome: SettleOutcome | string | null = null
+): string {
+	if ( isPartial( status, settleOutcome ) ) {
+		return __( 'Partial report', 'updatelens' );
+	}
 	switch ( status ) {
 		case 'captured':
 			return __( 'Updating', 'updatelens' );
@@ -45,7 +72,13 @@ export function statusLabel( status: AnalysisStatus | string ): string {
 	}
 }
 
-export function statusTone( status: AnalysisStatus | string ): Tone {
+export function statusTone(
+	status: AnalysisStatus | string,
+	settleOutcome: SettleOutcome | string | null = null
+): Tone {
+	if ( isPartial( status, settleOutcome ) ) {
+		return 'caution';
+	}
 	switch ( status ) {
 		case 'completed':
 			return 'positive';

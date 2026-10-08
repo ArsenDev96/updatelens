@@ -1,27 +1,18 @@
 import { __ } from '@wordpress/i18n';
 import type { ReactNode } from 'react';
 
-import { cn } from '@/lib/utils';
-
 import type { ChangedOption, OptionState } from '../types/api';
 import {
 	formatBytes,
 	formatBytesDelta,
 	formatBytesPair,
 } from '../utils/format';
+import { ChangeRow, RowDetails, StatePill } from './SignalParts';
 
 /*
  * Option rows. They show names, sizes and autoload state only: option values
  * are never stored by UpdateLens, so there are none to show.
  */
-
-function OptionName( { name }: { name: string } ) {
-	return (
-		<code className="m-0 block select-text break-all bg-transparent p-0 font-mono text-sm font-medium text-foreground">
-			{ name }
-		</code>
-	);
-}
 
 function onOff( autoloaded: boolean ) {
 	return autoloaded ? __( 'On', 'updatelens' ) : __( 'Off', 'updatelens' );
@@ -62,27 +53,27 @@ export function OptionStateRow( {
 	kind: 'added' | 'removed';
 } ) {
 	return (
-		<li
-			className={ cn(
-				'grid gap-1 border-l-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
-				kind === 'added' ? 'border-l-emerald-400' : 'border-l-rose-300'
-			) }
-		>
-			<OptionName name={ option.name } />
-			<div className="flex flex-wrap items-baseline gap-x-3 text-sm text-muted-foreground sm:justify-end">
-				<span className="tabular-nums">
-					{ formatBytes( option.size ) }
-				</span>
-				<span>
-					{ __( 'Autoload:', 'updatelens' ) }{ ' ' }
-					{ onOff( option.is_autoloaded ) }
-				</span>
-				{ ! autoloadRawIsRedundant(
-					option.autoload,
-					option.is_autoloaded
-				) && <Raw>({ option.autoload })</Raw> }
-			</div>
-		</li>
+		<ChangeRow
+			kind={ kind }
+			name={ option.name }
+			facts={
+				<>
+					<span className="font-medium tabular-nums text-slate-700">
+						{ formatBytes( option.size ) }
+					</span>
+					<StatePill muted={ ! option.is_autoloaded }>
+						<span>
+							{ __( 'Autoload:', 'updatelens' ) }{ ' ' }
+							{ onOff( option.is_autoloaded ) }
+						</span>
+						{ ! autoloadRawIsRedundant(
+							option.autoload,
+							option.is_autoloaded
+						) && <Raw>({ option.autoload })</Raw> }
+					</StatePill>
+				</>
+			}
+		/>
 	);
 }
 
@@ -97,8 +88,28 @@ function To() {
 }
 
 /**
+ * What changed about an option, most significant first: its value, else
+ * its stored autoload setting, else only its effective autoload behavior.
+ *
+ * @param option Changed option.
+ */
+function changeText( option: ChangedOption ): string {
+	if ( option.value_changed ) {
+		return __( 'Value changed', 'updatelens' );
+	}
+	if ( option.autoload_value_changed ) {
+		return __( 'Autoload setting changed', 'updatelens' );
+	}
+	if ( option.autoload_behavior_changed ) {
+		return __( 'Autoload behavior changed', 'updatelens' );
+	}
+	return __( 'Value unchanged', 'updatelens' );
+}
+
+/**
  * Option present before and after whose value, size or autoload state
- * differs. One line for the value; autoload details only if they changed.
+ * differs. One line for what changed; autoload details only if they
+ * changed.
  *
  * @param props        Props.
  * @param props.option Changed option.
@@ -112,86 +123,83 @@ export function ChangedOptionRow( { option }: { option: ChangedOption } ) {
 		option.autoload_value_changed || option.autoload_behavior_changed;
 
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-sky-300 px-4 py-3">
-			<OptionName name={ option.name } />
-			<p className="flex flex-wrap items-baseline gap-x-2 text-sm">
-				<span
-					className={
-						option.value_changed
-							? 'font-medium'
-							: 'text-muted-foreground'
-					}
-				>
-					{ option.value_changed
-						? __( 'Value changed', 'updatelens' )
-						: __( 'Value unchanged', 'updatelens' ) }
-				</span>
-				<span aria-hidden="true" className="text-muted-foreground">
-					·
-				</span>
-				{ option.size_delta === 0 ? (
-					<span className="tabular-nums text-muted-foreground">
-						{ after }
+		<ChangeRow
+			kind="changed"
+			name={ option.name }
+			facts={
+				<p className="flex flex-wrap items-baseline gap-x-2 sm:justify-end">
+					<span className="font-medium text-slate-800">
+						{ changeText( option ) }
 					</span>
-				) : (
-					<span className="tabular-nums">
-						<span className="text-muted-foreground">
-							{ before }
-							<To />
+					<span aria-hidden="true" className="text-slate-300">
+						·
+					</span>
+					{ option.size_delta === 0 ? (
+						<span className="tabular-nums text-muted-foreground">
 							{ after }
-						</span>{ ' ' }
-						<span className="font-medium">
-							({ formatBytesDelta( option.size_delta ) })
 						</span>
-					</span>
-				) }
-			</p>
-			{ autoloadChanged && (
-				<dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_minmax(0,1fr)]">
-					<dt className="text-muted-foreground">
-						{ __( 'Autoload setting', 'updatelens' ) }
-					</dt>
-					<dd>
-						{ option.autoload_value_changed ? (
-							<Raw>
-								{ option.before_autoload }
+					) : (
+						<span className="tabular-nums">
+							<span className="text-muted-foreground">
+								{ before }
 								<To />
-								{ option.after_autoload }
-							</Raw>
-						) : (
-							<>
-								<Raw>{ option.after_autoload }</Raw>{ ' ' }
+								{ after }
+							</span>{ ' ' }
+							<span className="font-medium text-slate-800">
+								({ formatBytesDelta( option.size_delta ) })
+							</span>
+						</span>
+					) }
+				</p>
+			}
+		>
+			{ autoloadChanged && (
+				<RowDetails
+					boxed
+					rows={ [
+						[
+							__( 'Autoload setting', 'updatelens' ),
+							option.autoload_value_changed ? (
+								<Raw>
+									{ option.before_autoload }
+									<To />
+									{ option.after_autoload }
+								</Raw>
+							) : (
+								<>
+									<Raw>{ option.after_autoload }</Raw>{ ' ' }
+									<span className="text-muted-foreground">
+										{ __( '(unchanged)', 'updatelens' ) }
+									</span>
+								</>
+							),
+						],
+						[
+							__( 'Effective behavior', 'updatelens' ),
+							option.autoload_behavior_changed ? (
+								<span className="inline-flex flex-wrap items-baseline gap-x-2 rounded bg-amber-50 px-1.5 font-medium text-amber-900 ring-1 ring-amber-200">
+									<span>
+										{ onOff( option.before_is_autoloaded ) }
+										<To />
+										{ onOff( option.after_is_autoloaded ) }
+									</span>
+									<span className="font-normal">
+										{ __(
+											'(behavior changed)',
+											'updatelens'
+										) }
+									</span>
+								</span>
+							) : (
 								<span className="text-muted-foreground">
+									{ onOff( option.after_is_autoloaded ) }{ ' ' }
 									{ __( '(unchanged)', 'updatelens' ) }
 								</span>
-							</>
-						) }
-					</dd>
-
-					<dt className="text-muted-foreground">
-						{ __( 'Autoload behavior', 'updatelens' ) }
-					</dt>
-					<dd>
-						{ option.autoload_behavior_changed ? (
-							<span className="inline-flex flex-wrap items-baseline gap-x-2 rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-900 ring-1 ring-amber-200">
-								<span>
-									{ onOff( option.before_is_autoloaded ) }
-									<To />
-									{ onOff( option.after_is_autoloaded ) }
-								</span>
-								<span className="font-normal">
-									{ __( '(behavior changed)', 'updatelens' ) }
-								</span>
-							</span>
-						) : (
-							<span className="text-muted-foreground">
-								{ onOff( option.after_is_autoloaded ) }{ ' ' }
-								{ __( '(no effective change)', 'updatelens' ) }
-							</span>
-						) }
-					</dd>
-				</dl>
+							),
+						],
+					] }
+				/>
 			) }
-		</li>
+		</ChangeRow>
 	);
 }

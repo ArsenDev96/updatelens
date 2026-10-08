@@ -4,6 +4,7 @@ import type { AvailableOptionsPhase } from '../types/api';
 import { formatCount } from '../utils/format';
 import { DiffSection } from './DiffSection';
 import { ChangedOptionRow, OptionStateRow } from './OptionRows';
+import { ChangeMark, SignalNote } from './SignalParts';
 
 /**
  * Added, removed and changed options of one phase with changes. Empty lists
@@ -32,10 +33,12 @@ export function OptionDiffList( { phase }: { phase: AvailableOptionsPhase } ) {
 	};
 
 	return (
-		<div className="space-y-5">
+		<div className="space-y-6">
 			{ phase.added.length > 0 && (
 				<DiffSection
 					id="updatelens-options-added"
+					appearance="card"
+					icon={ <ChangeMark kind="added" /> }
 					title={ titles.added }
 					items={ phase.added }
 					renderItem={ ( option ) => (
@@ -63,6 +66,8 @@ export function OptionDiffList( { phase }: { phase: AvailableOptionsPhase } ) {
 			{ phase.removed.length > 0 && (
 				<DiffSection
 					id="updatelens-options-removed"
+					appearance="card"
+					icon={ <ChangeMark kind="removed" /> }
 					title={ titles.removed }
 					items={ phase.removed }
 					renderItem={ ( option ) => (
@@ -93,6 +98,8 @@ export function OptionDiffList( { phase }: { phase: AvailableOptionsPhase } ) {
 			{ phase.changed.length > 0 && (
 				<DiffSection
 					id="updatelens-options-changed"
+					appearance="card"
+					icon={ <ChangeMark kind="changed" /> }
 					title={ titles.changed }
 					items={ phase.changed }
 					renderItem={ ( option ) => (
@@ -119,12 +126,12 @@ export function OptionDiffList( { phase }: { phase: AvailableOptionsPhase } ) {
 					) }
 				/>
 			) }
-			<p className="text-xs text-muted-foreground">
+			<SignalNote>
 				{ __(
 					'UpdateLens detects value changes without storing the option values themselves.',
 					'updatelens'
 				) }
-			</p>
+			</SignalNote>
 		</div>
 	);
 }

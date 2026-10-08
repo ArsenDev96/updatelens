@@ -11,11 +11,20 @@ export const TONE_BADGE: Record< Tone, string > = {
 	negative: 'border-rose-200 bg-rose-50 text-rose-800',
 };
 
-/** Left accent of the compact report status strip; the surface stays neutral. */
-export const TONE_STRIP: Record< Tone, string > = {
-	neutral: 'border-l-slate-400',
-	positive: 'border-l-emerald-500',
-	progress: 'border-l-sky-500',
-	caution: 'border-l-amber-500',
-	negative: 'border-l-rose-500',
+/** Dot of a status badge. */
+export const TONE_DOT: Record< Tone, string > = {
+	neutral: 'bg-slate-400',
+	positive: 'bg-emerald-500',
+	progress: 'bg-sky-500',
+	caution: 'bg-amber-500',
+	negative: 'bg-rose-500',
+};
+
+/** Icon color of the overview's status line. */
+export const TONE_ICON: Record< Tone, string > = {
+	neutral: 'text-slate-500',
+	positive: 'text-emerald-600',
+	progress: 'text-sky-600',
+	caution: 'text-amber-600',
+	negative: 'text-rose-600',
 };

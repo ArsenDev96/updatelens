@@ -146,7 +146,7 @@ describe( 'Action Scheduler in reports', () => {
 				'5 changes',
 			] );
 			expect( cardTexts()[ 2 ] ).toMatch(
-				/^Action Scheduler5 changes Added \d+/
+				/^Action SchedulerPending and in-progress background actions\.5 changes Added \d+/
 			);
 			// Net result: 6 options + 5 WP-Cron + 5 Action Scheduler.
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
@@ -211,7 +211,9 @@ describe( 'Action Scheduler in reports', () => {
 				'After update, 0 changes',
 				'Net result, 5 changes',
 			] );
-			expect( signalPanel() ).toHaveTextContent( '5 observed changes' );
+			expect( signalPanel() ).toHaveTextContent(
+				'5 observed Action Scheduler changes'
+			);
 			await user.click( tab( /After update/ ) );
 			expect( signalPanel() ).toHaveTextContent(
 				'No Action Scheduler changes observed'
@@ -505,16 +507,18 @@ describe( 'Action Scheduler in reports', () => {
 			await renderReport( WOOCOMMERCE );
 			await openActionScheduler( /After update/ );
 
-			expect(
-				within( signalPanel() )
-					.getAllByRole( 'term' )
-					.slice( 0, 8 )
-					.map( ( t ) => t.textContent )
-			).toEqual( [
+			// The counts first; the active-action totals are quiet statistics
+			// after the lists.
+			const terms = within( signalPanel() )
+				.getAllByRole( 'term' )
+				.map( ( t ) => t.textContent );
+			expect( terms.slice( 0, 4 ) ).toEqual( [
 				'Added',
 				'No longer active',
 				'Changed',
 				'Rescheduled',
+			] );
+			expect( terms.slice( -4 ) ).toEqual( [
 				'Active actions',
 				'Recurring',
 				'One-time',
@@ -535,6 +539,7 @@ describe( 'Action Scheduler in reports', () => {
 				'No longer active (1)',
 				'Changed (1)',
 				'Rescheduled (2)',
+				'Site totals',
 			] );
 		} );
 
@@ -606,9 +611,28 @@ describe( 'Action Scheduler in reports', () => {
 			expect( moved[ 1 ] ).toHaveTextContent( 'fetch_patterns' );
 			expect( moved[ 1 ] ).toHaveTextContent( '(+1 day)' );
 			expect( moved[ 1 ] ).toHaveTextContent( 'Interval · Every 1 day' );
+			// A same-day move does not repeat the date; a move to another day
+			// does. Both times keep their full value for assistive technology.
+			const [ from, to ] = Array.from(
+				moved[ 0 ].querySelectorAll( 'time' )
+			);
+			expect( from.textContent ).toMatch( /2026/ );
+			expect( to.textContent ).not.toMatch( /2026/ );
+			expect( to.getAttribute( 'datetime' ) ).toMatch(
+				/^2026-\d\d-\d\dT[\d:]+Z$/
+			);
 			expect(
-				within( section( 'Rescheduled (2)' ) ).getByRole( 'heading' )
-			).toHaveClass( 'text-muted-foreground' );
+				moved[ 1 ].querySelectorAll( 'time' )[ 1 ].textContent
+			).toMatch( /2026/ );
+			// Quieter than the other lists, never a warning.
+			const quiet = within( section( 'Rescheduled (2)' ) ).getByRole(
+				'heading'
+			);
+			expect( quiet ).toHaveClass( 'font-medium', 'text-slate-600' );
+			expect( quiet ).not.toHaveClass( 'font-semibold' );
+			expect(
+				within( section( 'Added (1)' ) ).getByRole( 'heading' )
+			).toHaveClass( 'font-semibold' );
 			expect( document.body ).not.toHaveTextContent(
 				/warning|problem|danger|caused/i
 			);
@@ -727,7 +751,7 @@ describe( 'Action Scheduler in reports', () => {
 			const user = await openActionScheduler( /Net result/ );
 
 			expect( signalPanel() ).toHaveTextContent(
-				`${ num( 2000 ) } observed changes`
+				`${ num( 2000 ) } observed Action Scheduler changes`
 			);
 			expect(
 				within( signalPanel() ).getAllByRole( 'listitem' )

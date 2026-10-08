@@ -44,6 +44,18 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))',
 				},
+				tint: {
+					DEFAULT: 'hsl(var(--tint))',
+					strong: 'hsl(var(--tint-strong))',
+					border: 'hsl(var(--tint-border))',
+					foreground: 'hsl(var(--tint-foreground))',
+				},
+			},
+			boxShadow: {
+				// Restrained elevation of report surfaces, and on hover.
+				surface:
+					'0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px 0 rgb(15 23 42 / 0.05)',
+				raised: '0 8px 20px -6px rgb(15 23 42 / 0.12), 0 2px 4px -2px rgb(15 23 42 / 0.06)',
 			},
 			borderRadius: {
 				lg: 'var(--radius)',

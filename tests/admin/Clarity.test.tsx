@@ -98,10 +98,11 @@ describe( 'report clarity', () => {
 				'WP-Cron, 5 changes',
 				'Action Scheduler, not available',
 			] );
-			// The visible indicator is compact: just the number.
+			// Phase indicators name the changes; signal indicators are just the number.
 			expect( tab( /^Net result/ ) ).toHaveTextContent(
-				/^Net result11$/
+				/^Net result11 changes$/
 			);
+			expect( tab( /^Options/ ) ).toHaveTextContent( /^Options6$/ );
 		} );
 
 		it( 'shows option-only changes (Elementor style)', async () => {
@@ -118,7 +119,7 @@ describe( 'report clarity', () => {
 				'Action Scheduler, not available',
 			] );
 			expect( tab( /^During update/ ) ).toHaveTextContent(
-				/^During update0$/
+				/^During update0 changes$/
 			);
 		} );
 

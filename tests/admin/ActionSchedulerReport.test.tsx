@@ -692,6 +692,8 @@ describe( 'Action Scheduler in reports', () => {
 			);
 		} );
 
+		// Renders and expands 1000 rows in jsdom: slower than the default
+		// 5 s timeout when the whole suite runs in parallel.
 		it( `collapses long lists after ${ DEFAULT_VISIBLE_DIFF_ROWS } rows`, async () => {
 			await renderReport( largeQueue( 1000 ) );
 			const user = await openActionScheduler( /Net result/ );
@@ -727,7 +729,7 @@ describe( 'Action Scheduler in reports', () => {
 					}
 				)
 			).toBeInTheDocument();
-		} );
+		}, 20000 );
 
 		it( 'uses UpdateLens translations for duration units', async () => {
 			setLocaleData(

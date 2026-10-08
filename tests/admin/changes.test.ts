@@ -1,3 +1,4 @@
+import { setLocaleData } from '@wordpress/i18n';
 import { describe, expect, it } from 'vitest';
 
 import type { HistoryPhase, ReportPhase } from '@/admin/types/api';
@@ -10,6 +11,7 @@ import {
 } from '@/admin/utils/changes';
 import { formatBytesPair } from '@/admin/utils/format';
 import {
+	changeCountNoun,
 	changeCountText,
 	changeIndicator,
 	defaultPhase,
@@ -202,6 +204,47 @@ describe( 'change wording', () => {
 			tone: 'unavailable',
 			accessibleName: 'WP-Cron, not available',
 		} );
+	} );
+
+	it( 'names the changes in phase indicators', () => {
+		expect( changeCountNoun( 0 ) ).toBe( '0 changes' );
+		expect( changeCountNoun( 1 ) ).toBe( '1 change' );
+		expect( changeCountNoun( 2 ) ).toBe( '2 changes' );
+		expect( changeIndicator( 'During update', 1, true ) ).toEqual( {
+			text: '1 change',
+			tone: 'changes',
+			accessibleName: 'During update, 1 change',
+		} );
+		expect( changeIndicator( 'After update', 0, true ) ).toEqual( {
+			text: '0 changes',
+			tone: 'none',
+			accessibleName: 'After update, no changes',
+		} );
+		expect( changeIndicator( 'Net result', null, true ) ).toEqual( {
+			text: 'Not available',
+			tone: 'unavailable',
+			accessibleName: 'Net result, not available',
+		} );
+	} );
+
+	it( 'takes plural forms from WordPress translations', () => {
+		// Three plural forms: the rule comes from the locale, not from English.
+		setLocaleData(
+			{
+				'': {
+					domain: 'updatelens',
+					plural_forms:
+						'nplurals=3; plural=(n==1 ? 0 : n>=2 && n<=4 ? 1 : 2);',
+				},
+				'%s change': [ '%s xone', '%s xfew', '%s xmany' ],
+			},
+			'updatelens'
+		);
+
+		expect( changeCountNoun( 0 ) ).toBe( '0 xmany' );
+		expect( changeCountNoun( 1 ) ).toBe( '1 xone' );
+		expect( changeCountNoun( 2 ) ).toBe( '2 xfew' );
+		expect( changeCountNoun( 5 ) ).toBe( '5 xmany' );
 	} );
 } );
 

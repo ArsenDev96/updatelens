@@ -14,7 +14,7 @@ import { Tabs } from './Tabs';
 
 /**
  * Tabs for the three phases, each with its change count across the
- * available signals. A phase is "not available" only if none of its
+ * available signals ("2 changes"). A phase is "not available" only if none of its
  * signals is.
  *
  * @param props          Props.
@@ -40,7 +40,8 @@ export function PhaseTabs( {
 				const label = phaseLabel( phase );
 				const { text, tone, accessibleName } = changeIndicator(
 					label,
-					counts[ phase ].total
+					counts[ phase ].total,
+					true
 				);
 				return {
 					key: phase,

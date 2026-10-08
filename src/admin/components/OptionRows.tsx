@@ -27,6 +27,18 @@ function onOff( autoloaded: boolean ) {
 	return autoloaded ? __( 'On', 'updatelens' ) : __( 'Off', 'updatelens' );
 }
 
+/**
+ * Whether the stored autoload value only repeats the On/Off label: the
+ * explicit values (`on`/`yes`, `off`/`no`). Others (`auto`, `auto-on`,
+ * `auto-off`) say WordPress decided, so they stay visible.
+ *
+ * @param raw        Stored autoload value.
+ * @param autoloaded Effective autoload behavior.
+ */
+function autoloadRawIsRedundant( raw: string, autoloaded: boolean ) {
+	return ( autoloaded ? [ 'on', 'yes' ] : [ 'off', 'no' ] ).includes( raw );
+}
+
 function Raw( { children }: { children: ReactNode } ) {
 	return (
 		<span className="font-mono text-xs text-muted-foreground">
@@ -65,7 +77,10 @@ export function OptionStateRow( {
 					{ __( 'Autoload:', 'updatelens' ) }{ ' ' }
 					{ onOff( option.is_autoloaded ) }
 				</span>
-				<Raw>({ option.autoload })</Raw>
+				{ ! autoloadRawIsRedundant(
+					option.autoload,
+					option.is_autoloaded
+				) && <Raw>({ option.autoload })</Raw> }
 			</div>
 		</li>
 	);

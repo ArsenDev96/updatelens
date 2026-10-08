@@ -89,7 +89,7 @@ export function phaseNote( phase: PhaseKey ): string {
 			);
 		case 'post_update':
 			return __(
-				'Changes observed during the first eligible admin lifecycle after the update. Other site activity may also contribute.',
+				'Changes observed shortly after the update, until the next admin page loaded. Other site activity may also contribute.',
 				'updatelens'
 			);
 		case 'final':
@@ -166,6 +166,19 @@ export function defaultProvider(
 }
 
 /**
+ * "0 changes", "1 change", "4 changes", with WordPress plural forms.
+ *
+ * @param count Number of observed records.
+ */
+export function changeCountNoun( count: number ): string {
+	return sprintf(
+		/* translators: %s: number of observed changes. */
+		_n( '%s change', '%s changes', count, 'updatelens' ),
+		formatCount( count )
+	);
+}
+
+/**
  * "1 change", "4 changes" or "no changes", for use inside a phrase
  * (e.g. an accessible tab name).
  *
@@ -174,23 +187,21 @@ export function defaultProvider(
 export function changeCountText( count: number ): string {
 	return count === 0
 		? __( 'no changes', 'updatelens' )
-		: sprintf(
-				/* translators: %s: number of observed changes. */
-				_n( '%s change', '%s changes', count, 'updatelens' ),
-				formatCount( count )
-			);
+		: changeCountNoun( count );
 }
 
 /**
  * Compact indicator after a tab label, and the tab's accessible name
  * ("Net result, 4 changes"). Null counts mean the phase or signal is unavailable.
  *
- * @param label Visible tab label.
- * @param count Change count, or null if unavailable.
+ * @param label    Visible tab label.
+ * @param count    Change count, or null if unavailable.
+ * @param withNoun Show "4 changes" instead of the bare number "4".
  */
 export function changeIndicator(
 	label: string,
-	count: number | null
+	count: number | null,
+	withNoun = false
 ): {
 	text: string;
 	tone: 'changes' | 'none' | 'unavailable';
@@ -204,7 +215,9 @@ export function changeIndicator(
 		text:
 			count === null
 				? __( 'Not available', 'updatelens' )
-				: formatCount( count ),
+				: withNoun
+					? changeCountNoun( count )
+					: formatCount( count ),
 		tone: count === null ? 'unavailable' : count > 0 ? 'changes' : 'none',
 		accessibleName: sprintf(
 			/* translators: 1: tab label, e.g. "Net result". 2: its status, e.g. "4 changes" or "not available". */
@@ -839,7 +852,7 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 				tone: 'positive',
 				title: __( 'Analysis completed', 'updatelens' ),
 				description: __(
-					'UpdateLens observed this update during the update request and the first eligible post-update admin lifecycle.',
+					'UpdateLens captured changes during the update and shortly afterward.',
 					'updatelens'
 				),
 				details: outcome ? [ outcome ] : [],

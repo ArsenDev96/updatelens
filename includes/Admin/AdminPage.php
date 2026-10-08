@@ -29,6 +29,12 @@ final class AdminPage {
 	const MENU_ICON = 'dashicons-visibility';
 
 	/**
+	 * Menu position: directly below Plugins (65), above Users (70). WordPress
+	 * sorts float positions between them and resolves collisions itself.
+	 */
+	const MENU_POSITION = 65.5;
+
+	/**
 	 * DOM id the React app mounts into. Must match src/admin/main.tsx and the
 	 * CSS scope in postcss.config.cjs.
 	 */
@@ -70,7 +76,8 @@ final class AdminPage {
 			Plugin::CAPABILITY,
 			self::SLUG,
 			array( $this, 'render' ),
-			self::MENU_ICON
+			self::MENU_ICON,
+			self::MENU_POSITION
 		);
 
 		// Recreate the analyses table if it went missing, and create the

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ReportPage } from '@/admin/pages/ReportPage';
-import type { AnalysisReport } from '@/admin/types/api';
+import type { AnalysisReport, AvailableOptionsPhase } from '@/admin/types/api';
 
 import {
 	AWAITING,
@@ -77,9 +77,15 @@ describe( 'ReportPage', () => {
 		expect( screen.getByText( 'Analysis completed' ) ).toBeInTheDocument();
 		expect(
 			screen.getByText(
+				'UpdateLens captured changes during the update and shortly afterward.'
+			)
+		).toBeInTheDocument();
+		expect(
+			screen.getByText(
 				'Observation completed on the next admin request.'
 			)
 		).toBeInTheDocument();
+		expect( document.body ).not.toHaveTextContent( /lifecycle|eligible/ );
 		expect( screen.getByText( /^Updated / ) ).toBeInTheDocument();
 
 		expect( tab( /Net result/ ) ).toHaveAttribute(
@@ -90,6 +96,17 @@ describe( 'ReportPage', () => {
 			'aria-selected',
 			'false'
 		);
+		// Phase tabs name the changes; signal tabs stay compact.
+		expect(
+			screen.getAllByRole( 'tab' ).map( ( item ) => item.textContent )
+		).toEqual( [
+			'During update2 changes',
+			'After update11 changes',
+			'Net result11 changes',
+			'Options6',
+			'WP-Cron5',
+			'Action SchedulerNot available',
+		] );
 		expect( panel() ).toHaveTextContent(
 			'Net difference between the state before the update and the end of the observation window.'
 		);
@@ -395,21 +412,81 @@ describe( 'ReportPage', () => {
 		expect( version ).toHaveTextContent( 'On (no effective change)' );
 	} );
 
-	it( 'renders added and removed options with effective autoload and raw value', async () => {
+	it( 'renders added and removed options with effective autoload, without repeating it', async () => {
 		renderReport( COMPLETED );
 
 		const added = (
 			await screen.findByText( 'ulfx_a_feature_flags' )
 		).closest( 'li' )!;
 		expect( added ).toHaveTextContent( '30 B' );
-		expect( added ).toHaveTextContent( 'Autoload: On' );
-		expect( added ).toHaveTextContent( /\bon\b/ );
+		expect( added ).toHaveTextContent( /Autoload: On$/ );
+		expect( added ).not.toHaveTextContent( '(on)' );
 
 		const removed = screen
 			.getByText( 'ulfx_a_legacy_cache' )
 			.closest( 'li' )!;
 		expect( removed ).toHaveTextContent( '2 KB' );
-		expect( removed ).toHaveTextContent( 'Autoload: Off' );
+		expect( removed ).toHaveTextContent( /Autoload: Off$/ );
+		expect( removed ).not.toHaveTextContent( 'Autoload: Off (off)' );
+		expect( removed ).not.toHaveTextContent( '(off)' );
+	} );
+
+	it( 'keeps stored autoload values that say more than On/Off', async () => {
+		const options = COMPLETED.phases.final.options as AvailableOptionsPhase;
+		renderReport( {
+			...COMPLETED,
+			phases: {
+				...COMPLETED.phases,
+				final: {
+					...COMPLETED.phases.final,
+					options: {
+						...options,
+						added: [
+							{
+								name: 'ulfx_large',
+								size: 200000,
+								autoload: 'auto-off',
+								is_autoloaded: false,
+							},
+							{
+								name: 'ulfx_default',
+								size: 3,
+								autoload: 'auto',
+								is_autoloaded: true,
+							},
+							{
+								name: 'ulfx_legacy_yes',
+								size: 3,
+								autoload: 'yes',
+								is_autoloaded: true,
+							},
+							{
+								name: 'ulfx_legacy_no',
+								size: 3,
+								autoload: 'no',
+								is_autoloaded: false,
+							},
+						],
+					},
+				},
+			},
+		} );
+
+		const row = async ( name: string ) =>
+			( await screen.findByText( name ) ).closest( 'li' )!;
+		expect( await row( 'ulfx_large' ) ).toHaveTextContent(
+			'Autoload: Off(auto-off)'
+		);
+		expect( await row( 'ulfx_default' ) ).toHaveTextContent(
+			'Autoload: On(auto)'
+		);
+		// Explicit legacy values only repeat the label.
+		expect( await row( 'ulfx_legacy_yes' ) ).toHaveTextContent(
+			/Autoload: On$/
+		);
+		expect( await row( 'ulfx_legacy_no' ) ).toHaveTextContent(
+			/Autoload: Off$/
+		);
 	} );
 
 	it( 'goes back to History in the app', async () => {

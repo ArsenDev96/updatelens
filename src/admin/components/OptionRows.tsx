@@ -17,7 +17,7 @@ import {
 
 function OptionName( { name }: { name: string } ) {
 	return (
-		<code className="m-0 block select-text break-all bg-transparent p-0 font-mono text-[13px] text-foreground">
+		<code className="m-0 block select-text break-all bg-transparent p-0 font-mono text-sm font-medium text-foreground">
 			{ name }
 		</code>
 	);
@@ -64,12 +64,12 @@ export function OptionStateRow( {
 	return (
 		<li
 			className={ cn(
-				'grid gap-1 border-l-2 px-4 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
+				'grid gap-1 border-l-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
 				kind === 'added' ? 'border-l-emerald-400' : 'border-l-rose-300'
 			) }
 		>
 			<OptionName name={ option.name } />
-			<div className="flex flex-wrap items-baseline gap-x-3 text-sm sm:justify-end">
+			<div className="flex flex-wrap items-baseline gap-x-3 text-sm text-muted-foreground sm:justify-end">
 				<span className="tabular-nums">
 					{ formatBytes( option.size ) }
 				</span>
@@ -112,10 +112,16 @@ export function ChangedOptionRow( { option }: { option: ChangedOption } ) {
 		option.autoload_value_changed || option.autoload_behavior_changed;
 
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-sky-300 px-4 py-2.5">
+		<li className="space-y-1.5 border-l-2 border-l-sky-300 px-4 py-3">
 			<OptionName name={ option.name } />
 			<p className="flex flex-wrap items-baseline gap-x-2 text-sm">
-				<span>
+				<span
+					className={
+						option.value_changed
+							? 'font-medium'
+							: 'text-muted-foreground'
+					}
+				>
 					{ option.value_changed
 						? __( 'Value changed', 'updatelens' )
 						: __( 'Value unchanged', 'updatelens' ) }

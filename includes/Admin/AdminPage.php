@@ -72,7 +72,7 @@ final class AdminPage {
 	public function add_page() {
 		$this->hook_suffix = add_menu_page(
 			__( 'UpdateLens', 'updatelens' ),
-			__( 'UpdateLens', 'updatelens' ),
+			__( 'UpdateLens', 'updatelens' ) . UnreadReports::menu_count( $this->unread_count() ),
 			Plugin::CAPABILITY,
 			self::SLUG,
 			array( $this, 'render' ),
@@ -86,6 +86,35 @@ final class AdminPage {
 		if ( $this->hook_suffix && ! is_multisite() ) {
 			add_action( 'load-' . $this->hook_suffix, array( Schema::class, 'repair' ) );
 			add_action( 'load-' . $this->hook_suffix, array( $this, 'ensure_baseline' ) );
+		}
+	}
+
+	/**
+	 * New reports since the current user's last visit, for the menu count.
+	 * Opening the UpdateLens screen marks every existing report as seen first,
+	 * so the count is gone on that screen. Only for users who can open it;
+	 * single sites only. Database errors never reach the page.
+	 *
+	 * @return int
+	 */
+	private function unread_count() {
+		global $wpdb, $plugin_page;
+
+		if ( is_multisite() || ! current_user_can( Plugin::CAPABILITY ) ) {
+			return 0;
+		}
+
+		$unread      = UnreadReports::create();
+		$user_id     = get_current_user_id();
+		$show_errors = $wpdb->hide_errors();
+		try {
+			if ( self::SLUG === $plugin_page ) {
+				$unread->mark_seen( $user_id );
+			}
+
+			return $unread->count_for_user( $user_id );
+		} finally {
+			$wpdb->show_errors( $show_errors );
 		}
 	}
 

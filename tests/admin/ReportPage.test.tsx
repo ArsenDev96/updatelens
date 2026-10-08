@@ -39,6 +39,8 @@ function renderReport( report: AnalysisReport | null, onBack = vi.fn() ) {
 /** The phase panel (the first tab panel; the signal panel is nested in it). */
 const panel = () => screen.getAllByRole( 'tabpanel' )[ 0 ];
 const tab = ( name: RegExp ) => screen.getByRole( 'tab', { name } );
+const optionsSection = () =>
+	screen.getByRole( 'region', { name: /^Options & autoload/ } );
 
 describe( 'ReportPage', () => {
 	beforeEach( () => {
@@ -96,29 +98,45 @@ describe( 'ReportPage', () => {
 			'aria-selected',
 			'false'
 		);
-		// Phase tabs name the changes; signal tabs stay compact.
+		// The phase tabs are the only navigation; they name the changes.
 		expect(
 			screen.getAllByRole( 'tab' ).map( ( item ) => item.textContent )
 		).toEqual( [
 			'During update2 changes',
 			'After update11 changes',
 			'Net result11 changes',
-			'Options6',
-			'WP-Cron5',
-			'Action SchedulerNot available',
 		] );
+		expect( screen.getAllByRole( 'tablist' ) ).toHaveLength( 1 );
+		expect( screen.getAllByRole( 'tabpanel' ) ).toHaveLength( 1 );
+		// Phase headline: the same total as the tab.
+		expect(
+			within( panel() ).getByText( '11 observed changes' )
+		).toBeVisible();
 		expect( panel() ).toHaveTextContent(
 			'Net difference between the state before the update and the end of the observation window.'
 		);
 
-		// Primary summary cards.
-		const metrics = within( panel() ).getAllByRole( 'definition' );
+		// Options counts first (the autoloaded data change because it is not 0 B), then totals.
+		const options = screen.getByRole( 'region', {
+			name: 'Options & autoload · 6 changes',
+		} );
+		const metrics = within( options ).getAllByRole( 'definition' );
+		expect(
+			within( options )
+				.getAllByRole( 'term' )
+				.slice( 0, 4 )
+				.map( ( term ) => term.textContent )
+		).toEqual( [ 'Added', 'Removed', 'Changed', 'Autoloaded data' ] );
 		expect( metrics.slice( 0, 4 ).map( ( m ) => m.textContent ) ).toEqual( [
 			'2',
 			'1',
 			'3',
 			'+30 B',
 		] );
+		// Technical details stay collapsed.
+		expect(
+			screen.getByText( 'Technical details' ).closest( 'details' )
+		).not.toHaveAttribute( 'open' );
 		// Secondary totals (decimal separator follows the browser locale).
 		expect( panel() ).toHaveTextContent(
 			/Total option data\s*29[.,]7 KB\s*→\s*to\s*27[.,]8 KB\s*\(−2 KB\)/
@@ -129,19 +147,25 @@ describe( 'ReportPage', () => {
 
 		// Sections, including WordPress core activity observed in the window.
 		expect(
-			within( panel() ).getByRole( 'heading', { name: 'Added (2)' } )
+			within( optionsSection() ).getByRole( 'heading', {
+				name: 'Added (2)',
+			} )
 		).toBeInTheDocument();
 		expect(
-			within( panel() ).getByText( 'recently_activated' )
+			within( optionsSection() ).getByText( 'recently_activated' )
 		).toBeInTheDocument();
 		expect(
-			within( panel() ).getByRole( 'heading', { name: 'Removed (1)' } )
+			within( optionsSection() ).getByRole( 'heading', {
+				name: 'Removed (1)',
+			} )
 		).toBeInTheDocument();
 		expect(
-			within( panel() ).getByText( 'ulfx_a_legacy_cache' )
+			within( optionsSection() ).getByText( 'ulfx_a_legacy_cache' )
 		).toBeInTheDocument();
 		expect(
-			within( panel() ).getByRole( 'heading', { name: 'Changed (3)' } )
+			within( optionsSection() ).getByRole( 'heading', {
+				name: 'Changed (3)',
+			} )
 		).toBeInTheDocument();
 		expect(
 			screen.getByText(
@@ -164,14 +188,20 @@ describe( 'ReportPage', () => {
 			'Changes observed while WordPress was performing this plugin update.'
 		);
 		expect(
-			within( panel() ).getByRole( 'heading', { name: 'Added (1)' } )
+			within( optionsSection() ).getByRole( 'heading', {
+				name: 'Added (1)',
+			} )
 		).toBeInTheDocument();
 		// Empty lists are left out; the summary shows their zero counts.
 		expect(
-			within( panel() ).queryByRole( 'heading', { name: /^Removed/ } )
+			within( optionsSection() ).queryByRole( 'heading', {
+				name: /^Removed/,
+			} )
 		).toBeNull();
 		expect(
-			within( panel() ).queryByRole( 'heading', { name: /^Changed/ } )
+			within( optionsSection() ).queryByRole( 'heading', {
+				name: /^Changed/,
+			} )
 		).toBeNull();
 
 		await user.keyboard( '{ArrowRight}' );
@@ -184,7 +214,9 @@ describe( 'ReportPage', () => {
 			'Other site activity may also contribute.'
 		);
 		expect(
-			within( panel() ).getByRole( 'heading', { name: 'Removed (2)' } )
+			within( optionsSection() ).getByRole( 'heading', {
+				name: 'Removed (2)',
+			} )
 		).toBeInTheDocument();
 
 		await user.keyboard( '{End}' );
@@ -303,17 +335,20 @@ describe( 'ReportPage', () => {
 			'true'
 		);
 		expect(
-			within( panel() ).getByRole( 'heading', { name: 'Added (2)' } )
+			within( optionsSection() ).getByRole( 'heading', {
+				name: 'Added (2)',
+			} )
 		).toBeInTheDocument();
 
-		// Options is unreadable here, so the available WP-Cron signal is shown first.
+		// Options is unreadable here: one neutral line; WP-Cron stays in full.
 		await user.click( tab( /After update/ ) );
-		expect( tab( /^WP-Cron/ ) ).toHaveAttribute( 'aria-selected', 'true' );
-		expect( tab( /^Options/ ) ).toHaveTextContent( 'Not available' );
-		await user.click( tab( /^Options/ ) );
-		expect( panel() ).toHaveTextContent(
+		expect( optionsSection() ).toHaveAccessibleName( 'Options & autoload' );
+		expect( optionsSection() ).toHaveTextContent(
 			"This stored phase couldn't be read safely."
 		);
+		expect(
+			screen.getByRole( 'region', { name: /^WP-Cron · \d+ changes?$/ } )
+		).toBeInTheDocument();
 		expect( panel() ).not.toHaveTextContent( 'data_corrupt' );
 
 		await user.click( tab( /During update/ ) );

@@ -17,43 +17,37 @@ import { ActionSchedulerChanges } from '../components/ActionSchedulerDiff';
 import { CronDiffList, CronSummary } from '../components/CronDiff';
 import { LoadError } from '../components/LoadError';
 import { OptionDiffList } from '../components/OptionDiffList';
-import { PhaseSummary } from '../components/PhaseSummary';
-import { PhaseTabs, ProviderTabs } from '../components/PhaseTabs';
+import { OptionsSummary } from '../components/PhaseSummary';
+import { PhaseTabs } from '../components/PhaseTabs';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { useRequest } from '../hooks/use-request';
 import type {
-	ActionSchedulerPhase,
 	AnalysisReport,
-	CronPhase,
-	OptionsPhase,
 	PhaseKey,
 	Provider,
 	ReportPhase,
 } from '../types/api';
-import {
-	actionSchedulerChangeCount,
-	cronChangeCount,
-	optionsChangeCount,
-	reportChangeCounts,
-	type PhaseChangeCounts,
-} from '../utils/changes';
+import { reportChangeCounts, type PhaseChangeCounts } from '../utils/changes';
 import { formatDateTime } from '../utils/format';
 import {
 	actionSchedulerUnavailableReasonText,
+	changeCountNoun,
 	cronPhaseNote,
 	cronUnavailableReasonText,
 	defaultPhase,
-	defaultProvider,
-	noChangesText,
+	observedChangesText,
 	PHASE_KEYS,
 	phaseLabel,
 	phaseNote,
+	PROVIDERS,
+	providerLabel,
 	reportNotice,
+	signalStatusText,
 	unavailableReasonText,
 } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
-import { TONE_NOTICE } from '../utils/tone';
+import { TONE_STRIP } from '../utils/tone';
 
 interface ReportPageProps {
 	id: number;
@@ -133,10 +127,6 @@ function Report( {
 } ) {
 	const heading = useRef< HTMLHeadingElement >( null );
 	const [ chosen, setChosen ] = useState< PhaseKey | null >( null );
-	// An explicit signal choice is kept across phases; otherwise each phase picks its default.
-	const [ chosenProvider, setChosenProvider ] = useState< Provider | null >(
-		null
-	);
 	// Counts come from the summaries only; computed once per loaded report.
 	const counts = useMemo(
 		() => reportChangeCounts( report.phases ),
@@ -158,37 +148,35 @@ function Report( {
 			aria-labelledby="updatelens-report-title"
 			className="space-y-5"
 		>
-			<header className="space-y-1.5">
+			<header className="space-y-1">
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
 					<h2
 						id="updatelens-report-title"
 						ref={ heading }
 						tabIndex={ -1 }
-						className="break-words text-xl font-semibold outline-none"
+						className="break-words text-2xl font-semibold outline-none"
 					>
 						{ pluginName( report.plugin ) }
 					</h2>
 					<StatusBadge status={ report.status } />
 				</div>
-				<p className="font-mono text-sm">
+				<p className="font-mono text-base font-medium">
 					<Versions plugin={ report.plugin } />
 				</p>
-				<p className="flex flex-wrap gap-x-3 text-sm text-muted-foreground">
-					{ updated && (
-						<span>
-							{ sprintf(
-								/* translators: %s: date and time of the update. */
-								__( 'Updated %s', 'updatelens' ),
-								updated
-							) }
-						</span>
-					) }
-					{ report.plugin.file && (
-						<code className="m-0 break-all rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-							{ report.plugin.file }
-						</code>
-					) }
-				</p>
+				{ updated && (
+					<p className="text-sm text-muted-foreground">
+						{ sprintf(
+							/* translators: %s: date and time of the update. */
+							__( 'Updated %s', 'updatelens' ),
+							updated
+						) }
+					</p>
+				) }
+				{ report.plugin.file && (
+					<p className="break-all font-mono text-xs text-muted-foreground">
+						{ report.plugin.file }
+					</p>
+				) }
 			</header>
 
 			<Notice report={ report } onRefresh={ onRefresh } />
@@ -203,14 +191,6 @@ function Report( {
 						phase={ selected }
 						data={ report.phases[ selected ] }
 						counts={ counts[ selected ] }
-						provider={
-							chosenProvider ??
-							defaultProvider(
-								report.phases[ selected ],
-								counts[ selected ]
-							)
-						}
-						onProvider={ setChosenProvider }
 						windowSeconds={ report.observation_window_seconds }
 					/>
 				</PhaseTabs>
@@ -234,21 +214,23 @@ function Notice( {
 		<section
 			aria-label={ __( 'Analysis status', 'updatelens' ) }
 			className={ cn(
-				'space-y-1 rounded-lg border px-4 py-3 text-sm',
-				TONE_NOTICE[ notice.tone ]
+				'flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border-l-4 bg-muted/50 px-3 py-2 text-sm',
+				TONE_STRIP[ notice.tone ]
 			) }
 		>
-			<p className="font-medium">{ notice.title }</p>
-			<p className="text-muted-foreground">{ notice.description }</p>
-			{ notice.details.map( ( detail ) => (
-				<p key={ detail }>{ detail }</p>
-			) ) }
+			<div className="min-w-0 flex-1 space-y-0.5">
+				<p className="font-medium">{ notice.title }</p>
+				<p className="text-muted-foreground">
+					<span>{ notice.description }</span>
+					{ notice.details.map( ( detail ) => (
+						<span key={ detail }> { detail }</span>
+					) ) }
+				</p>
+			</div>
 			{ notice.open && (
-				<div className="pt-2">
-					<Button variant="outline" size="sm" onClick={ onRefresh }>
-						{ __( 'Refresh', 'updatelens' ) }
-					</Button>
-				</div>
+				<Button variant="outline" size="sm" onClick={ onRefresh }>
+					{ __( 'Refresh', 'updatelens' ) }
+				</Button>
 			) }
 		</section>
 	);
@@ -258,164 +240,209 @@ function PhasePanel( {
 	phase,
 	data,
 	counts,
-	provider,
-	onProvider,
 	windowSeconds,
 }: {
 	phase: PhaseKey;
 	data: ReportPhase;
 	counts: PhaseChangeCounts;
-	provider: Provider;
-	onProvider: ( provider: Provider ) => void;
 	windowSeconds: number;
 } ) {
 	return (
-		<div className="space-y-4">
-			<p className="text-sm text-muted-foreground">
-				{ phaseNote( phase ) }
-			</p>
-			{ counts.options === 0 &&
-				counts.cron === 0 &&
-				( counts.action_scheduler ?? 0 ) === 0 && (
-					<p className="text-sm font-medium">
-						{ __(
-							'No tracked changes observed during this phase.',
-							'updatelens'
-						) }
-					</p>
-				) }
-			<ProviderTabs
-				counts={ counts }
-				selected={ provider }
-				onSelect={ onProvider }
-			>
-				{ provider === 'options' && (
-					<OptionsPanel
-						data={ data.options }
-						windowSeconds={ windowSeconds }
-					/>
-				) }
-				{ provider === 'cron' && (
-					<CronPanel
-						data={ data.cron }
-						windowSeconds={ windowSeconds }
-					/>
-				) }
-				{ provider === 'action_scheduler' && (
-					<ActionSchedulerPanel
-						data={ data.action_scheduler }
-						windowSeconds={ windowSeconds }
-					/>
-				) }
-			</ProviderTabs>
+		<div className="space-y-6">
+			<PhaseOverview phase={ phase } counts={ counts } />
+			{ PROVIDERS.map( ( provider ) => (
+				<SignalSection
+					key={ provider }
+					provider={ provider }
+					data={ data }
+					count={ counts[ provider ] }
+					windowSeconds={ windowSeconds }
+				/>
+			) ) }
 		</div>
 	);
-}
-
-function OptionsPanel( {
-	data,
-	windowSeconds,
-}: {
-	data: OptionsPhase;
-	windowSeconds: number;
-} ) {
-	if ( ! data.available ) {
-		return (
-			<UnavailablePhase
-				text={ unavailableReasonText( data.reason, windowSeconds ) }
-			/>
-		);
-	}
-	if ( optionsChangeCount( data ) === 0 ) {
-		return <NoChanges text={ noChangesText( 'options' ) } />;
-	}
-	return (
-		<div className="space-y-4">
-			<PhaseSummary summary={ data.summary } />
-			<OptionDiffList phase={ data } />
-		</div>
-	);
-}
-
-function CronPanel( {
-	data,
-	windowSeconds,
-}: {
-	data: CronPhase;
-	windowSeconds: number;
-} ) {
-	if ( ! data.available ) {
-		return (
-			<UnavailablePhase
-				text={ cronUnavailableReasonText( data.reason, windowSeconds ) }
-			/>
-		);
-	}
-	if ( cronChangeCount( data ) === 0 ) {
-		return <NoChanges text={ noChangesText( 'cron' ) } />;
-	}
-	return (
-		<div className="space-y-4">
-			<p className="text-sm text-muted-foreground">{ cronPhaseNote() }</p>
-			<CronSummary summary={ data.summary } />
-			<CronDiffList phase={ data } />
-		</div>
-	);
-}
-
-function ActionSchedulerPanel( {
-	data,
-	windowSeconds,
-}: {
-	data: ActionSchedulerPhase;
-	windowSeconds: number;
-} ) {
-	if ( ! data.available ) {
-		return (
-			<UnavailablePhase
-				text={ actionSchedulerUnavailableReasonText(
-					data.reason,
-					windowSeconds
-				) }
-			/>
-		);
-	}
-	if ( actionSchedulerChangeCount( data ) === 0 ) {
-		return <NoChanges text={ noChangesText( 'action_scheduler' ) } />;
-	}
-	return <ActionSchedulerChanges phase={ data } />;
 }
 
 /**
- * Compact state of a signal that was captured without changes.
+ * What the phase covers, its total of observed changes (the tab's count) and,
+ * when there are changes, each signal's state. Without changes the compact
+ * signal sections say the rest.
  *
- * @param props      Props.
- * @param props.text Title and description.
+ * @param props        Props.
+ * @param props.phase  Phase.
+ * @param props.counts Change counts of the phase.
  */
-function NoChanges( {
-	text,
+function PhaseOverview( {
+	phase,
+	counts,
 }: {
-	text: { title: string; description: string };
+	phase: PhaseKey;
+	counts: PhaseChangeCounts;
 } ) {
 	return (
-		<div className="rounded-lg border bg-card px-4 py-3 text-sm">
-			<p className="font-medium">{ text.title }</p>
-			<p className="text-muted-foreground">{ text.description }</p>
+		<div className="space-y-2">
+			<p className="text-sm text-muted-foreground">
+				{ phaseNote( phase ) }
+			</p>
+			<p
+				className={ cn(
+					'tabular-nums',
+					( counts.total ?? 0 ) > 0
+						? 'text-2xl font-semibold'
+						: 'text-base font-medium'
+				) }
+			>
+				{ observedChangesText( counts.total ) }
+			</p>
+			{ ( counts.total ?? 0 ) > 0 && (
+				<dl
+					aria-label={ __( 'Observed signals', 'updatelens' ) }
+					className="flex flex-wrap gap-x-6 gap-y-1 text-sm"
+				>
+					{ PROVIDERS.map( ( provider ) => (
+						<div
+							key={ provider }
+							className="flex items-baseline gap-1.5"
+						>
+							<dt className="text-muted-foreground">
+								{ providerLabel( provider ) }
+							</dt>
+							<dd
+								className={
+									( counts[ provider ] ?? 0 ) > 0
+										? 'font-medium'
+										: 'text-muted-foreground'
+								}
+							>
+								{ signalStatusText( counts[ provider ] ) }
+							</dd>
+						</div>
+					) ) }
+				</dl>
+			) }
 		</div>
 	);
 }
 
-function UnavailablePhase( {
-	text,
+/**
+ * One signal of the phase as a section: in full with its changes, or as a
+ * single muted line without changes or when unavailable.
+ *
+ * @param props               Props.
+ * @param props.provider      Signal.
+ * @param props.data          Phase data of every signal.
+ * @param props.count         Change count of the signal, null if unavailable.
+ * @param props.windowSeconds Observation window length from the API.
+ */
+function SignalSection( {
+	provider,
+	data,
+	count,
+	windowSeconds,
 }: {
-	text: { title: string; description: string };
+	provider: Provider;
+	data: ReportPhase;
+	count: number | null;
+	windowSeconds: number;
 } ) {
+	const headingId = `updatelens-signal-${ provider }-heading`;
+	const label = providerLabel( provider );
+
+	if ( count === null || count === 0 ) {
+		const reason =
+			count === null
+				? unavailableText( provider, data, windowSeconds )
+				: null;
+		return (
+			<section
+				id={ `updatelens-signal-${ provider }` }
+				aria-labelledby={ headingId }
+				className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-t pt-3 text-sm"
+			>
+				<h3 id={ headingId } className="font-medium">
+					{ label }
+				</h3>
+				<p className="text-muted-foreground">
+					{ reason ? (
+						<>
+							<span className="font-medium">
+								{ reason.title }
+							</span>
+							{ ' · ' }
+							<span>{ reason.description }</span>
+						</>
+					) : (
+						__( 'No changes observed.', 'updatelens' )
+					) }
+				</p>
+			</section>
+		);
+	}
+
 	return (
-		<div className="rounded-lg border border-dashed px-4 py-3 text-sm">
-			<p className="font-medium">{ text.title }</p>
-			<p className="text-muted-foreground">{ text.description }</p>
-		</div>
+		<section
+			id={ `updatelens-signal-${ provider }` }
+			aria-labelledby={ headingId }
+			className="space-y-4 border-t pt-5"
+		>
+			<h3 id={ headingId } className="text-lg font-semibold">
+				{ label }{ ' ' }
+				<span className="font-normal text-muted-foreground">
+					· { changeCountNoun( count ) }
+				</span>
+			</h3>
+			{ provider === 'options' && data.options.available && (
+				<>
+					<OptionsSummary summary={ data.options.summary } />
+					<OptionDiffList phase={ data.options } />
+				</>
+			) }
+			{ provider === 'cron' && data.cron.available && (
+				<>
+					<CronSummary summary={ data.cron.summary } />
+					<p className="text-xs text-muted-foreground">
+						{ cronPhaseNote() }
+					</p>
+					<CronDiffList phase={ data.cron } />
+				</>
+			) }
+			{ provider === 'action_scheduler' &&
+				data.action_scheduler.available && (
+					<ActionSchedulerChanges phase={ data.action_scheduler } />
+				) }
+		</section>
 	);
+}
+
+/**
+ * Why a signal is unavailable in this phase.
+ *
+ * @param provider      Signal.
+ * @param data          Phase data.
+ * @param windowSeconds Observation window length from the API.
+ */
+function unavailableText(
+	provider: Provider,
+	data: ReportPhase,
+	windowSeconds: number
+): { title: string; description: string } | null {
+	switch ( provider ) {
+		case 'options':
+			return data.options.available
+				? null
+				: unavailableReasonText( data.options.reason, windowSeconds );
+		case 'cron':
+			return data.cron.available
+				? null
+				: cronUnavailableReasonText( data.cron.reason, windowSeconds );
+		case 'action_scheduler':
+			return data.action_scheduler.available
+				? null
+				: actionSchedulerUnavailableReasonText(
+						data.action_scheduler.reason,
+						windowSeconds
+					);
+	}
 }
 
 function TechnicalDetails( { report }: { report: AnalysisReport } ) {

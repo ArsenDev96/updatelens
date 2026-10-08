@@ -273,6 +273,42 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	}
 
 	/**
+	 * Highest ID, or 0.
+	 *
+	 * @return int
+	 * @throws RuntimeException On failure.
+	 */
+	public function max_id() {
+		if ( $this->fail_reads ) {
+			throw new RuntimeException( 'read failed' );
+		}
+
+		return $this->rows ? (int) max( array_keys( $this->rows ) ) : 0;
+	}
+
+	/**
+	 * Number of rows with a higher ID.
+	 *
+	 * @param int $id ID.
+	 * @return int
+	 * @throws RuntimeException On failure.
+	 */
+	public function count_after( $id ) {
+		if ( $this->fail_reads ) {
+			throw new RuntimeException( 'read failed' );
+		}
+
+		return count(
+			array_filter(
+				array_keys( $this->rows ),
+				static function ( $row_id ) use ( $id ) {
+					return $row_id > (int) $id;
+				}
+			)
+		);
+	}
+
+	/**
 	 * Start time of the row with the lowest ID.
 	 *
 	 * @return string|null

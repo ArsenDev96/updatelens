@@ -15,7 +15,7 @@ import { formatUnixDateTime, unixToIso } from '../utils/format';
  */
 export function HookName( { hook }: { hook: string } ) {
 	return (
-		<code className="m-0 block select-text break-all bg-transparent p-0 font-mono text-[13px] text-foreground">
+		<code className="m-0 block select-text break-all bg-transparent p-0 font-mono text-sm font-medium text-foreground">
 			{ hook }
 		</code>
 	);

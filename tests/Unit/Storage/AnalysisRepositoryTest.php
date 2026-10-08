@@ -125,4 +125,37 @@ final class AnalysisRepositoryTest extends TestCase {
 
 		$this->assertSame( array( array( 'id' => '7' ) ), ( new AnalysisRepository( $this->wpdb ) )->find_page( 20, 0 ) );
 	}
+
+	/**
+	 * The menu count reads only the primary key: MAX(id) and a COUNT above a watermark.
+	 */
+	public function test_unread_queries_use_the_primary_key_only() {
+		$this->wpdb->vars = array( '42', '3' );
+		$repository       = new AnalysisRepository( $this->wpdb );
+
+		$this->assertSame( 42, $repository->max_id() );
+		$this->assertSame( 3, $repository->count_after( 40 ) );
+		$this->assertSame( 0, $repository->count_after( 7 ), 'NULL from the database is 0.' );
+		$repository->count_after( -5 );
+
+		$this->assertSame(
+			array(
+				array( 'SELECT MAX(id) FROM %i', array( 'wp_updatelens_analyses' ) ),
+				array( 'SELECT COUNT(*) FROM %i WHERE id > %d', array( 'wp_updatelens_analyses', 40 ) ),
+				array( 'SELECT COUNT(*) FROM %i WHERE id > %d', array( 'wp_updatelens_analyses', 7 ) ),
+				array( 'SELECT COUNT(*) FROM %i WHERE id > %d', array( 'wp_updatelens_analyses', 0 ) ),
+			),
+			$this->wpdb->prepared
+		);
+	}
+
+	/**
+	 * A failed unread query throws like every other read.
+	 */
+	public function test_unread_query_failure_throws() {
+		$this->wpdb->last_error = 'Table does not exist';
+
+		$this->expectException( RuntimeException::class );
+		( new AnalysisRepository( $this->wpdb ) )->count_after( 1 );
+	}
 }

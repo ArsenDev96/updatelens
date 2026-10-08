@@ -13,7 +13,6 @@ import type {
 	ReportPhase,
 } from '@/admin/types/api';
 import { phaseChangeCounts } from '@/admin/utils/changes';
-import { defaultProvider } from '@/admin/utils/labels';
 
 import {
 	action,
@@ -66,7 +65,19 @@ const tabNames = ( list: string ) =>
 	within( screen.getByRole( 'tablist', { name: list } ) )
 		.getAllByRole( 'tab' )
 		.map( ( t ) => t.getAttribute( 'aria-label' ) );
-const signalPanel = () => screen.getAllByRole( 'tabpanel' )[ 1 ];
+/** The Action Scheduler section of the selected phase (signals are stacked, not tabs). */
+const signalPanel = () =>
+	screen.getByRole( 'region', { name: /^Action Scheduler/ } );
+/** Accessible names of the stacked signal sections, in order. */
+const sectionNames = () =>
+	[ /^Options & autoload/, /^WP-Cron/, /^Action Scheduler/ ]
+		.map( ( name ) =>
+			screen
+				.getByRole( 'region', { name } )
+				.getAttribute( 'aria-labelledby' )
+		)
+		.map( ( id ) => document.getElementById( id! )!.textContent );
+
 const section = ( name: string | RegExp ) =>
 	within( signalPanel() ).getByRole( 'region', { name } );
 /** A number as the UI formats it in the host locale. */
@@ -78,7 +89,6 @@ async function openActionScheduler( phase: RegExp ) {
 	const user = userEvent.setup();
 	await screen.findAllByRole( 'tablist' );
 	await user.click( tab( phase ) );
-	await user.click( tab( /^Action Scheduler/ ) );
 	return user;
 }
 
@@ -125,13 +135,13 @@ describe( 'Action Scheduler in reports', () => {
 	} );
 
 	describe( 'signal tabs and counts', () => {
-		it( 'appends Action Scheduler after Options and WP-Cron, with counts in every phase', async () => {
+		it( 'stacks Action Scheduler after Options and WP-Cron, with counts in every phase', async () => {
 			await renderReport( WOOCOMMERCE );
 
-			expect( tabNames( 'Observed signals' ) ).toEqual( [
-				'Options, 6 changes',
-				'WP-Cron, 5 changes',
-				'Action Scheduler, 5 changes',
+			expect( sectionNames() ).toEqual( [
+				'Options & autoload · 6 changes',
+				'WP-Cron · 5 changes',
+				'Action Scheduler · 5 changes',
 			] );
 			// Net result: 6 options + 5 WP-Cron + 5 Action Scheduler.
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
@@ -139,9 +149,32 @@ describe( 'Action Scheduler in reports', () => {
 				'After update, 5 changes',
 				'Net result, 16 changes',
 			] );
-			expect( tab( /^Action Scheduler/ ) ).toHaveTextContent(
-				/^Action Scheduler5$/
-			);
+			expect( screen.getByText( '16 observed changes' ) ).toBeVisible();
+			expect( signalPanel() ).toHaveTextContent( 'fetch_patterns' );
+		} );
+
+		it( 'keeps the phase total equal to the sum of its signal sections', async () => {
+			await renderReport( WOOCOMMERCE );
+			const user = userEvent.setup();
+
+			for ( const [ phase, total ] of [
+				[ /During update/, 1 ],
+				[ /After update/, 5 ],
+				[ /Net result/, 16 ],
+			] as const ) {
+				await user.click( tab( phase ) );
+				const sum = sectionNames()
+					.map( ( name ) => /· (\d+) changes?$/.exec( name! ) )
+					.reduce(
+						( acc, match ) =>
+							acc + ( match ? Number( match[ 1 ] ) : 0 ),
+						0
+					);
+				expect( sum ).toBe( total );
+				expect( tab( phase ) ).toHaveTextContent(
+					total === 1 ? '1 change' : `${ total } changes`
+				);
+			}
 		} );
 
 		it( 'counts Action Scheduler-only changes and distinguishes zero from unavailable', async () => {
@@ -162,23 +195,18 @@ describe( 'Action Scheduler in reports', () => {
 				'After update, no changes',
 				'Net result, 5 changes',
 			] );
-			expect( tab( /^Action Scheduler/ ) ).toHaveAccessibleName(
-				'Action Scheduler, 5 changes'
+			expect( signalPanel() ).toHaveAccessibleName(
+				'Action Scheduler · 5 changes'
 			);
 			await user.click( tab( /After update/ ) );
-			expect( tab( /^Action Scheduler/ ) ).toHaveAccessibleName(
-				'Action Scheduler, no changes'
-			);
-			expect( tab( /^Action Scheduler/ ) ).toHaveTextContent(
-				/^Action Scheduler0$/
-			);
+			expect( signalPanel() ).toHaveAccessibleName( 'Action Scheduler' );
+			expect( signalPanel() ).toHaveTextContent( 'No changes observed.' );
 			await user.click( tab( /During update/ ) );
-			expect( tab( /^Action Scheduler/ ) ).toHaveAccessibleName(
-				'Action Scheduler, not available'
+			expect( signalPanel() ).toHaveAccessibleName( 'Action Scheduler' );
+			expect( signalPanel() ).toHaveTextContent(
+				'Action Scheduler not detected'
 			);
-			expect( tab( /^Action Scheduler/ ) ).toHaveTextContent(
-				'Not available'
-			);
+			expect( signalPanel() ).not.toHaveTextContent( 'No changes' );
 		} );
 
 		it( 'sums all available signals and skips unavailable ones', () => {
@@ -206,64 +234,19 @@ describe( 'Action Scheduler in reports', () => {
 			} );
 		} );
 
-		it( 'supports arrow keys, Home and End across three signals', async () => {
+		it( 'has no signal tabs to navigate', async () => {
 			await renderReport( WOOCOMMERCE );
-			const user = userEvent.setup();
 
-			await user.click( tab( /^Options/ ) );
-			await user.keyboard( '{End}' );
-			expect( tab( /^Action Scheduler/ ) ).toHaveFocus();
-			expect( tab( /^Action Scheduler/ ) ).toHaveAttribute(
-				'aria-selected',
-				'true'
-			);
-			expect( signalPanel() ).toHaveTextContent( 'fetch_patterns' );
-			await user.keyboard( '{ArrowLeft}' );
-			expect( tab( /^WP-Cron/ ) ).toHaveFocus();
-			await user.keyboard( '{ArrowRight}{ArrowRight}' );
-			expect( tab( /^Options/ ) ).toHaveFocus();
-			await user.keyboard( '{Home}' );
-			expect( tab( /^Options/ ) ).toHaveAttribute(
-				'aria-selected',
-				'true'
-			);
+			expect( screen.getAllByRole( 'tablist' ) ).toHaveLength( 1 );
+			expect( screen.getAllByRole( 'tab' ) ).toHaveLength( 3 );
+			expect(
+				screen.queryByRole( 'tab', { name: /^Action Scheduler/ } )
+			).toBeNull();
 		} );
 	} );
 
-	describe( 'default signal', () => {
-		it( 'prefers Options, then Action Scheduler, then WP-Cron with changes', () => {
-			expect(
-				defaultProvider(
-					countsPhase( 'changes', 'changes', 'changes' )
-				)
-			).toBe( 'options' );
-			expect(
-				defaultProvider( countsPhase( 'none', 'changes', 'changes' ) )
-			).toBe( 'action_scheduler' );
-			expect(
-				defaultProvider( countsPhase( 'none', 'none', 'changes' ) )
-			).toBe( 'cron' );
-			expect(
-				defaultProvider( countsPhase( null, null, 'changes' ) )
-			).toBe( 'cron' );
-		} );
-
-		it( 'falls back to the first available signal, skipping unavailable ones', () => {
-			expect(
-				defaultProvider( countsPhase( 'none', 'none', 'none' ) )
-			).toBe( 'options' );
-			expect(
-				defaultProvider( countsPhase( null, 'none', 'none' ) )
-			).toBe( 'action_scheduler' );
-			expect( defaultProvider( countsPhase( null, null, 'none' ) ) ).toBe(
-				'cron'
-			);
-			expect( defaultProvider( countsPhase( null, null, null ) ) ).toBe(
-				'options'
-			);
-		} );
-
-		it( 'opens Action Scheduler when it is the only signal with changes, and keeps a chosen signal across phases', async () => {
+	describe( 'stacked signals', () => {
+		it( 'shows Action Scheduler in full when it is the only signal with changes', async () => {
 			await renderReport(
 				asReport( 51, ( association ) => ( {
 					action_scheduler:
@@ -274,18 +257,19 @@ describe( 'Action Scheduler in reports', () => {
 			);
 			const user = userEvent.setup();
 
-			expect( tab( /^Action Scheduler/ ) ).toHaveAttribute(
-				'aria-selected',
-				'true'
-			);
 			expect( signalPanel() ).toHaveTextContent(
 				'wpforms_admin_notifications_update'
 			);
-			await user.click( tab( /^WP-Cron/ ) );
+			// The other signals stay in their place, as one line each.
+			for ( const name of [ /^Options & autoload/, /^WP-Cron/ ] ) {
+				const section = screen.getByRole( 'region', { name } );
+				expect( section ).toHaveTextContent( 'No changes observed.' );
+				expect( section.querySelector( 'ul' ) ).toBeNull();
+			}
 			await user.click( tab( /During update/ ) );
-			expect( tab( /^WP-Cron/ ) ).toHaveAttribute(
-				'aria-selected',
-				'true'
+			expect( signalPanel() ).toHaveTextContent( 'No changes observed.' );
+			expect( document.body ).not.toHaveTextContent(
+				'wpforms_admin_notifications_update'
 			);
 		} );
 	} );
@@ -373,11 +357,14 @@ describe( 'Action Scheduler in reports', () => {
 				expect( tab( /^Net result/ ) ).toHaveAccessibleName(
 					'Net result, 11 changes'
 				);
-				expect( tab( /^Options/ ) ).toHaveAttribute(
-					'aria-selected',
-					'true'
+				expect(
+					screen.getByRole( 'region', {
+						name: /^Options & autoload/,
+					} )
+				).toHaveTextContent( 'ulfx_a_feature_flags' );
+				expect( signalPanel() ).toHaveAccessibleName(
+					'Action Scheduler'
 				);
-				await openActionScheduler( /Net result/ );
 				expect( signalPanel() ).toHaveTextContent( title );
 				expect( signalPanel() ).toHaveTextContent( description );
 			}
@@ -405,16 +392,13 @@ describe( 'Action Scheduler in reports', () => {
 				} as AnalysisReport[ 'phases' ],
 			} );
 
-			expect( tabNames( 'Observed signals' ) ).toEqual( [
-				'Options, 6 changes',
-				'WP-Cron, 5 changes',
-				'Action Scheduler, not available',
+			expect( sectionNames() ).toEqual( [
+				'Options & autoload · 6 changes',
+				'WP-Cron · 5 changes',
+				'Action Scheduler',
 			] );
-			await openActionScheduler( /Net result/ );
 			expect( signalPanel() ).toHaveTextContent( 'Not captured' );
-			expect( signalPanel() ).not.toHaveTextContent(
-				'No Action Scheduler changes observed'
-			);
+			expect( signalPanel() ).not.toHaveTextContent( 'No changes' );
 		} );
 
 		it( 'isolates a corrupt Action Scheduler phase', async () => {
@@ -423,17 +407,17 @@ describe( 'Action Scheduler in reports', () => {
 			expect( tab( /^Net result/ ) ).toHaveAccessibleName(
 				'Net result, 11 changes'
 			);
-			expect( signalPanel() ).toHaveTextContent( 'ulfx_a_feature_flags' );
+			expect(
+				screen.getByRole( 'region', { name: /^Options & autoload/ } )
+			).toHaveTextContent( 'ulfx_a_feature_flags' );
 			const user = await openActionScheduler( /Net result/ );
 			expect( signalPanel() ).toHaveTextContent( 'Unreadable' );
+			expect(
+				screen.getByRole( 'region', { name: /^WP-Cron/ } )
+			).toHaveAccessibleName( 'WP-Cron · 5 changes' );
 			await user.click( tab( /After update/ ) );
 			expect( signalPanel() ).toHaveTextContent(
 				'wpforms_admin_notifications_update'
-			);
-			await user.click( tab( /^WP-Cron/ ) );
-			await user.click( tab( /Net result/ ) );
-			expect( tab( /^WP-Cron/ ) ).toHaveAccessibleName(
-				'WP-Cron, 5 changes'
 			);
 		} );
 	} );
@@ -449,11 +433,9 @@ describe( 'Action Scheduler in reports', () => {
 			);
 			await openActionScheduler( /Net result/ );
 
+			expect( signalPanel() ).toHaveAccessibleName( 'Action Scheduler' );
 			expect( signalPanel() ).toHaveTextContent(
-				'No Action Scheduler changes observed'
-			);
-			expect( signalPanel() ).toHaveTextContent(
-				'UpdateLens captured this phase successfully, but no active scheduled actions changed.'
+				/^Action SchedulerNo changes observed\.$/
 			);
 			expect( within( signalPanel() ).queryByRole( 'term' ) ).toBeNull();
 			expect(
@@ -500,7 +482,7 @@ describe( 'Action Scheduler in reports', () => {
 			);
 			expect(
 				within( signalPanel() )
-					.getAllByRole( 'heading', { level: 3 } )
+					.getAllByRole( 'heading', { level: 4 } )
 					.map( ( heading ) => heading.textContent )
 			).toEqual( [
 				'Added (1)',
@@ -698,8 +680,8 @@ describe( 'Action Scheduler in reports', () => {
 			await renderReport( largeQueue( 1000 ) );
 			const user = await openActionScheduler( /Net result/ );
 
-			expect( tab( /^Action Scheduler/ ) ).toHaveAccessibleName(
-				`Action Scheduler, ${ num( 2000 ) } changes`
+			expect( signalPanel() ).toHaveAccessibleName(
+				`Action Scheduler · ${ num( 2000 ) } changes`
 			);
 			expect(
 				within( signalPanel() ).getAllByRole( 'listitem' )

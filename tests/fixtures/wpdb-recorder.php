@@ -41,6 +41,20 @@ class wpdb {
 	public $results = array();
 	public $col     = array();
 
+	/**
+	 * Return values of get_var(), in order (default null).
+	 *
+	 * @var array
+	 */
+	public $vars = array();
+
+	/**
+	 * Whether errors are shown; hide_errors()/show_errors() toggle it.
+	 *
+	 * @var bool
+	 */
+	public $show_errors = true;
+
 	public function prepare( $query, ...$args ) {
 		$this->prepared[] = array( $query, $args );
 
@@ -61,6 +75,26 @@ class wpdb {
 		$this->queries[] = $sql;
 
 		return $this->results;
+	}
+
+	public function get_var( $sql ) {
+		$this->queries[] = $sql;
+
+		return $this->vars ? array_shift( $this->vars ) : null;
+	}
+
+	public function hide_errors() {
+		$shown             = $this->show_errors;
+		$this->show_errors = false;
+
+		return $shown;
+	}
+
+	public function show_errors( $show = true ) {
+		$shown             = $this->show_errors;
+		$this->show_errors = $show;
+
+		return $shown;
 	}
 
 	public function get_col( $sql ) {

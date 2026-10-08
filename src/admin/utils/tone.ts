@@ -11,10 +11,11 @@ export const TONE_BADGE: Record< Tone, string > = {
 	negative: 'border-rose-200 bg-rose-50 text-rose-800',
 };
 
-export const TONE_NOTICE: Record< Tone, string > = {
-	neutral: 'border-slate-200 bg-slate-50',
-	positive: 'border-emerald-200 bg-emerald-50/60',
-	progress: 'border-sky-200 bg-sky-50/70',
-	caution: 'border-amber-200 bg-amber-50/70',
-	negative: 'border-rose-200 bg-rose-50/70',
+/** Left accent of the compact report status strip; the surface stays neutral. */
+export const TONE_STRIP: Record< Tone, string > = {
+	neutral: 'border-l-slate-400',
+	positive: 'border-l-emerald-500',
+	progress: 'border-l-sky-500',
+	caution: 'border-l-amber-500',
+	negative: 'border-l-rose-500',
 };

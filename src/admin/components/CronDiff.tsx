@@ -16,7 +16,7 @@ import {
 } from '../utils/format';
 import { Details, HookName, Time, To } from './DiffRow';
 import { DiffSection } from './DiffSection';
-import { Metric, Total } from './PhaseSummary';
+import { ChangeCounts, Total, Totals } from './PhaseSummary';
 
 /*
  * WP-Cron changes of one phase. Only hooks, timing and recurrence exist in
@@ -38,30 +38,30 @@ import { Metric, Total } from './PhaseSummary';
  */
 export function CronSummary( { summary }: { summary: CronDiffSummary } ) {
 	return (
-		<div className="space-y-3">
-			<dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-				<Metric
-					label={ __( 'Added', 'updatelens' ) }
-					value={ formatCount( summary.added_count ) }
-				/>
-				<Metric
-					label={
+		<div className="space-y-2">
+			<ChangeCounts
+				items={ [
+					{
+						label: __( 'Added', 'updatelens' ),
+						value: formatCount( summary.added_count ),
+					},
+					{
 						/* translators: Summary count of WP-Cron events present before and absent after (removed or no longer scheduled). */
-						__( 'No longer present', 'updatelens' )
-					}
-					value={ formatCount( summary.removed_count ) }
-				/>
-				<Metric
-					label={ __( 'Changed', 'updatelens' ) }
-					value={ formatCount( summary.changed_count ) }
-				/>
-				<Metric
-					label={ __( 'Rescheduled', 'updatelens' ) }
-					value={ formatCount( summary.rescheduled_count ) }
-					quiet
-				/>
-			</dl>
-			<dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 xl:grid-cols-4">
+						label: __( 'No longer present', 'updatelens' ),
+						value: formatCount( summary.removed_count ),
+					},
+					{
+						label: __( 'Changed', 'updatelens' ),
+						value: formatCount( summary.changed_count ),
+					},
+					{
+						label: __( 'Rescheduled', 'updatelens' ),
+						value: formatCount( summary.rescheduled_count ),
+						quiet: true,
+					},
+				] }
+			/>
+			<Totals label={ __( 'WP-Cron totals', 'updatelens' ) }>
 				<Total
 					label={ __( 'Events', 'updatelens' ) }
 					before={ formatCount( summary.before_event_count ) }
@@ -88,7 +88,7 @@ export function CronSummary( { summary }: { summary: CronDiffSummary } ) {
 						summary.unique_hook_count_delta
 					) }
 				/>
-			</dl>
+			</Totals>
 		</div>
 	);
 }
@@ -354,7 +354,7 @@ function AddedEventRow( { event }: { event: CronEventState } ) {
 	}
 
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-emerald-400 px-4 py-2.5">
+		<li className="space-y-1.5 border-l-2 border-l-emerald-400 px-4 py-3">
 			<HookName hook={ event.hook } />
 			<p className="text-sm">
 				{ recurrence( event.schedule, event.is_recurring ) }
@@ -372,7 +372,7 @@ function AddedEventRow( { event }: { event: CronEventState } ) {
  */
 function RemovedEventRow( { event }: { event: CronEventState } ) {
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-rose-300 px-4 py-2.5">
+		<li className="space-y-1.5 border-l-2 border-l-rose-300 px-4 py-3">
 			<HookName hook={ event.hook } />
 			<p className="text-sm">
 				{ recurrence( event.schedule, event.is_recurring ) }
@@ -394,7 +394,7 @@ function RemovedEventRow( { event }: { event: CronEventState } ) {
  */
 function GoneEventRow( { event }: { event: CronEventState } ) {
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-slate-300 px-4 py-2.5">
+		<li className="space-y-1.5 border-l-2 border-l-slate-300 px-4 py-3">
 			<HookName hook={ event.hook } />
 			<p className="text-sm">
 				{ __( 'One-time', 'updatelens' ) } ·{ ' ' }
@@ -473,7 +473,7 @@ function ChangedEventRow( { event }: { event: ChangedCronEvent } ) {
 	] );
 
 	return (
-		<li className="space-y-1.5 border-l-2 border-l-sky-300 px-4 py-2.5">
+		<li className="space-y-1.5 border-l-2 border-l-sky-300 px-4 py-3">
 			<HookName hook={ event.hook } />
 			<p className="text-sm font-medium">
 				{ __( 'Schedule changed', 'updatelens' ) }
@@ -494,7 +494,7 @@ function RescheduledEventRow( { event }: { event: RescheduledCronEvent } ) {
 	const delta = formatDurationDelta( event.timestamp_delta );
 
 	return (
-		<li className="space-y-1 border-l-2 border-l-slate-200 px-4 py-2.5 text-muted-foreground">
+		<li className="space-y-1 border-l-2 border-l-slate-200 px-4 py-3 text-muted-foreground">
 			<HookName hook={ event.hook } />
 			<p className="text-sm">
 				<Time timestamp={ event.before_timestamp } />

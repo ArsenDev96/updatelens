@@ -278,6 +278,39 @@ class AnalysisRepository {
 	}
 
 	/**
+	 * Highest analysis ID, or 0 if there is none. History lists every row, so
+	 * this is the newest History entry. Primary key only; no diff columns.
+	 *
+	 * @return int
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function max_id() {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
+		$max = $wpdb->get_var( $wpdb->prepare( 'SELECT MAX(id) FROM %i', $this->table ) );
+		$this->assert_no_error();
+
+		return (int) $max;
+	}
+
+	/**
+	 * Number of analyses with an ID above the given one (History entries newer
+	 * than it). A primary-key range count; no diff columns.
+	 *
+	 * @param int $id Analysis ID.
+	 * @return int
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function count_after( $id ) {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
+		$count = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE id > %d', $this->table, max( 0, (int) $id ) ) );
+		$this->assert_no_error();
+
+		return (int) $count;
+	}
+
+	/**
 	 * Start time of the first stored analysis (by primary key), or null if there is none.
 	 *
 	 * @return string|null Stored UTC DATETIME.

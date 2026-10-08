@@ -15,4 +15,5 @@ if ( is_readable( __DIR__ . '/vendor/autoload.php' ) ) {
 	require_once __DIR__ . '/vendor/autoload.php';
 	\UpdateLens\Storage\Schema::uninstall();
 	\UpdateLens\Baseline\MonitoringBaseline::uninstall();
+	\UpdateLens\Admin\UnreadReports::uninstall();
 }

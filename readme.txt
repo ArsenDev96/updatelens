@@ -36,13 +36,13 @@ Known limitations: only options, WP-Cron and Action Scheduler are analyzed; WP-C
 
 UpdateLens never stores raw option values, WP-Cron arguments or Action Scheduler arguments. It compares them through keyed fingerprints (HMAC-SHA256, keyed from the site's salts) that are never shown in reports and are deleted with the temporary snapshots when an analysis finishes. Action Scheduler action IDs, claim IDs and serialized schedules are never stored or shown.
 
-UpdateLens has no telemetry or analytics, uses no external UpdateLens service and makes no external HTTP requests. Its data stays in your WordPress database: its own table, `{prefix}updatelens_analyses`, and the `updatelens_db_version` and `updatelens_monitoring_baseline` options.
+UpdateLens has no telemetry or analytics, uses no external UpdateLens service and makes no external HTTP requests. Its data stays in your WordPress database: its own table, `{prefix}updatelens_analyses`, the `updatelens_db_version`, `updatelens_monitoring_baseline` and `updatelens_unread_origin_id` options, and per administrator the `updatelens_last_seen_analysis_id` user meta (the newest report ID they have seen, for the count of new reports in the menu).
 
 Each analysis also stores the ID of the WordPress user who ran the update. The user ID is not shown in reports and not returned by UpdateLens's REST API.
 
 The monitoring baseline holds only the time monitoring started and the name, version, file and active state of each plugin installed then; it is never updated afterwards.
 
-Deactivating UpdateLens keeps the history and the monitoring baseline. Deleting the plugin from the Plugins screen removes the table and both options.
+Deactivating UpdateLens keeps the history, the monitoring baseline and the new-report counts. Deleting the plugin from the Plugins screen removes the table, the options and the user meta.
 
 = Source code and build =
 
@@ -94,6 +94,7 @@ The After update phase ends at the next wp-admin page you open within 5 minutes 
 = 0.2.0 =
 * First public release.
 * Analyzes options and autoload data, WP-Cron events and Action Scheduler actions around manual single-plugin updates from wp-admin.
-* Reports each update in three phases: During update, After update and Net result.
+* Reports each update in three phases: During update, After update and Net result, with all signals of a phase on one page.
+* The UpdateLens menu shows each administrator how many new reports were added since their last visit.
 * Shows when monitoring began and which plugins were installed then (first-run monitoring baseline); earlier updates are never reconstructed.
 * Privacy-safe matching: option values and WP-Cron and Action Scheduler arguments are compared through keyed fingerprints and never stored or shown.

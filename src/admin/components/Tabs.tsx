@@ -26,8 +26,6 @@ interface TabsProps< K extends string > {
 	/** Tab element IDs are `${ idPrefix }-${ key }`. */
 	idPrefix: string;
 	panelId: string;
-	/** Secondary tabs are smaller, for a second level inside a panel. */
-	level?: 'primary' | 'secondary';
 	children: ReactNode;
 }
 
@@ -44,13 +42,11 @@ export function Tabs< K extends string >( {
 	label,
 	idPrefix,
 	panelId,
-	level = 'primary',
 	children,
 }: TabsProps< K > ) {
 	const tabs = useRef< Partial< Record< K, HTMLButtonElement > > >( {} );
 	const keys = items.map( ( item ) => item.key );
 	const tabId = ( key: K ) => `${ idPrefix }-${ key }`;
-	const secondary = level === 'secondary';
 
 	const onKeyDown = ( event: KeyboardEvent< HTMLDivElement > ) => {
 		// Move from the focused tab (normally the selected one).
@@ -58,7 +54,7 @@ export function Tabs< K extends string >( {
 			( key ) => tabs.current[ key ] === event.target
 		);
 		if ( focused === undefined ) {
-			return; // A key press inside a nested tab list.
+			return; // A key press inside the panel.
 		}
 		const index = keys.indexOf( focused );
 		const last = keys.length - 1;
@@ -78,15 +74,12 @@ export function Tabs< K extends string >( {
 	};
 
 	return (
-		<div className={ secondary ? 'space-y-3' : 'space-y-4' }>
+		<div className="space-y-5">
 			<div
 				role="tablist"
 				aria-label={ label }
 				onKeyDown={ onKeyDown }
-				className={ cn(
-					'inline-flex max-w-full flex-wrap gap-1 rounded-lg border',
-					secondary ? 'bg-background p-0.5' : 'bg-muted/60 p-1'
-				) }
+				className="inline-flex max-w-full flex-wrap gap-1 rounded-lg border bg-muted/60 p-1"
 			>
 				{ items.map( ( item ) => {
 					const isSelected = item.key === selected;
@@ -105,18 +98,10 @@ export function Tabs< K extends string >( {
 							tabIndex={ isSelected ? 0 : -1 }
 							onClick={ () => onSelect( item.key ) }
 							className={ cn(
-								'rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-								secondary
-									? 'px-2.5 py-1 text-xs'
-									: 'px-3 py-1.5 text-sm',
-								isSelected &&
-									secondary &&
-									'bg-muted text-foreground',
-								isSelected &&
-									! secondary &&
-									'bg-background text-foreground shadow-sm',
-								! isSelected &&
-									'text-muted-foreground hover:text-foreground'
+								'rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+								isSelected
+									? 'bg-background text-foreground shadow-sm ring-1 ring-border'
+									: 'text-muted-foreground hover:text-foreground'
 							) }
 						>
 							{ item.label }

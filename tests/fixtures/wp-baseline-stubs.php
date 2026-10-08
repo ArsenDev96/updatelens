@@ -19,6 +19,7 @@ $GLOBALS['updatelens_test'] = array(
 	'caps'     => array( 'manage_options' ),
 	'queries'  => array(),
 	'routes'   => array(),
+	'usermeta' => array(),
 );
 
 function get_option( $name, $default_value = false ) {
@@ -37,6 +38,26 @@ function add_option( $name, $value = '', $deprecated = '', $autoload = null ) {
 
 function delete_option( $name ) {
 	unset( $GLOBALS['updatelens_test']['options'][ $name ] );
+
+	return true;
+}
+
+function get_user_meta( $user_id, $key = '', $single = false ) {
+	return $GLOBALS['updatelens_test']['usermeta'][ $user_id ][ $key ] ?? '';
+}
+
+function update_user_meta( $user_id, $key, $value ) {
+	$GLOBALS['updatelens_test']['usermeta'][ $user_id ][ $key ] = $value;
+
+	return true;
+}
+
+function delete_metadata( $meta_type, $object_id, $meta_key, $meta_value = '', $delete_all = false ) {
+	foreach ( $GLOBALS['updatelens_test']['usermeta'] as $user_id => $meta ) {
+		if ( $delete_all || (int) $user_id === (int) $object_id ) {
+			unset( $GLOBALS['updatelens_test']['usermeta'][ $user_id ][ $meta_key ] );
+		}
+	}
 
 	return true;
 }

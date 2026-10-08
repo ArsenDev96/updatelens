@@ -1,21 +1,16 @@
 import { __ } from '@wordpress/i18n';
 import type { ReactNode } from 'react';
 
-import type { PhaseKey, Provider } from '../types/api';
+import type { PhaseKey } from '../types/api';
 import type { PhaseChangeCounts } from '../utils/changes';
-import {
-	changeIndicator,
-	PHASE_KEYS,
-	phaseLabel,
-	PROVIDERS,
-	providerLabel,
-} from '../utils/labels';
+import { changeIndicator, PHASE_KEYS, phaseLabel } from '../utils/labels';
 import { Tabs } from './Tabs';
 
 /**
  * Tabs for the three phases, each with its change count across the
- * available signals ("2 changes"). A phase is "not available" only if none of its
- * signals is.
+ * available signals ("2 changes"). A phase is "not available" only if none
+ * of its signals is. The only tabs of a report: signals are stacked
+ * sections inside the panel.
  *
  * @param props          Props.
  * @param props.counts   Change counts per phase.
@@ -40,8 +35,7 @@ export function PhaseTabs( {
 				const label = phaseLabel( phase );
 				const { text, tone, accessibleName } = changeIndicator(
 					label,
-					counts[ phase ].total,
-					true
+					counts[ phase ].total
 				);
 				return {
 					key: phase,
@@ -55,54 +49,6 @@ export function PhaseTabs( {
 			label={ __( 'Observation phases', 'updatelens' ) }
 			idPrefix="updatelens-tab"
 			panelId="updatelens-phase-panel"
-		>
-			{ children }
-		</Tabs>
-	);
-}
-
-/**
- * Second-level tabs for the signals of one phase (Options, WP-Cron, Action
- * Scheduler), each with its own change count or availability.
- *
- * @param props          Props.
- * @param props.counts   Change counts of the phase.
- * @param props.selected Selected signal.
- * @param props.onSelect Selection handler.
- * @param props.children Panel content.
- */
-export function ProviderTabs( {
-	counts,
-	selected,
-	onSelect,
-	children,
-}: {
-	counts: PhaseChangeCounts;
-	selected: Provider;
-	onSelect: ( provider: Provider ) => void;
-	children: ReactNode;
-} ) {
-	return (
-		<Tabs
-			items={ PROVIDERS.map( ( provider ) => {
-				const label = providerLabel( provider );
-				const { text, tone, accessibleName } = changeIndicator(
-					label,
-					counts[ provider ]
-				);
-				return {
-					key: provider,
-					label,
-					indicator: { text, tone },
-					accessibleName,
-				};
-			} ) }
-			selected={ selected }
-			onSelect={ onSelect }
-			label={ __( 'Observed signals', 'updatelens' ) }
-			idPrefix="updatelens-provider-tab"
-			panelId="updatelens-provider-panel"
-			level="secondary"
 		>
 			{ children }
 		</Tabs>

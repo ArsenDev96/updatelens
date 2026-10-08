@@ -16,7 +16,6 @@ import {
 	cronPhaseNote,
 	cronUnavailableReasonText,
 	defaultPhase,
-	defaultProvider,
 	errorText,
 	phaseLabel,
 	phaseNote,
@@ -39,7 +38,6 @@ import {
 	EXPIRED,
 	FAILED,
 	INCOMPATIBLE,
-	MALFORMED_CRON,
 	T,
 	unavailable,
 } from './fixtures';
@@ -389,17 +387,11 @@ describe( 'durations', () => {
 
 describe( 'WP-Cron labels', () => {
 	it( 'names the signals', () => {
-		expect( providerLabel( 'options' ) ).toBe( 'Options' );
+		expect( providerLabel( 'options' ) ).toBe( 'Options & autoload' );
 		expect( providerLabel( 'cron' ) ).toBe( 'WP-Cron' );
-	} );
-
-	it( 'defaults to Options unless only WP-Cron is available', () => {
-		expect( defaultProvider( COMPLETED.phases.final ) ).toBe( 'options' );
-		expect( defaultProvider( MALFORMED_CRON.phases.final ) ).toBe(
-			'options'
+		expect( providerLabel( 'action_scheduler' ) ).toBe(
+			'Action Scheduler'
 		);
-		expect( defaultProvider( CRON_ONLY.phases.final ) ).toBe( 'cron' );
-		expect( defaultProvider( FAILED.phases.final ) ).toBe( 'options' );
 	} );
 
 	it.each( [

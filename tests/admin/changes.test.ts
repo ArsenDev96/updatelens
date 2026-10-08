@@ -1,7 +1,7 @@
 import { setLocaleData } from '@wordpress/i18n';
 import { describe, expect, it } from 'vitest';
 
-import type { HistoryPhase, ReportPhase } from '@/admin/types/api';
+import type { HistoryPhase } from '@/admin/types/api';
 import {
 	cronChangeCount,
 	historyPhaseState,
@@ -15,8 +15,9 @@ import {
 	changeCountText,
 	changeIndicator,
 	defaultPhase,
-	defaultProvider,
 	historyPhaseText,
+	observedChangesText,
+	signalStatusText,
 } from '@/admin/utils/labels';
 
 import {
@@ -29,7 +30,6 @@ import {
 } from './dogfood-fixtures';
 import {
 	COMPLETED,
-	CRON_ONLY,
 	CRON_POST,
 	EXPIRED,
 	FAILED,
@@ -142,42 +142,47 @@ describe( 'default phase', () => {
 	} );
 } );
 
-describe( 'default signal', () => {
-	const phase = (
-		options: ReportPhase,
-		cron: ReportPhase
-	): ReportPhase => ( {
-		options: options.options,
-		cron: cron.cron,
-		action_scheduler: options.action_scheduler,
-	} );
-
-	it( 'prefers Options when both have changes', () => {
-		expect( defaultProvider( COMPLETED.phases.final ) ).toBe( 'options' );
-	} );
-
-	it( 'selects WP-Cron when only WP-Cron changed', () => {
-		expect( defaultProvider( CRON_CHANGES_ONLY.phases.final ) ).toBe(
-			'cron'
+describe( 'phase and signal wording', () => {
+	it( 'states the observed total of a phase', () => {
+		expect( observedChangesText( 1 ) ).toBe( '1 observed change' );
+		expect( observedChangesText( 16 ) ).toBe( '16 observed changes' );
+		expect( observedChangesText( 0 ) ).toBe(
+			'No tracked changes observed during this phase.'
+		);
+		expect( observedChangesText( null ) ).toBe(
+			'Not available for this phase'
 		);
 	} );
 
-	it( 'falls back to Options, then WP-Cron, when nothing changed', () => {
-		expect( defaultProvider( RANK_MATH.phases.final ) ).toBe( 'options' );
-		expect(
-			defaultProvider(
-				phase( CRON_ONLY.phases.final, RANK_MATH.phases.final )
-			)
-		).toBe( 'cron' );
-		expect(
-			defaultProvider(
-				phase( RANK_MATH.phases.final, MALFORMED_CRON.phases.final )
-			)
-		).toBe( 'options' );
-		// Options changed, WP-Cron unavailable.
-		expect( defaultProvider( PARTIAL_CRON.phases.post_update ) ).toBe(
-			'options'
-		);
+	it( 'states each signal in text, never as a bare color or number', () => {
+		expect( signalStatusText( 3 ) ).toBe( '3 changes' );
+		expect( signalStatusText( 1 ) ).toBe( '1 change' );
+		expect( signalStatusText( 0 ) ).toBe( 'No changes' );
+		expect( signalStatusText( null ) ).toBe( 'Not available' );
+	} );
+
+	it( 'keeps the phase total equal to the sum of its available signals', () => {
+		for ( const report of [
+			COMPLETED,
+			CRON_CHANGES_ONLY,
+			RANK_MATH,
+			PARTIAL_CRON,
+		] ) {
+			for ( const counts of Object.values(
+				reportChangeCounts( report.phases )
+			) ) {
+				const available = [
+					counts.options,
+					counts.cron,
+					counts.action_scheduler,
+				].filter( ( count ): count is number => count !== null );
+				expect( counts.total ).toBe(
+					available.length
+						? available.reduce( ( sum, n ) => sum + n, 0 )
+						: null
+				);
+			}
+		}
 	} );
 } );
 
@@ -188,39 +193,21 @@ describe( 'change wording', () => {
 		expect( changeCountText( 4 ) ).toBe( '4 changes' );
 	} );
 
-	it( 'builds compact tab indicators with useful accessible names', () => {
-		expect( changeIndicator( 'Net result', 4 ) ).toEqual( {
-			text: '4',
-			tone: 'changes',
-			accessibleName: 'Net result, 4 changes',
-		} );
-		expect( changeIndicator( 'Options', 0 ) ).toEqual( {
-			text: '0',
-			tone: 'none',
-			accessibleName: 'Options, no changes',
-		} );
-		expect( changeIndicator( 'WP-Cron', null ) ).toEqual( {
-			text: 'Not available',
-			tone: 'unavailable',
-			accessibleName: 'WP-Cron, not available',
-		} );
-	} );
-
 	it( 'names the changes in phase indicators', () => {
 		expect( changeCountNoun( 0 ) ).toBe( '0 changes' );
 		expect( changeCountNoun( 1 ) ).toBe( '1 change' );
 		expect( changeCountNoun( 2 ) ).toBe( '2 changes' );
-		expect( changeIndicator( 'During update', 1, true ) ).toEqual( {
+		expect( changeIndicator( 'During update', 1 ) ).toEqual( {
 			text: '1 change',
 			tone: 'changes',
 			accessibleName: 'During update, 1 change',
 		} );
-		expect( changeIndicator( 'After update', 0, true ) ).toEqual( {
+		expect( changeIndicator( 'After update', 0 ) ).toEqual( {
 			text: '0 changes',
 			tone: 'none',
 			accessibleName: 'After update, no changes',
 		} );
-		expect( changeIndicator( 'Net result', null, true ) ).toEqual( {
+		expect( changeIndicator( 'Net result', null ) ).toEqual( {
 			text: 'Not available',
 			tone: 'unavailable',
 			accessibleName: 'Net result, not available',

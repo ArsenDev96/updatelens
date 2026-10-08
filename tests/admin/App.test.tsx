@@ -186,7 +186,7 @@ describe( 'privacy', () => {
 		return value;
 	}
 
-	it( 'renders only contract fields in History and every phase and signal', async () => {
+	it( 'renders only contract fields in History and every phase', async () => {
 		const report = leakEverywhere( COMPLETED ) as AnalysisReport;
 		serveApi( [ report ] );
 		render( <App /> );
@@ -224,10 +224,13 @@ describe( 'privacy', () => {
 			/Net result/,
 		] ) {
 			await user.click( screen.getByRole( 'tab', { name } ) );
-			for ( const signal of [ /^Options/, /^WP-Cron/ ] ) {
-				await user.click( screen.getByRole( 'tab', { name: signal } ) );
-				check();
+			// Every signal of the phase is rendered at once (stacked sections).
+			for ( const button of screen.queryAllByRole( 'button', {
+				expanded: false,
+			} ) ) {
+				await user.click( button );
 			}
+			check();
 		}
 		// The Cron hooks themselves are shown.
 		expect( document.body ).toHaveTextContent( 'ul_fixture_cleanup' );

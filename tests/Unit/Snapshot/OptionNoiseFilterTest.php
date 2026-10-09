@@ -30,6 +30,9 @@ final class OptionNoiseFilterTest extends TestCase {
 			'UpdateLens option'       => array( 'updatelens_settings' ),
 			'UpdateLens future state' => array( 'updatelens_snapshot_state' ),
 			'WP-Cron storage'         => array( 'cron' ),
+			'hosting core updates'    => array( 'wpe_site_transient_update_core' ),
+			'hosting plugin updates'  => array( 'wpe_site_transient_update_plugins' ),
+			'hosting theme updates'   => array( 'wpe_site_transient_update_themes' ),
 		);
 	}
 
@@ -53,6 +56,13 @@ final class OptionNoiseFilterTest extends TestCase {
 			'updatelens not at start'      => array( 'my_updatelens_option' ),
 			'uppercase transient prefix'   => array( '_TRANSIENT_foo' ),
 			'empty name'                   => array( '' ),
+			'other wpe option'             => array( 'wpe_update_source' ),
+			'bare wpe site transient'      => array( 'wpe_site_transient_' ),
+			'other wpe site transient'     => array( 'wpe_site_transient_update_translations' ),
+			'wpe update name with suffix'  => array( 'wpe_site_transient_update_plugins_backup' ),
+			'wpe update name as suffix'    => array( 'my_wpe_site_transient_update_core' ),
+			'wpe name without prefix'      => array( 'site_transient_update_themes' ),
+			'uppercase wpe update name'    => array( 'WPE_SITE_TRANSIENT_UPDATE_CORE' ),
 		);
 	}
 

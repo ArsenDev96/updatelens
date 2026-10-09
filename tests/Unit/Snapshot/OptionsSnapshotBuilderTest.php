@@ -94,6 +94,35 @@ final class OptionsSnapshotBuilderTest extends TestCase {
 	}
 
 	/**
+	 * The three hosting update-check records are dropped; other `wpe_*` options are kept.
+	 */
+	public function test_hosting_update_check_records_are_excluded() {
+		$snapshot = $this->builder()->build(
+			array(
+				$this->row( 'wpe_site_transient_update_core', str_repeat( 'c', 1000 ), 'off' ),
+				$this->row( 'wpe_site_transient_update_plugins', str_repeat( 'p', 3000 ), 'off' ),
+				$this->row( 'wpe_site_transient_update_themes', str_repeat( 't', 2000 ), 'on' ),
+				$this->row( 'wpe_update_source', 'mirror', 'on' ),                                     // 6 bytes, autoloaded.
+				$this->row( 'wpe_site_transient_update_translations', 'abcd', 'off' ),                 // 4 bytes.
+			)
+		);
+
+		$this->assertSame(
+			array( 'wpe_site_transient_update_translations', 'wpe_update_source' ),
+			array_keys( $snapshot->get_records() )
+		);
+		$this->assertSame(
+			array(
+				'option_count'     => 2,
+				'autoloaded_count' => 1,
+				'total_bytes'      => 10,
+				'autoloaded_bytes' => 6,
+			),
+			$snapshot->get_summary()->to_array()
+		);
+	}
+
+	/**
 	 * Records carry the expected metadata.
 	 */
 	public function test_record_metadata() {

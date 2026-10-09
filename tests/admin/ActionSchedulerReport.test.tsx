@@ -329,7 +329,7 @@ describe( 'Action Scheduler in reports', () => {
 				'Action Scheduler not detected'
 			);
 			expect( signalPanel() ).toHaveTextContent(
-				'Action Scheduler was not active for this phase.'
+				'Action Scheduler was not active at the start of this phase.'
 			);
 			expect( signalPanel() ).not.toHaveTextContent(
 				/error|failed|broken|unreadable|corrupt/i

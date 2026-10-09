@@ -23,10 +23,11 @@ use UpdateLens\Tests\Support\ActionSchedulerFixture as AS_Fixture;
 use UpdateLens\Tests\Support\CronFixture;
 
 /**
- * Decoded Net result diffs → Potential Impact checks and findings.
+ * Report Net result phase → Potential Impact evaluation.
  *
  * Every fixture goes through the real snapshot builder, diff builder and
- * codec (encode + decode), so the evaluator sees exactly what reports decode.
+ * codec (encode + decode), and is wrapped like AnalysisReadModel wraps an
+ * available phase, so the evaluator sees exactly what reports hold.
  */
 final class PotentialImpactTest extends TestCase {
 
@@ -105,15 +106,44 @@ final class PotentialImpactTest extends TestCase {
 	}
 
 	/**
-	 * Evaluate.
+	 * A report phase object: available with the decoded lists, or unavailable with a reason.
 	 *
-	 * @param array|null $options          Options diff.
-	 * @param array|null $cron             WP-Cron diff.
-	 * @param array|null $action_scheduler Action Scheduler diff.
+	 * @param array|string $diff Decoded diff, or the unavailable reason.
 	 * @return array
 	 */
-	private function evaluate( ?array $options, ?array $cron = null, ?array $action_scheduler = null ) {
-		return ( new PotentialImpact() )->evaluate( $options, $cron, $action_scheduler );
+	private static function signal( $diff ) {
+		if ( is_string( $diff ) ) {
+			return array(
+				'available'   => false,
+				'association' => 'net_across_phases',
+				'reason'      => $diff,
+			);
+		}
+
+		return array(
+			'available'   => true,
+			'association' => 'net_across_phases',
+		) + $diff;
+	}
+
+	/**
+	 * Evaluate decoded diffs; null = unavailable (`settle_expired`), a string = that reason.
+	 *
+	 * @param array|string|null $options          Options diff.
+	 * @param array|string|null $cron             WP-Cron diff.
+	 * @param array|string|null $action_scheduler Action Scheduler diff.
+	 * @return array
+	 */
+	private function evaluate( $options, $cron = null, $action_scheduler = null ) {
+		return ( new PotentialImpact() )->evaluate(
+			array(
+				'final' => array(
+					'options'          => self::signal( null === $options ? 'settle_expired' : $options ),
+					'cron'             => self::signal( null === $cron ? 'settle_expired' : $cron ),
+					'action_scheduler' => self::signal( null === $action_scheduler ? 'settle_expired' : $action_scheduler ),
+				),
+			)
+		);
 	}
 
 	/**
@@ -170,6 +200,21 @@ final class PotentialImpactTest extends TestCase {
 	}
 
 	/**
+	 * The change kind of each finding.
+	 *
+	 * @param array<int, array> $findings Findings.
+	 * @return string[]
+	 */
+	private static function changes( array $findings ) {
+		return array_map(
+			static function ( array $finding ) {
+				return $finding['evidence']['change'];
+			},
+			$findings
+		);
+	}
+
+	/**
 	 * A value of a given byte size.
 	 *
 	 * @param int $bytes Size.
@@ -180,35 +225,36 @@ final class PotentialImpactTest extends TestCase {
 	}
 
 	// ---------------------------------------------------------------------
-	// Checks and availability.
+	// Evaluation status and availability.
 	// ---------------------------------------------------------------------
 
 	/**
-	 * Without any Net result nothing is evaluated, and that is not "no findings" per check.
+	 * Without any Net result nothing is evaluated: every signal says why, and there
+	 * is no finding count (not "0 findings").
 	 */
 	public function test_nothing_available_is_not_evaluated() {
 		$this->assertSame(
 			array(
-				'checks'   => array(
-					array(
-						'rule'   => 'large_autoloaded_option',
-						'signal' => 'options',
-						'status' => 'not_evaluated',
+				'phase'    => 'final',
+				'status'   => 'not_evaluated',
+				'signals'  => array(
+					'options'          => array(
+						'status'        => 'not_evaluated',
+						'reason'        => 'settle_expired',
+						'rules'         => array( 'large_autoloaded_option' ),
+						'finding_count' => null,
 					),
-					array(
-						'rule'   => 'recurring_cron_event_removed',
-						'signal' => 'cron',
-						'status' => 'not_evaluated',
+					'cron'             => array(
+						'status'        => 'not_evaluated',
+						'reason'        => 'settle_expired',
+						'rules'         => array( 'recurring_cron_event_removed', 'recurring_schedule_changed' ),
+						'finding_count' => null,
 					),
-					array(
-						'rule'   => 'recurring_schedule_changed',
-						'signal' => 'cron',
-						'status' => 'not_evaluated',
-					),
-					array(
-						'rule'   => 'recurring_schedule_changed',
-						'signal' => 'action_scheduler',
-						'status' => 'not_evaluated',
+					'action_scheduler' => array(
+						'status'        => 'not_evaluated',
+						'reason'        => 'settle_expired',
+						'rules'         => array( 'recurring_schedule_changed' ),
+						'finding_count' => null,
 					),
 				),
 				'findings' => array(),
@@ -218,26 +264,29 @@ final class PotentialImpactTest extends TestCase {
 	}
 
 	/**
-	 * Empty diffs: every check evaluated, no findings.
+	 * Empty diffs: every signal evaluated, zero findings — distinct from not evaluated.
 	 */
 	public function test_everything_evaluated_without_findings() {
 		$result = $this->evaluate( $this->options( array(), array() ), $this->cron( array(), array() ), $this->action_scheduler( array(), array() ) );
 
-		$this->assertSame( array( 'evaluated', 'evaluated', 'evaluated', 'evaluated' ), array_column( $result['checks'], 'status' ) );
+		$this->assertSame( 'evaluated', $result['status'] );
+		foreach ( $result['signals'] as $signal ) {
+			$this->assertSame( array( 'evaluated', null, 0 ), array( $signal['status'], $signal['reason'], $signal['finding_count'] ) );
+		}
 		$this->assertSame( array(), $result['findings'] );
 	}
 
 	/**
-	 * Each signal's availability is independent of the others.
+	 * Each signal's availability is independent; the overall status summarizes them.
 	 *
 	 * @dataProvider provide_availability
 	 *
-	 * @param bool  $options          Options available.
-	 * @param bool  $cron             WP-Cron available.
-	 * @param bool  $action_scheduler Action Scheduler available.
-	 * @param array $statuses         Expected check statuses.
+	 * @param bool   $options          Options available.
+	 * @param bool   $cron             WP-Cron available.
+	 * @param bool   $action_scheduler Action Scheduler available.
+	 * @param string $status           Expected overall status.
 	 */
-	public function test_signal_availability_is_independent( $options, $cron, $action_scheduler, array $statuses ) {
+	public function test_signal_availability_is_independent( $options, $cron, $action_scheduler, $status ) {
 		$large  = array( 'acme_cache' => array( self::bytes( self::LIMIT + 1 ), 'on' ) );
 		$result = $this->evaluate(
 			$options ? $this->options( array(), $large ) : null,
@@ -245,26 +294,20 @@ final class PotentialImpactTest extends TestCase {
 			$action_scheduler ? $this->action_scheduler( array( AS_Fixture::recurring( 'acme_job', self::T, 3600 ) ), array( AS_Fixture::recurring( 'acme_job', self::T, 600 ) ) ) : null
 		);
 
-		$this->assertSame( $statuses, array_column( $result['checks'], 'status' ) );
+		$this->assertSame( $status, $result['status'] );
 		$expected = array();
-		if ( $options ) {
-			$expected[] = 'large_autoloaded_option:options';
+		foreach ( array(
+			'options'          => $options,
+			'cron'             => $cron,
+			'action_scheduler' => $action_scheduler,
+		) as $signal => $available ) {
+			$this->assertSame( $available ? 'evaluated' : 'not_evaluated', $result['signals'][ $signal ]['status'] );
+			$this->assertSame( $available ? 1 : null, $result['signals'][ $signal ]['finding_count'] );
+			if ( $available ) {
+				$expected[] = $signal;
+			}
 		}
-		if ( $cron ) {
-			$expected[] = 'recurring_schedule_changed:cron';
-		}
-		if ( $action_scheduler ) {
-			$expected[] = 'recurring_schedule_changed:action_scheduler';
-		}
-		$this->assertSame(
-			$expected,
-			array_map(
-				static function ( array $finding ) {
-					return $finding['code'] . ':' . $finding['signal'];
-				},
-				$result['findings']
-			)
-		);
+		$this->assertSame( $expected, array_column( $result['findings'], 'signal' ) );
 	}
 
 	/**
@@ -273,20 +316,156 @@ final class PotentialImpactTest extends TestCase {
 	 * @return array
 	 */
 	public function provide_availability() {
-		$e = 'evaluated';
-		$n = 'not_evaluated';
 		return array(
-			'only options'          => array( true, false, false, array( $e, $n, $n, $n ) ),
-			'only cron'             => array( false, true, false, array( $n, $e, $e, $n ) ),
-			'only action scheduler' => array( false, false, true, array( $n, $n, $n, $e ) ),
-			'options missing'       => array( false, true, true, array( $n, $e, $e, $e ) ),
-			'cron missing'          => array( true, false, true, array( $e, $n, $n, $e ) ),
-			'all'                   => array( true, true, true, array( $e, $e, $e, $e ) ),
+			'only options'          => array( true, false, false, 'partial' ),
+			'only cron'             => array( false, true, false, 'partial' ),
+			'only action scheduler' => array( false, false, true, 'partial' ),
+			'options missing'       => array( false, true, true, 'partial' ),
+			'cron missing'          => array( true, false, true, 'partial' ),
+			'all'                   => array( true, true, true, 'evaluated' ),
+			'none'                  => array( false, false, false, 'not_evaluated' ),
 		);
 	}
 
+	/**
+	 * The phase's own reason explains a signal that was not evaluated.
+	 */
+	public function test_reasons_come_from_the_phase() {
+		$result = $this->evaluate( 'data_corrupt', 'malformed_cron_state', 'not_installed' );
+
+		$this->assertSame(
+			array(
+				'options'          => 'data_corrupt',
+				'cron'             => 'malformed_cron_state',
+				'action_scheduler' => 'not_installed',
+			),
+			array_map(
+				static function ( array $signal ) {
+					return $signal['reason'];
+				},
+				$result['signals']
+			)
+		);
+		$this->assertSame( 'not_evaluated', $result['status'] );
+	}
+
+	/**
+	 * A missing signal object or reason is `not_recorded`, never evaluated.
+	 */
+	public function test_missing_signal_is_not_recorded() {
+		foreach ( array(
+			array(
+				'final' => array(
+					'options' => array( 'available' => false ),
+					'cron'    => 'not an object',
+				),
+			),
+			array(),
+			array( 'final' => 'not an object' ),
+		) as $phases ) {
+			$result = ( new PotentialImpact() )->evaluate( $phases );
+
+			$this->assertSame( 'not_evaluated', $result['status'] );
+			foreach ( $result['signals'] as $signal ) {
+				$this->assertSame( array( 'not_evaluated', 'not_recorded' ), array( $signal['status'], $signal['reason'] ) );
+			}
+		}
+	}
+
+	/**
+	 * Action Scheduler is `not_applicable` only when the caller knows it was
+	 * absent at every capture; then the overall status ignores it. Reasons in
+	 * the phases alone (e.g. `not_installed` everywhere, as older analyses
+	 * stored it) never are enough.
+	 *
+	 * @dataProvider provide_action_scheduler_applicability
+	 *
+	 * @param string|null $reason  Action Scheduler Net result reason, null = available.
+	 * @param bool        $absent  Whether Action Scheduler is known to be absent at every capture.
+	 * @param string      $status  Expected Action Scheduler status.
+	 * @param string      $overall Expected overall status (Options and WP-Cron evaluated).
+	 */
+	public function test_action_scheduler_applicability( $reason, $absent, $status, $overall ) {
+		$phases = array();
+		foreach ( array( 'during_update', 'post_update', 'final' ) as $phase ) {
+			$phases[ $phase ] = array(
+				'options'          => self::signal( $this->options( array(), array() ) ),
+				'cron'             => self::signal( $this->cron( array(), array() ) ),
+				'action_scheduler' => self::signal( null === $reason ? $this->action_scheduler( array(), array() ) : $reason ),
+			);
+		}
+
+		$result = ( new PotentialImpact() )->evaluate( $phases, $absent );
+
+		$this->assertSame( $status, $result['signals']['action_scheduler']['status'] );
+		$this->assertSame( $overall, $result['status'] );
+		if ( 'evaluated' !== $status ) {
+			$this->assertSame( array( $reason, null ), array( $result['signals']['action_scheduler']['reason'], $result['signals']['action_scheduler']['finding_count'] ) );
+		}
+	}
+
+	/**
+	 * Net result reason, known absence, expected statuses.
+	 *
+	 * @return array
+	 */
+	public function provide_action_scheduler_applicability() {
+		return array(
+			'absent at every capture'          => array( 'not_installed', true, 'not_applicable', 'evaluated' ),
+			'not_installed, absence not known' => array( 'not_installed', false, 'not_evaluated', 'partial' ),
+			'available'                        => array( null, false, 'evaluated', 'evaluated' ),
+			'available wins over a stale flag' => array( null, true, 'evaluated', 'evaluated' ),
+			'newly detected'                   => array( 'newly_detected', false, 'not_evaluated', 'partial' ),
+			'no longer detected'               => array( 'no_longer_detected', false, 'not_evaluated', 'partial' ),
+			'expired'                          => array( 'settle_expired', false, 'not_evaluated', 'partial' ),
+			'update failed'                    => array( 'update_failed', false, 'not_evaluated', 'partial' ),
+			'unreadable'                       => array( 'snapshot_unavailable', false, 'not_evaluated', 'partial' ),
+			'corrupt net result'               => array( 'data_corrupt', false, 'not_evaluated', 'partial' ),
+			'predates Action Scheduler'        => array( 'not_captured', false, 'not_evaluated', 'partial' ),
+			'default: absence not known'       => array( 'not_installed', null, 'not_evaluated', 'partial' ),
+		);
+	}
+
+	/**
+	 * The default is "absence not known": `not_installed` everywhere without the flag is not evaluated.
+	 */
+	public function test_absence_is_not_assumed() {
+		$phases = array();
+		foreach ( array( 'during_update', 'post_update', 'final' ) as $phase ) {
+			$phases[ $phase ] = array(
+				'options'          => self::signal( $this->options( array(), array() ) ),
+				'cron'             => self::signal( $this->cron( array(), array() ) ),
+				'action_scheduler' => self::signal( 'not_installed' ),
+			);
+		}
+
+		$result = ( new PotentialImpact() )->evaluate( $phases );
+
+		$this->assertSame( array( 'partial', 'not_evaluated' ), array( $result['status'], $result['signals']['action_scheduler']['status'] ) );
+	}
+
+	/**
+	 * Only Action Scheduler can be `not_applicable`: Options or WP-Cron without a Net result
+	 * are always `not_evaluated`, and with nothing evaluated the overall status is `not_evaluated`.
+	 */
+	public function test_not_applicable_never_counts_as_evaluated() {
+		$phases = array();
+		foreach ( array( 'during_update', 'post_update', 'final' ) as $phase ) {
+			$phases[ $phase ] = array(
+				'options'          => self::signal( 'settle_expired' ),
+				'cron'             => self::signal( 'not_installed' ),
+				'action_scheduler' => self::signal( 'not_installed' ),
+			);
+		}
+
+		$result = ( new PotentialImpact() )->evaluate( $phases, true );
+
+		$this->assertSame( 'not_evaluated', $result['status'] );
+		$this->assertSame( array( 'not_evaluated', 'not_evaluated', 'not_applicable' ), array_column( $result['signals'], 'status' ) );
+	}
+
 	// ---------------------------------------------------------------------
-	// Rule 3: large autoloaded option.
+	// Large autoloaded option.
 	// ---------------------------------------------------------------------
 
 	/**
@@ -296,17 +475,21 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertSame(
 			array(
 				array(
-					'code'                 => 'large_autoloaded_option',
-					'signal'               => 'options',
-					'name'                 => 'acme_cache',
-					'transition'           => 'added',
-					'threshold_bytes'      => 150000,
-					'before_size'          => null,
-					'after_size'           => 180000,
-					'before_autoload'      => null,
-					'after_autoload'       => 'on',
-					'before_is_autoloaded' => null,
-					'after_is_autoloaded'  => true,
+					'code'     => 'large_autoloaded_option',
+					'signal'   => 'options',
+					'option'   => 'acme_cache',
+					'evidence' => array(
+						'transition'      => 'added',
+						'threshold_bytes' => 150000,
+						'size_delta'      => null,
+						'value_changed'   => null,
+					),
+					'before'   => null,
+					'after'    => array(
+						'size'          => 180000,
+						'autoload'      => 'on',
+						'is_autoloaded' => true,
+					),
 				),
 			),
 			$this->option_findings( array(), array( 'acme_cache' => array( self::bytes( 180000 ), 'on' ) ) )
@@ -368,9 +551,17 @@ final class PotentialImpactTest extends TestCase {
 
 		$this->assertCount( $is_found ? 1 : 0, $findings );
 		if ( $is_found ) {
-			$this->assertSame( 'grew_past_threshold', $findings[0]['transition'] );
-			$this->assertSame( array( $before, $after ), array( $findings[0]['before_size'], $findings[0]['after_size'] ) );
-			$this->assertTrue( $findings[0]['before_is_autoloaded'] );
+			$this->assertSame(
+				array(
+					'transition'      => 'grew_past_threshold',
+					'threshold_bytes' => 150000,
+					'size_delta'      => $after - $before,
+					'value_changed'   => true,
+				),
+				$findings[0]['evidence']
+			);
+			$this->assertSame( array( $before, $after ), array( $findings[0]['before']['size'], $findings[0]['after']['size'] ) );
+			$this->assertTrue( $findings[0]['before']['is_autoloaded'] );
 		}
 	}
 
@@ -420,25 +611,32 @@ final class PotentialImpactTest extends TestCase {
 	 */
 	public function test_large_option_becoming_autoloaded() {
 		$value = self::bytes( 200000 );
-		$found = $this->option_findings( array( 'acme_cache' => array( $value, 'off' ) ), array( 'acme_cache' => array( $value, 'on' ) ) );
 
 		$this->assertSame(
 			array(
 				array(
-					'code'                 => 'large_autoloaded_option',
-					'signal'               => 'options',
-					'name'                 => 'acme_cache',
-					'transition'           => 'became_autoloaded',
-					'threshold_bytes'      => 150000,
-					'before_size'          => 200000,
-					'after_size'           => 200000,
-					'before_autoload'      => 'off',
-					'after_autoload'       => 'on',
-					'before_is_autoloaded' => false,
-					'after_is_autoloaded'  => true,
+					'code'     => 'large_autoloaded_option',
+					'signal'   => 'options',
+					'option'   => 'acme_cache',
+					'evidence' => array(
+						'transition'      => 'became_autoloaded',
+						'threshold_bytes' => 150000,
+						'size_delta'      => 0,
+						'value_changed'   => false,
+					),
+					'before'   => array(
+						'size'          => 200000,
+						'autoload'      => 'off',
+						'is_autoloaded' => false,
+					),
+					'after'    => array(
+						'size'          => 200000,
+						'autoload'      => 'on',
+						'is_autoloaded' => true,
+					),
 				),
 			),
-			$found
+			$this->option_findings( array( 'acme_cache' => array( $value, 'off' ) ), array( 'acme_cache' => array( $value, 'on' ) ) )
 		);
 	}
 
@@ -449,8 +647,8 @@ final class PotentialImpactTest extends TestCase {
 		$found = $this->option_findings( array( 'acme_cache' => array( 'x', 'auto-off' ) ), array( 'acme_cache' => array( self::bytes( 200000 ), 'auto-on' ) ) );
 
 		$this->assertCount( 1, $found );
-		$this->assertSame( 'became_autoloaded', $found[0]['transition'] );
-		$this->assertSame( array( 1, 200000 ), array( $found[0]['before_size'], $found[0]['after_size'] ) );
+		$this->assertSame( 'became_autoloaded', $found[0]['evidence']['transition'] );
+		$this->assertSame( array( 1, 200000, 199999 ), array( $found[0]['before']['size'], $found[0]['after']['size'], $found[0]['evidence']['size_delta'] ) );
 	}
 
 	/**
@@ -462,12 +660,12 @@ final class PotentialImpactTest extends TestCase {
 		// Raw `auto` is effectively autoloaded: a finding.
 		$found = $this->option_findings( array(), array( 'acme_auto' => array( $large, 'auto' ) ) );
 		$this->assertCount( 1, $found );
-		$this->assertSame( array( 'auto', true ), array( $found[0]['after_autoload'], $found[0]['after_is_autoloaded'] ) );
+		$this->assertSame( array( 'auto', true ), array( $found[0]['after']['autoload'], $found[0]['after']['is_autoloaded'] ) );
 
 		// Raw change between two autoloaded values while crossing the threshold: growth, not "became autoloaded".
 		$found = $this->option_findings( array( 'acme_cache' => array( 'x', 'yes' ) ), array( 'acme_cache' => array( $large, 'auto-on' ) ) );
 		$this->assertCount( 1, $found );
-		$this->assertSame( array( 'grew_past_threshold', 'yes', 'auto-on' ), array( $found[0]['transition'], $found[0]['before_autoload'], $found[0]['after_autoload'] ) );
+		$this->assertSame( array( 'grew_past_threshold', 'yes', 'auto-on' ), array( $found[0]['evidence']['transition'], $found[0]['before']['autoload'], $found[0]['after']['autoload'] ) );
 
 		// Not autoloaded after (raw values that are off): never a finding.
 		$this->assertSame(
@@ -512,12 +710,20 @@ final class PotentialImpactTest extends TestCase {
 			)
 		);
 
-		$this->assertSame( array( '123', 'Z_turned', 'a_added', 'b_grows', 'c_added' ), array_column( $found, 'name' ) );
-		$this->assertSame( array( 'added', 'became_autoloaded', 'added', 'grew_past_threshold', 'added' ), array_column( $found, 'transition' ) );
+		$this->assertSame( array( '123', 'Z_turned', 'a_added', 'b_grows', 'c_added' ), array_column( $found, 'option' ) );
+		$this->assertSame(
+			array( 'added', 'became_autoloaded', 'added', 'grew_past_threshold', 'added' ),
+			array_map(
+				static function ( array $finding ) {
+					return $finding['evidence']['transition'];
+				},
+				$found
+			)
+		);
 	}
 
 	// ---------------------------------------------------------------------
-	// Rule 1: removed recurring WP-Cron event.
+	// Recurring WP-Cron event instance no longer observed.
 	// ---------------------------------------------------------------------
 
 	/**
@@ -527,19 +733,29 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertSame(
 			array(
 				array(
-					'code'                  => 'recurring_cron_event_removed',
-					'signal'                => 'cron',
-					'hook'                  => 'acme_daily_sync',
-					'removed'               => array(
-						array(
-							'timestamp' => self::T + 60,
-							'schedule'  => 'daily',
-							'interval'  => 86400,
+					'code'     => 'recurring_cron_event_removed',
+					'signal'   => 'cron',
+					'hook'     => 'acme_daily_sync',
+					'evidence' => array(
+						'removed_recurring_count' => 1,
+						'added_recurring_count'   => 0,
+						'not_replaced_count'      => 1,
+						'other_recorded_changes'  => array(
+							'added_one_time' => 0,
+							'rescheduled'    => 0,
+							'changed'        => 0,
 						),
 					),
-					'removed_count'         => 1,
-					'added_recurring_count' => 0,
-					'still_observed_count'  => 0,
+					'before'   => array(
+						'removed_recurring' => array(
+							array(
+								'timestamp' => self::T + 60,
+								'schedule'  => 'daily',
+								'interval'  => 86400,
+							),
+						),
+					),
+					'after'    => array( 'added_recurring' => array() ),
 				),
 			),
 			$this->cron_findings(
@@ -571,11 +787,11 @@ final class PotentialImpactTest extends TestCase {
 		);
 
 		$this->assertSame( array(), $result['findings'] );
-		$this->assertSame( 'evaluated', $result['checks'][1]['status'] );
+		$this->assertSame( array( 'evaluated', 0 ), array( $result['signals']['cron']['status'], $result['signals']['cron']['finding_count'] ) );
 	}
 
 	/**
-	 * Ordinary rescheduling of recurring events is never a finding.
+	 * Ordinary rescheduling of recurring events (a normal cron run) is never a finding.
 	 */
 	public function test_rescheduled_recurring_event_is_not_a_finding() {
 		$result = $this->evaluate(
@@ -634,7 +850,7 @@ final class PotentialImpactTest extends TestCase {
 	}
 
 	/**
-	 * Replaced by fewer recurring instances: a finding with the counts as evidence.
+	 * Replaced by fewer recurring instances: a finding with the replacement as evidence.
 	 */
 	public function test_partly_replaced_recurring_events() {
 		$found = $this->cron_findings(
@@ -644,18 +860,40 @@ final class PotentialImpactTest extends TestCase {
 				CronFixture::recurring( self::T, 'acme_sync', 'daily', array( 'site' => 2 ) ),
 			),
 			array(
-				CronFixture::recurring( self::T, 'acme_sync', 'daily', array( 'site' => 3 ) ),
+				CronFixture::recurring( self::T + 7, 'acme_sync', 'hourly', array( 'site' => 3 ) ),
 			)
 		);
 
 		$this->assertCount( 1, $found );
-		$this->assertSame( array( 2, 1, 1 ), array( $found[0]['removed_count'], $found[0]['added_recurring_count'], $found[0]['still_observed_count'] ) );
-		$this->assertCount( 2, $found[0]['removed'] );
+		$this->assertSame(
+			array(
+				'removed_recurring_count' => 2,
+				'added_recurring_count'   => 1,
+				'not_replaced_count'      => 1,
+				'other_recorded_changes'  => array(
+					'added_one_time' => 0,
+					'rescheduled'    => 0,
+					'changed'        => 0,
+				),
+			),
+			$found[0]['evidence']
+		);
+		$this->assertCount( 2, $found[0]['before']['removed_recurring'] );
+		$this->assertSame(
+			array(
+				array(
+					'timestamp' => self::T + 7,
+					'schedule'  => 'hourly',
+					'interval'  => 3600,
+				),
+			),
+			$found[0]['after']['added_recurring']
+		);
 	}
 
 	/**
 	 * A recurring event replaced only by a one-time event of the same hook is still a
-	 * finding: no recurring instance replaces it. The one-time event is evidence.
+	 * finding: no recurring instance replaces it. The one-time event is counted.
 	 */
 	public function test_recurring_event_replaced_by_one_time_event() {
 		$found = $this->cron_findings(
@@ -665,14 +903,17 @@ final class PotentialImpactTest extends TestCase {
 		);
 
 		$this->assertCount( 1, $found );
-		$this->assertSame( array( 1, 0, 1 ), array( $found[0]['removed_count'], $found[0]['added_recurring_count'], $found[0]['still_observed_count'] ) );
+		$this->assertSame( array( 1, 0, 1 ), array( $found[0]['evidence']['removed_recurring_count'], $found[0]['evidence']['added_recurring_count'], $found[0]['evidence']['not_replaced_count'] ) );
+		$this->assertSame( 1, $found[0]['evidence']['other_recorded_changes']['added_one_time'] );
+		$this->assertSame( array(), $found[0]['after']['added_recurring'] );
 	}
 
 	/**
-	 * Several instances of one hook: one finding per hook; instances that stay unchanged
-	 * are not in the diff, so `still_observed_count` counts only instances the diff shows.
+	 * Unchanged instances of a hook never appear in a diff. With one instance removed
+	 * and the others unchanged, the evidence shows zero other recorded changes — and
+	 * says nothing about whether instances remain (no "remaining" or "still observed" field).
 	 */
-	public function test_multiple_instances_of_one_hook() {
+	public function test_unchanged_instances_are_not_claimed_either_way() {
 		$before = array(
 			CronFixture::recurring( self::T, 'acme_sync', 'hourly', array( 'site' => 1 ) ),
 			CronFixture::recurring( self::T, 'acme_sync', 'hourly', array( 'site' => 2 ) ),
@@ -680,10 +921,16 @@ final class PotentialImpactTest extends TestCase {
 			CronFixture::recurring( self::T + 30, 'acme_sync', 'daily', array( 'site' => 4 ) ),
 		);
 
-		// One removed, the others unchanged: the diff cannot show that instances remain.
 		$found = $this->cron_findings( PotentialImpact::RECURRING_CRON_EVENT_REMOVED, $before, array_slice( $before, 0, 3 ) );
 		$this->assertCount( 1, $found );
-		$this->assertSame( array( 1, 0 ), array( $found[0]['removed_count'], $found[0]['still_observed_count'] ) );
+		$this->assertSame(
+			array(
+				'added_one_time' => 0,
+				'rescheduled'    => 0,
+				'changed'        => 0,
+			),
+			$found[0]['evidence']['other_recorded_changes']
+		);
 		$this->assertSame(
 			array(
 				array(
@@ -692,21 +939,48 @@ final class PotentialImpactTest extends TestCase {
 					'interval'  => 86400,
 				),
 			),
-			$found[0]['removed']
+			$found[0]['before']['removed_recurring']
 		);
 
-		// Two removed, one rescheduled, one unchanged: one finding; the rescheduled one is still observed.
+		$json = (string) json_encode( $found ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+		foreach ( array( 'still', 'remaining', 'disappeared', 'missing', 'gone', 'total' ) as $claim ) {
+			$this->assertStringNotContainsString( $claim, $json );
+		}
+	}
+
+	/**
+	 * Other recorded changes of the same hook are counted per list (rescheduled, changed).
+	 */
+	public function test_other_recorded_changes_of_the_hook() {
 		$found = $this->cron_findings(
 			PotentialImpact::RECURRING_CRON_EVENT_REMOVED,
-			$before,
 			array(
-				CronFixture::recurring( self::T + 3600, 'acme_sync', 'hourly', array( 'site' => 1 ) ),
+				CronFixture::recurring( self::T, 'acme_sync', 'hourly', array( 'site' => 1 ) ),
 				CronFixture::recurring( self::T, 'acme_sync', 'hourly', array( 'site' => 2 ) ),
+				CronFixture::recurring( self::T, 'acme_sync', 'daily', array( 'site' => 3 ) ),
+				CronFixture::recurring( self::T, 'other_hook', 'hourly' ),
+			),
+			array(
+				CronFixture::recurring( self::T + 3600, 'acme_sync', 'hourly', array( 'site' => 1 ) ), // Rescheduled.
+				CronFixture::recurring( self::T, 'acme_sync', 'weekly', array( 'site' => 3 ) ),        // Changed.
+				CronFixture::recurring( self::T + 3600, 'other_hook', 'hourly' ),                       // Other hook.
 			)
 		);
+
 		$this->assertCount( 1, $found );
-		$this->assertSame( array( 2, 0, 1 ), array( $found[0]['removed_count'], $found[0]['added_recurring_count'], $found[0]['still_observed_count'] ) );
-		$this->assertSame( array( 'hourly', 'daily' ), array_column( $found[0]['removed'], 'schedule' ) );
+		$this->assertSame(
+			array(
+				'removed_recurring_count' => 1,
+				'added_recurring_count'   => 0,
+				'not_replaced_count'      => 1,
+				'other_recorded_changes'  => array(
+					'added_one_time' => 0,
+					'rescheduled'    => 1,
+					'changed'        => 1,
+				),
+			),
+			$found[0]['evidence']
+		);
 	}
 
 	/**
@@ -726,7 +1000,7 @@ final class PotentialImpactTest extends TestCase {
 				'schedule'  => 'acme_custom',
 				'interval'  => null,
 			),
-			$found[0]['removed'][0]
+			$found[0]['before']['removed_recurring'][0]
 		);
 	}
 
@@ -744,11 +1018,11 @@ final class PotentialImpactTest extends TestCase {
 		);
 
 		$this->assertSame( array( 'recurring_schedule_changed' ), array_column( $result['findings'], 'code' ) );
-		$this->assertSame( 'no_longer_recurring', $result['findings'][0]['change'] );
+		$this->assertSame( array( 'no_longer_recurring' ), self::changes( $result['findings'] ) );
 	}
 
 	/**
-	 * Removal findings are sorted by hook, byte-wise.
+	 * Removal findings are sorted by hook, byte-wise; numeric hooks stay strings.
 	 */
 	public function test_removal_findings_sorted_by_hook() {
 		$found = $this->cron_findings(
@@ -764,10 +1038,11 @@ final class PotentialImpactTest extends TestCase {
 		);
 
 		$this->assertSame( array( '10', '9', 'B_hook', 'a_hook', 'b_hook' ), array_column( $found, 'hook' ) );
+		$this->assertSame( '10', $found[0]['hook'] );
 	}
 
 	// ---------------------------------------------------------------------
-	// Rule 2: changed recurring schedule.
+	// Recurring schedule configuration changed.
 	// ---------------------------------------------------------------------
 
 	/**
@@ -777,17 +1052,17 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertSame(
 			array(
 				array(
-					'code'   => 'recurring_schedule_changed',
-					'signal' => 'cron',
-					'hook'   => 'acme_sync',
-					'change' => 'interval_changed',
-					'before' => array(
+					'code'     => 'recurring_schedule_changed',
+					'signal'   => 'cron',
+					'hook'     => 'acme_sync',
+					'evidence' => array( 'change' => 'interval_changed' ),
+					'before'   => array(
 						'timestamp'    => self::T,
 						'schedule'     => 'daily',
 						'interval'     => 86400,
 						'is_recurring' => true,
 					),
-					'after'  => array(
+					'after'    => array(
 						'timestamp'    => self::T + 600,
 						'schedule'     => 'hourly',
 						'interval'     => 3600,
@@ -815,7 +1090,7 @@ final class PotentialImpactTest extends TestCase {
 	public function test_cron_schedule_changes( array $before, array $after, $change ) {
 		$found = $this->cron_findings( PotentialImpact::RECURRING_SCHEDULE_CHANGED, array( $before ), array( $after ) );
 
-		$this->assertSame( null === $change ? array() : array( $change ), array_column( $found, 'change' ) );
+		$this->assertSame( null === $change ? array() : array( $change ), self::changes( $found ) );
 	}
 
 	/**
@@ -846,19 +1121,19 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertSame(
 			array(
 				array(
-					'code'   => 'recurring_schedule_changed',
-					'signal' => 'action_scheduler',
-					'hook'   => 'acme_import',
-					'group'  => 'acme',
-					'change' => 'interval_changed',
-					'before' => array(
+					'code'     => 'recurring_schedule_changed',
+					'signal'   => 'action_scheduler',
+					'hook'     => 'acme_import',
+					'group'    => 'acme',
+					'evidence' => array( 'change' => 'interval_changed' ),
+					'before'   => array(
 						'timestamp'       => self::T,
 						'schedule_type'   => 'interval',
 						'interval'        => 3600,
 						'cron_expression' => null,
 						'is_recurring'    => true,
 					),
-					'after'  => array(
+					'after'    => array(
 						'timestamp'       => self::T + 60,
 						'schedule_type'   => 'interval',
 						'interval'        => 86400,
@@ -883,8 +1158,7 @@ final class PotentialImpactTest extends TestCase {
 			array( AS_Fixture::cron( 'acme_report', self::T, '0 0 * * *' ) )
 		);
 
-		$this->assertCount( 1, $found );
-		$this->assertSame( 'schedule_changed', $found[0]['change'] );
+		$this->assertSame( array( 'cron_expression_changed' ), self::changes( $found ) );
 		$this->assertSame( array( 'cron', null, '0 */6 * * *' ), array( $found[0]['before']['schedule_type'], $found[0]['before']['interval'], $found[0]['before']['cron_expression'] ) );
 		$this->assertSame( array( 'cron', null, '0 0 * * *' ), array( $found[0]['after']['schedule_type'], $found[0]['after']['interval'], $found[0]['after']['cron_expression'] ) );
 	}
@@ -901,7 +1175,7 @@ final class PotentialImpactTest extends TestCase {
 	public function test_action_scheduler_schedule_changes( array $before, array $after, $change ) {
 		$found = $this->action_scheduler_findings( array( $before ), array( $after ) );
 
-		$this->assertSame( null === $change ? array() : array( $change ), array_column( $found, 'change' ) );
+		$this->assertSame( null === $change ? array() : array( $change ), self::changes( $found ) );
 	}
 
 	/**
@@ -912,20 +1186,64 @@ final class PotentialImpactTest extends TestCase {
 	public function provide_action_scheduler_changes() {
 		$t = self::T;
 		return array(
-			'interval to cron'         => array( AS_Fixture::recurring( 'acme', $t, 3600 ), AS_Fixture::cron( 'acme', $t, '0 * * * *' ), 'schedule_changed' ),
-			'cron to interval'         => array( AS_Fixture::cron( 'acme', $t, '0 * * * *' ), AS_Fixture::recurring( 'acme', $t, 3600 ), 'schedule_changed' ),
-			'interval to single'       => array( AS_Fixture::recurring( 'acme', $t, 3600 ), AS_Fixture::single( 'acme', $t ), 'no_longer_recurring' ),
-			'cron to async'            => array( AS_Fixture::cron( 'acme', $t, '0 * * * *' ), AS_Fixture::async( 'acme', $t ), 'no_longer_recurring' ),
-			'single to interval'       => array( AS_Fixture::single( 'acme', $t ), AS_Fixture::recurring( 'acme', $t, 3600 ), null ),
-			'async to single'          => array( AS_Fixture::async( 'acme', $t ), AS_Fixture::single( 'acme', $t + 60 ), null ),
-			'recurring run (next row)' => array( AS_Fixture::recurring( 'acme', $t, 3600 ), AS_Fixture::recurring( 'acme', $t + 3600, 3600 ), null ),
-			'other arguments'          => array( AS_Fixture::recurring( 'acme', $t, 3600, array( 1 ) ), AS_Fixture::recurring( 'acme', $t, 600, array( 2 ) ), null ),
-			'other group'              => array( AS_Fixture::recurring( 'acme', $t, 3600, array(), 'one' ), AS_Fixture::recurring( 'acme', $t, 600, array(), 'two' ), null ),
+			'interval to cron'                   => array( AS_Fixture::recurring( 'acme', $t, 3600 ), AS_Fixture::cron( 'acme', $t, '0 * * * *' ), 'schedule_type_changed' ),
+			'cron to interval'                   => array( AS_Fixture::cron( 'acme', $t, '0 * * * *' ), AS_Fixture::recurring( 'acme', $t, 3600 ), 'schedule_type_changed' ),
+			'interval to single'                 => array( AS_Fixture::recurring( 'acme', $t, 3600 ), AS_Fixture::single( 'acme', $t ), 'no_longer_recurring' ),
+			'cron to async'                      => array( AS_Fixture::cron( 'acme', $t, '0 * * * *' ), AS_Fixture::async( 'acme', $t ), 'no_longer_recurring' ),
+			'other cron expression'              => array( AS_Fixture::cron( 'acme', $t, '0 9 * * MON' ), AS_Fixture::cron( 'acme', $t, '0 9 * * TUE' ), 'cron_expression_changed' ),
+			'year field restricted'              => array( AS_Fixture::cron( 'acme', $t, '0 0 * * *' ), AS_Fixture::cron( 'acme', $t, '0 0 * * * 2027' ), 'cron_expression_changed' ),
+			'other step'                         => array( AS_Fixture::cron( 'acme', $t, '*/5 * * * *' ), AS_Fixture::cron( 'acme', $t, '*/15 * * * *' ), 'cron_expression_changed' ),
+			'equivalent: trailing year *'        => array( AS_Fixture::cron( 'acme', $t, '0 0 * * *' ), AS_Fixture::cron( 'acme', $t + 60, '0 0 * * * *' ), null ),
+			'equivalent: day name and number'    => array( AS_Fixture::cron( 'acme', $t, '0 9 * * MON-FRI' ), AS_Fixture::cron( 'acme', $t, '0 9 * * 1-5' ), null ),
+			'equivalent: month name, lower case' => array( AS_Fixture::cron( 'acme', $t, '0 0 1 jan,Jul *' ), AS_Fixture::cron( 'acme', $t, '0 0 1 1,7 *' ), null ),
+			'equivalent: ? and *'                => array( AS_Fixture::cron( 'acme', $t, '0 0 ? * *' ), AS_Fixture::cron( 'acme', $t, '0 0 * * ?' ), null ),
+			'equivalent: step of 1'              => array( AS_Fixture::cron( 'acme', $t, '*/1 * * * *' ), AS_Fixture::cron( 'acme', $t, '* * * * *' ), null ),
+			'equivalent: leading zeros'          => array( AS_Fixture::cron( 'acme', $t, '05 00 * * *' ), AS_Fixture::cron( 'acme', $t, '5 0 * * *' ), null ),
+			'single to interval'                 => array( AS_Fixture::single( 'acme', $t ), AS_Fixture::recurring( 'acme', $t, 3600 ), null ),
+			'async to single'                    => array( AS_Fixture::async( 'acme', $t ), AS_Fixture::single( 'acme', $t + 60 ), null ),
+			'recurring run (next row)'           => array( AS_Fixture::recurring( 'acme', $t, 3600 ), AS_Fixture::recurring( 'acme', $t + 3600, 3600 ), null ),
+			'cron run (next row)'                => array( AS_Fixture::cron( 'acme', $t, '0 * * * *' ), AS_Fixture::cron( 'acme', $t + 3600, '0 * * * *' ), null ),
+			'other arguments'                    => array( AS_Fixture::recurring( 'acme', $t, 3600, array( 1 ) ), AS_Fixture::recurring( 'acme', $t, 600, array( 2 ) ), null ),
+			'other group'                        => array( AS_Fixture::recurring( 'acme', $t, 3600, array(), 'one' ), AS_Fixture::recurring( 'acme', $t, 600, array(), 'two' ), null ),
+			'equivalent cron, other arguments'   => array( AS_Fixture::cron( 'acme', $t, '0 0 * * *', array( 1 ) ), AS_Fixture::cron( 'acme', $t, '0 0 * * MON', array( 2 ) ), null ),
 		);
 	}
 
 	/**
-	 * A removed recurring action is not a finding: rule 1 covers WP-Cron only.
+	 * Ordinary execution is never a finding: an action that starts running, a recurring
+	 * action whose next run was queued while the current one runs, and actions that left
+	 * the queue (completed, failed or canceled) and show as removed.
+	 */
+	public function test_action_scheduler_execution_is_not_a_finding() {
+		$running = static function ( array $row ) {
+			$row['status'] = 'in-progress';
+			return $row;
+		};
+
+		$result = $this->evaluate(
+			null,
+			null,
+			$this->action_scheduler(
+				array(
+					AS_Fixture::recurring( 'acme_sync', self::T, 3600, array(), 'acme' ),
+					AS_Fixture::cron( 'acme_report', self::T, '0 * * * *', array(), 'acme' ),
+					AS_Fixture::recurring( 'acme_cleanup', self::T, 86400 ),
+					AS_Fixture::single( 'acme_once', self::T ),
+				),
+				array(
+					$running( AS_Fixture::recurring( 'acme_sync', self::T, 3600, array(), 'acme' ) ),
+					AS_Fixture::recurring( 'acme_sync', self::T + 3600, 3600, array(), 'acme' ),
+					AS_Fixture::cron( 'acme_report', self::T + 3600, '0 * * * *', array(), 'acme' ),
+				)
+			)
+		);
+
+		$this->assertSame( array(), $result['findings'] );
+		$this->assertSame( array( 'evaluated', 0 ), array( $result['signals']['action_scheduler']['status'], $result['signals']['action_scheduler']['finding_count'] ) );
+	}
+
+	/**
+	 * A removed recurring action is not a finding: the removal rule covers WP-Cron only.
 	 */
 	public function test_removed_recurring_action_is_not_a_finding() {
 		$result = $this->evaluate( null, null, $this->action_scheduler( array( AS_Fixture::recurring( 'acme', self::T, 3600 ) ), array() ) );
@@ -933,12 +1251,45 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertSame( array(), $result['findings'] );
 	}
 
+	/**
+	 * Equivalent cron forms, directly.
+	 *
+	 * @dataProvider provide_cron_expressions
+	 *
+	 * @param string $expression Expression.
+	 * @param string $expected   Equivalent form.
+	 */
+	public function test_equivalent_cron_expression( $expression, $expected ) {
+		$this->assertSame( $expected, PotentialImpact::equivalent_cron_expression( $expression ) );
+	}
+
+	/**
+	 * Expressions.
+	 *
+	 * @return array
+	 */
+	public function provide_cron_expressions() {
+		return array(
+			'plain'                     => array( '0 */6 * * *', '0 */6 * * *' ),
+			'year *'                    => array( '0 0 * * * *', '0 0 * * *' ),
+			'year kept'                 => array( '0 0 * * * 2027', '0 0 * * * 2027' ),
+			'names'                     => array( '0 9 * jan-mar mon,wed,FRI', '0 9 * 1-3 1,3,5' ),
+			'names only in their field' => array( '0 0 * * MAR', '0 0 * * MAR' ),
+			'question marks'            => array( '0 0 ? * ?', '0 0 * * *' ),
+			'step of one'               => array( '*/1 */1 * * *', '* * * * *' ),
+			'leading zeros'             => array( '00 05 01 01 0', '0 5 1 1 0' ),
+			'zero stays zero'           => array( '0 10 20 * 0', '0 10 20 * 0' ),
+			'last and nearest weekday'  => array( '0 0 LW * 5L', '0 0 LW * 5L' ),
+			'nth weekday name'          => array( '0 0 * * fri#2', '0 0 * * 5#2' ),
+		);
+	}
+
 	// ---------------------------------------------------------------------
-	// Ordering, determinism and privacy.
+	// Ordering, determinism, privacy and scale.
 	// ---------------------------------------------------------------------
 
 	/**
-	 * Every rule at once: findings follow the check order, then name/hook order.
+	 * Every rule at once: findings follow signal and rule order, then name/hook order.
 	 */
 	public function test_order_across_rules() {
 		$large  = self::bytes( 200000 );
@@ -990,7 +1341,7 @@ final class PotentialImpactTest extends TestCase {
 			),
 			array_map(
 				static function ( array $finding ) {
-					$subject = isset( $finding['name'] ) ? $finding['name'] : $finding['hook'];
+					$subject = isset( $finding['option'] ) ? $finding['option'] : $finding['hook'];
 					if ( isset( $finding['group'] ) ) {
 						$subject .= '/' . $finding['group'];
 					}
@@ -999,6 +1350,7 @@ final class PotentialImpactTest extends TestCase {
 				$result['findings']
 			)
 		);
+		$this->assertSame( array( 2, 4, 3 ), array_column( $result['signals'], 'finding_count' ) );
 	}
 
 	/**
@@ -1080,14 +1432,15 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertStringNotContainsString( '###', $json );
 		$this->assertStringNotContainsString( 'fingerprint', $json );
 		$this->assertStringNotContainsString( 'args', $json );
-		$this->assertStringNotContainsString( 'value', $json );
+		$this->assertStringNotContainsString( 'option_value', $json );
+		$this->assertStringNotContainsString( '"value"', $json );
 		$this->assertSame( 0, preg_match( '/[0-9a-f]{32}/', $json ), 'No hashes or md5 event keys.' );
 		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_serialize -- Checks the serialized form too.
 		$this->assertStringNotContainsString( self::FAKE_SECRET, serialize( $result ) );
 	}
 
 	/**
-	 * Finding keys are fixed per rule and signal (the evidence contract for later UI work).
+	 * Finding keys are fixed per rule and signal (the evidence contract for the UI).
 	 */
 	public function test_finding_keys() {
 		$large  = self::bytes( 200000 );
@@ -1103,14 +1456,121 @@ final class PotentialImpactTest extends TestCase {
 			$this->action_scheduler( array( AS_Fixture::recurring( 'acme', self::T, 60 ) ), array( AS_Fixture::recurring( 'acme', self::T, 120 ) ) )
 		);
 
+		$this->assertSame( array( 'phase', 'status', 'signals', 'findings' ), array_keys( $result ) );
 		$this->assertSame(
 			array(
-				array( 'code', 'signal', 'name', 'transition', 'threshold_bytes', 'before_size', 'after_size', 'before_autoload', 'after_autoload', 'before_is_autoloaded', 'after_is_autoloaded' ),
-				array( 'code', 'signal', 'hook', 'removed', 'removed_count', 'added_recurring_count', 'still_observed_count' ),
-				array( 'code', 'signal', 'hook', 'change', 'before', 'after' ),
-				array( 'code', 'signal', 'hook', 'group', 'change', 'before', 'after' ),
+				array( 'code', 'signal', 'option', 'evidence', 'before', 'after' ),
+				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after' ),
+				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after' ),
+				array( 'code', 'signal', 'hook', 'group', 'evidence', 'before', 'after' ),
 			),
 			array_map( 'array_keys', $result['findings'] )
 		);
+		$this->assertSame(
+			array(
+				array( 'transition', 'threshold_bytes', 'size_delta', 'value_changed' ),
+				array( 'removed_recurring_count', 'added_recurring_count', 'not_replaced_count', 'other_recorded_changes' ),
+				array( 'change' ),
+				array( 'change' ),
+			),
+			array_map(
+				static function ( array $finding ) {
+					return array_keys( $finding['evidence'] );
+				},
+				$result['findings']
+			)
+		);
+	}
+
+	/**
+	 * Large diffs (thousands of records per signal) stay fast and produce the expected findings.
+	 */
+	public function test_large_diffs() {
+		$options = array(
+			'added'   => array(),
+			'removed' => array(),
+			'changed' => array(),
+		);
+		$cron    = array(
+			'added'       => array(),
+			'removed'     => array(),
+			'rescheduled' => array(),
+			'changed'     => array(),
+		);
+		$as      = $cron;
+		for ( $i = 0; $i < 2000; $i++ ) {
+			$name                 = sprintf( 'opt_%05d', $i );
+			$options['added'][]   = array(
+				'name'          => $name,
+				'size'          => 0 === $i % 10 ? 200000 : 100,
+				'autoload'      => 'on',
+				'is_autoloaded' => true,
+			);
+			$options['changed'][] = array(
+				'name'                      => $name . '_c',
+				'value_changed'             => true,
+				'before_size'               => 100,
+				'after_size'                => 0 === $i % 10 ? 200000 : 200,
+				'size_delta'                => 0 === $i % 10 ? 199900 : 100,
+				'before_autoload'           => 'on',
+				'after_autoload'            => 'on',
+				'autoload_value_changed'    => false,
+				'before_is_autoloaded'      => true,
+				'after_is_autoloaded'       => true,
+				'autoload_behavior_changed' => false,
+			);
+			$hook                 = sprintf( 'hook_%05d', $i );
+			$event                = array(
+				'hook'         => $hook,
+				'timestamp'    => self::T,
+				'schedule'     => 'hourly',
+				'interval'     => 3600,
+				'is_recurring' => true,
+			);
+			$cron['removed'][]    = $event;
+			if ( 0 !== $i % 4 ) {
+				$cron['added'][] = $event; // Replaced: three of four hooks.
+			}
+			$cron['rescheduled'][] = array(
+				'hook'             => $hook,
+				'before_timestamp' => self::T,
+				'after_timestamp'  => self::T + 3600,
+				'timestamp_delta'  => 3600,
+				'schedule'         => 'hourly',
+				'interval'         => 3600,
+				'is_recurring'     => true,
+			);
+			$as['changed'][]       = array(
+				'hook'                   => $hook,
+				'group'                  => '',
+				'before_timestamp'       => self::T,
+				'after_timestamp'        => self::T,
+				'timestamp_changed'      => false,
+				'before_schedule_type'   => 'cron',
+				'after_schedule_type'    => 'cron',
+				'before_interval'        => null,
+				'after_interval'         => null,
+				'before_cron_expression' => '0 0 * * *',
+				'after_cron_expression'  => 0 === $i % 2 ? '0 0 * * * *' : '0 1 * * *',
+				'before_is_recurring'    => true,
+				'after_is_recurring'     => true,
+			);
+		}
+
+		$start   = microtime( true );
+		$result  = ( new PotentialImpact() )->evaluate(
+			array(
+				'final' => array(
+					'options'          => self::signal( $options ),
+					'cron'             => self::signal( $cron ),
+					'action_scheduler' => self::signal( $as ),
+				),
+			)
+		);
+		$elapsed = microtime( true ) - $start;
+
+		$this->assertSame( array( 400, 500, 1000 ), array_column( $result['signals'], 'finding_count' ) );
+		$this->assertSame( 1, $result['findings'][500]['evidence']['other_recorded_changes']['rescheduled'] );
+		$this->assertLessThan( 1.0, $elapsed, 'Evaluation of 14,000 records should take well under a second.' );
 	}
 }

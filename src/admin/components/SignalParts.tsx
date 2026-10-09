@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
+import { locatedPrecision, useLocated } from '../utils/highlight';
 import { Icon, type IconName } from './Icon';
 
 /*
@@ -77,7 +78,7 @@ export function ChangeMark( {
  * @param props.name      Identifier.
  * @param props.className Extra classes.
  */
-function Identifier( {
+export function Identifier( {
 	name,
 	className,
 }: {
@@ -114,6 +115,8 @@ function Identifier( {
  * @param props.meta     Secondary line directly under the name (e.g. an
  *                       Action Scheduler group).
  * @param props.quiet    Less emphasis (rescheduling).
+ * @param props.record   Diff record of the row, for locating it from a
+ *                       Potential Impact finding.
  * @param props.children Extra lines under the row.
  */
 export function ChangeRow( {
@@ -122,6 +125,7 @@ export function ChangeRow( {
 	facts,
 	meta,
 	quiet = false,
+	record,
 	children,
 }: {
 	kind: ChangeKind;
@@ -129,15 +133,43 @@ export function ChangeRow( {
 	facts: ReactNode;
 	meta?: ReactNode;
 	quiet?: boolean;
+	record?: object;
 	children?: ReactNode;
 } ) {
+	// `exact`: the finding's own entry; `group`: an entry of the same hook.
+	const located = locatedPrecision( useLocated(), record );
+
 	return (
-		<li className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 px-4 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-4">
+		<li
+			data-updatelens-located={ located ?? undefined }
+			className={ cn(
+				'grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 px-4 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-4',
+				located && 'scroll-mt-24',
+				located === 'exact' &&
+					'bg-tint shadow-[inset_3px_0_0_hsl(var(--primary))]',
+				located === 'group' &&
+					'shadow-[inset_3px_0_0_theme(colors.slate.300)]'
+			) }
+		>
 			<ChangeMark kind={ kind } />
 			<Identifier
 				name={ name }
 				className={ cn( quiet && 'font-normal text-slate-700' ) }
 			/>
+			{ located && (
+				<p
+					className={ cn(
+						'col-start-2 -mt-0.5 text-xs font-medium leading-5 sm:col-end-[-1]',
+						located === 'exact'
+							? 'text-tint-foreground'
+							: 'text-slate-600'
+					) }
+				>
+					{ located === 'exact'
+						? __( 'From Potential Impact', 'updatelens' )
+						: __( 'Same hook as the finding', 'updatelens' ) }
+				</p>
+			) }
 			{ meta && (
 				<div className="col-start-2 -mt-1 text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere] sm:col-end-[-1]">
 					{ meta }

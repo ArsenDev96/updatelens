@@ -16,10 +16,28 @@ import type { PhaseKey, Provider } from '@/admin/types/api';
  * @param options        View.
  * @param options.signal Signal whose details are open (default: the overview).
  * @param options.phase  Phase in the URL (default: none, the report's default phase).
+ * @param options.item   Located option name or hook (`&item=`).
+ * @param options.group  Located Action Scheduler group (`&group=`).
+ * @param options.kind   Located change list (`&kind=`).
+ * @param options.finding Index of the located finding (`&finding=`).
  */
 export function openReport(
 	id: number,
-	{ signal, phase }: { signal?: Provider; phase?: PhaseKey } = {}
+	{
+		signal,
+		phase,
+		item,
+		group,
+		kind,
+		finding,
+	}: {
+		signal?: Provider;
+		phase?: PhaseKey;
+		item?: string;
+		group?: string;
+		kind?: string;
+		finding?: number;
+	} = {}
 ) {
 	const params = new URLSearchParams( {
 		page: 'updatelens',
@@ -30,6 +48,18 @@ export function openReport(
 	}
 	if ( phase ) {
 		params.set( 'phase', phase );
+	}
+	if ( item !== undefined ) {
+		params.set( 'item', item );
+	}
+	if ( group !== undefined ) {
+		params.set( 'group', group );
+	}
+	if ( kind !== undefined ) {
+		params.set( 'kind', kind );
+	}
+	if ( finding !== undefined ) {
+		params.set( 'finding', String( finding ) );
 	}
 	window.history.replaceState(
 		null,

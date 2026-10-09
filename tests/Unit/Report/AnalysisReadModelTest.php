@@ -11,10 +11,16 @@ use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use UpdateLens\Diff\ActionSchedulerDiffBuilder;
 use UpdateLens\Diff\CronDiffBuilder;
+use UpdateLens\Diff\OptionsDiffBuilder;
 use UpdateLens\Report\AnalysisReadModel;
 use UpdateLens\Report\UnavailableReason;
+use UpdateLens\Snapshot\AutoloadPolicy;
+use UpdateLens\Snapshot\OptionNoiseFilter;
+use UpdateLens\Snapshot\OptionsSnapshotBuilder;
+use UpdateLens\Snapshot\OptionValueHasher;
 use UpdateLens\Storage\ActionSchedulerDiffCodec;
 use UpdateLens\Storage\CronDiffCodec;
+use UpdateLens\Storage\OptionsDiffCodec;
 use UpdateLens\Tests\Support\ActionSchedulerFixture;
 use UpdateLens\Tests\Support\CronFixture;
 use UpdateLens\Update\ActionSchedulerPhaseReason;
@@ -298,7 +304,7 @@ final class AnalysisReadModelTest extends TestCase {
 	public function test_report_whitelists_fields() {
 		$report = ( new AnalysisReadModel() )->report( self::row() );
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'error' ), array_keys( $report ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'error' ), array_keys( $report ) );
 		$this->assertSame( 300, $report['observation_window_seconds'] );
 		foreach ( $report['phases'] as $phase ) {
 			$this->assertSame( array( 'options', 'cron', 'action_scheduler' ), array_keys( $phase ) );
@@ -736,10 +742,28 @@ final class AnalysisReadModelTest extends TestCase {
 	}
 
 	/**
-	 * The pass-through list is exactly ActionSchedulerPhaseReason::ALL.
+	 * Every stored reason is either passed through or reported under another
+	 * known code: together exactly ActionSchedulerPhaseReason::ALL.
 	 */
 	public function test_action_scheduler_reason_list_is_complete() {
-		$this->assertSame( ActionSchedulerPhaseReason::ALL, AnalysisReadModel::ACTION_SCHEDULER_REASONS );
+		$stored = array_merge( AnalysisReadModel::ACTION_SCHEDULER_REASONS, array_keys( AnalysisReadModel::ACTION_SCHEDULER_REPORTED_AS ) );
+		sort( $stored );
+		$all = ActionSchedulerPhaseReason::ALL;
+		sort( $all );
+
+		$this->assertSame( $all, $stored );
+		$this->assertSame( array(), array_intersect( array_keys( AnalysisReadModel::ACTION_SCHEDULER_REPORTED_AS ), AnalysisReadModel::ACTION_SCHEDULER_REASONS ) );
+		$this->assertSame( array(), array_diff( AnalysisReadModel::ACTION_SCHEDULER_REPORTED_AS, AnalysisReadModel::ACTION_SCHEDULER_REASONS ) );
+	}
+
+	/**
+	 * Absence at both captures is stored as its own code and reported as `not_installed`.
+	 */
+	public function test_action_scheduler_absent_at_both_captures_is_reported_as_not_installed() {
+		$report = ( new AnalysisReadModel() )->report( self::row( array( 'action_scheduler_during_update_reason' => 'not_installed_throughout' ) ) );
+
+		$this->assertSame( 'not_installed', $report['phases']['during_update']['action_scheduler']['reason'] );
+		$this->assertStringNotContainsString( 'not_installed_throughout', (string) json_encode( $report ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
 	}
 
 	/**
@@ -905,5 +929,355 @@ final class AnalysisReadModelTest extends TestCase {
 			),
 			$report['phases']['during_update']['options']
 		);
+	}
+
+	// ---------------------------------------------------------------------
+	// Potential Impact.
+	// ---------------------------------------------------------------------
+
+	/**
+	 * Stored Options diff JSON from `name => [ raw value, raw autoload ]` rows.
+	 *
+	 * @param array $before Options before.
+	 * @param array $after  Options after.
+	 * @return string
+	 */
+	private static function options_diff_json( array $before, array $after ) {
+		$builder = new OptionsSnapshotBuilder( new OptionValueHasher( 'test-site-secret' ), new OptionNoiseFilter(), new AutoloadPolicy( array( 'yes', 'on', 'auto-on', 'auto' ) ) );
+		$rows    = static function ( array $options ) {
+			$rows = array();
+			foreach ( $options as $name => $option ) {
+				$rows[] = array(
+					'option_name'  => $name,
+					'option_value' => $option[0],
+					'autoload'     => $option[1],
+				);
+			}
+			return $rows;
+		};
+
+		return ( new OptionsDiffCodec() )->encode( ( new OptionsDiffBuilder() )->build( $builder->build( $rows( $before ) ), $builder->build( $rows( $after ) ) ) );
+	}
+
+	/**
+	 * Stored Cron diff JSON with one removed recurring event (secret arguments).
+	 *
+	 * @return string
+	 */
+	private static function cron_removal_json() {
+		$before = CronFixture::snapshot(
+			CronFixture::cron(
+				array(
+					CronFixture::recurring( 1767225600, 'acme_sync', 'hourly', array( 'token' => self::FAKE_SECRET ) ),
+					CronFixture::recurring( 1767225600, 'wp_version_check', 'twicedaily' ),
+				)
+			)
+		);
+		$after  = CronFixture::snapshot( CronFixture::cron( array( CronFixture::recurring( 1767268800, 'wp_version_check', 'twicedaily' ) ) ) );
+
+		return ( new CronDiffCodec() )->encode( ( new CronDiffBuilder() )->build( $before, $after ) );
+	}
+
+	/**
+	 * A completed report with all three Net results: findings from the decoded
+	 * diffs, every signal evaluated, nothing secret in the output.
+	 */
+	public function test_potential_impact_of_a_completed_report() {
+		$report = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'settle_outcome'              => 'admin_shutdown',
+					'options_final_diff'          => self::options_diff_json(
+						array( 'acme_settings' => array( self::FAKE_SECRET, 'on' ) ),
+						array(
+							'acme_settings' => array( self::FAKE_SECRET, 'on' ),
+							'acme_cache'    => array( str_pad( self::FAKE_SECRET, 200000, '#' ), 'auto' ),
+						)
+					),
+					'cron_final_diff'             => self::cron_removal_json(),
+					'action_scheduler_final_diff' => self::action_scheduler_diff_json(),
+				)
+			)
+		);
+		$impact = $report['potential_impact'];
+
+		$this->assertSame( array( 'final', 'evaluated' ), array( $impact['phase'], $impact['status'] ) );
+		$this->assertSame( array( 1, 1, 1 ), array_values( array_column( $impact['signals'], 'finding_count' ) ) );
+		$this->assertSame(
+			array(
+				'large_autoloaded_option:acme_cache:added',
+				'recurring_cron_event_removed:acme_sync:1',
+				'recurring_schedule_changed:acme_sync:schedule_type_changed',
+			),
+			array_map(
+				static function ( array $finding ) {
+					$evidence = $finding['evidence'];
+					if ( isset( $evidence['transition'] ) ) {
+						$detail = $evidence['transition'];
+					} elseif ( isset( $evidence['change'] ) ) {
+						$detail = $evidence['change'];
+					} else {
+						$detail = $evidence['not_replaced_count'];
+					}
+					return $finding['code'] . ':' . ( isset( $finding['option'] ) ? $finding['option'] : $finding['hook'] ) . ':' . $detail;
+				},
+				$impact['findings']
+			)
+		);
+		$this->assertSame( 'acme', $impact['findings'][2]['group'] );
+		$this->assertSame(
+			array( 'interval', 86400, null, 'cron', null, '0 */6 * * *' ),
+			array(
+				$impact['findings'][2]['before']['schedule_type'],
+				$impact['findings'][2]['before']['interval'],
+				$impact['findings'][2]['before']['cron_expression'],
+				$impact['findings'][2]['after']['schedule_type'],
+				$impact['findings'][2]['after']['interval'],
+				$impact['findings'][2]['after']['cron_expression'],
+			)
+		);
+
+		$json = (string) json_encode( $impact ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+		foreach ( array( self::FAKE_SECRET, self::AS_SECRET, '###', 'token', 'fingerprint', 'args', 'snapshot', '"schema"' ) as $needle ) {
+			$this->assertStringNotContainsString( $needle, $json );
+		}
+	}
+
+	/**
+	 * Only the Net result is evaluated: changes recorded only during or after the update are not findings.
+	 */
+	public function test_potential_impact_reads_only_the_net_result() {
+		$empty_cron = ( new CronDiffCodec() )->encode( ( new CronDiffBuilder() )->build( CronFixture::snapshot( CronFixture::cron( array() ) ), CronFixture::snapshot( CronFixture::cron( array() ) ) ) );
+		$report     = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'settle_outcome'          => 'admin_shutdown',
+					'cron_during_update_diff' => self::cron_removal_json(),
+					'cron_post_update_diff'   => self::cron_removal_json(),
+					'cron_final_diff'         => $empty_cron,
+				)
+			)
+		);
+		$cron       = $report['potential_impact']['signals']['cron'];
+
+		$this->assertSame( array( 'evaluated', null, 0 ), array( $cron['status'], $cron['reason'], $cron['finding_count'] ) );
+		$this->assertSame( array(), $report['potential_impact']['findings'] );
+	}
+
+	/**
+	 * Lifecycle states without a Net result: nothing evaluated, and every signal
+	 * carries exactly the reason of its Net result phase.
+	 *
+	 * @return array
+	 */
+	public function provide_unevaluated_states() {
+		return array(
+			'update in progress' => array( array( 'status' => 'captured' ), array( 'update_in_progress', 'update_in_progress', 'update_in_progress' ) ),
+			'awaiting settle'    => array( array( 'status' => 'awaiting_settle' ), array( 'awaiting_settle', 'awaiting_settle', 'awaiting_settle' ) ),
+			'expired'            => array(
+				array(
+					'cron_final_reason'             => 'settle_expired',
+					'action_scheduler_final_reason' => 'settle_expired',
+				),
+				array( 'settle_expired', 'settle_expired', 'settle_expired' ),
+			),
+			'update failed'      => array(
+				array(
+					'status'                        => 'failed',
+					'error_code'                    => 'update_failed',
+					'settle_outcome'                => 'not_applicable',
+					'cron_final_reason'             => 'update_failed',
+					'action_scheduler_final_reason' => 'update_failed',
+				),
+				array( 'update_failed', 'update_failed', 'update_failed' ),
+			),
+			'incompatible'       => array(
+				array(
+					'status'                        => 'incompatible',
+					'cron_final_reason'             => 'analysis_ended',
+					'action_scheduler_final_reason' => 'analysis_ended',
+				),
+				array( 'fingerprint_context_changed', 'analysis_ended', 'analysis_ended' ),
+			),
+			'abandoned'          => array(
+				array(
+					'status'                        => 'abandoned',
+					'cron_final_reason'             => 'analysis_abandoned',
+					'action_scheduler_final_reason' => 'analysis_abandoned',
+				),
+				array( 'analysis_abandoned', 'analysis_abandoned', 'analysis_abandoned' ),
+			),
+		);
+	}
+
+	/**
+	 * Unevaluated lifecycle states.
+	 *
+	 * @dataProvider provide_unevaluated_states
+	 * @param array    $overrides Row overrides.
+	 * @param string[] $reasons   Expected reasons: options, cron, action_scheduler.
+	 */
+	public function test_potential_impact_without_a_net_result( array $overrides, array $reasons ) {
+		$report = ( new AnalysisReadModel() )->report( self::row( $overrides ) );
+		$impact = $report['potential_impact'];
+
+		$this->assertSame( 'not_evaluated', $impact['status'] );
+		$this->assertSame( array(), $impact['findings'] );
+		$this->assertSame( $reasons, array_values( array_column( $impact['signals'], 'reason' ) ) );
+		foreach ( $impact['signals'] as $signal => $evaluation ) {
+			$this->assertSame( array( 'not_evaluated', null ), array( $evaluation['status'], $evaluation['finding_count'] ) );
+			$this->assertSame( $report['phases']['final'][ $signal ]['reason'], $evaluation['reason'] );
+		}
+	}
+
+	/**
+	 * A failed provider only affects its own evaluation; the others still run.
+	 */
+	public function test_potential_impact_with_failed_providers() {
+		$report = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'settle_outcome'                => 'admin_shutdown',
+					'options_final_diff'            => self::options_diff_json( array(), array() ),
+					'cron_final_reason'             => 'malformed_cron_state',
+					'action_scheduler_final_reason' => 'not_installed',
+				)
+			)
+		);
+		$impact = $report['potential_impact'];
+
+		$this->assertSame( 'partial', $impact['status'] );
+		$this->assertSame(
+			array(
+				array( 'evaluated', null, 0 ),
+				array( 'not_evaluated', 'malformed_cron_state', null ),
+				array( 'not_evaluated', 'not_installed', null ),
+			),
+			array_map(
+				static function ( array $signal ) {
+					return array( $signal['status'], $signal['reason'], $signal['finding_count'] );
+				},
+				array_values( $impact['signals'] )
+			)
+		);
+	}
+
+	/**
+	 * Stored Action Scheduler reasons per phase (during, post, final) and the
+	 * expected Potential Impact status and reason, the overall status, and the
+	 * reasons the phases report.
+	 *
+	 * `not_installed` is what analyses stored before absence was resolved per
+	 * phase; it never shows what a phase's later capture found, so those
+	 * reports are not applicable for no combination.
+	 *
+	 * @return array<string, array{array<int, string|null>, array{string, string}, string, array<int, string>}>
+	 */
+	public function provide_stored_action_scheduler_presence() {
+		$t  = 'not_installed_throughout';
+		$ni = 'not_installed';
+
+		return array(
+			'absent at every capture'                => array( array( $t, $t, $t ), array( 'not_applicable', $ni ), 'evaluated', array( $ni, $ni, $ni ) ),
+			'historical: not_installed everywhere'   => array( array( $ni, $ni, $ni ), array( 'not_evaluated', $ni ), 'partial', array( $ni, $ni, $ni ) ),
+			'historical: Net result only'            => array( array( null, null, $ni ), array( 'not_evaluated', $ni ), 'partial', array( 'not_recorded', 'not_recorded', $ni ) ),
+			'historical row settled by new code'     => array( array( $ni, $t, $ni ), array( 'not_evaluated', $ni ), 'partial', array( $ni, $ni, $ni ) ),
+			'newly detected at settle'               => array( array( $t, 'newly_detected', 'newly_detected' ), array( 'not_evaluated', 'newly_detected' ), 'partial', array( $ni, 'newly_detected', 'newly_detected' ) ),
+			'detected only between the ends'         => array( array( 'newly_detected', 'no_longer_detected', $t ), array( 'not_evaluated', $ni ), 'partial', array( 'newly_detected', 'no_longer_detected', $ni ) ),
+			'no longer detected with the update'     => array( array( 'no_longer_detected', $t, 'no_longer_detected' ), array( 'not_evaluated', 'no_longer_detected' ), 'partial', array( 'no_longer_detected', $ni, 'no_longer_detected' ) ),
+			'absent, then the settle window expired' => array( array( $t, 'settle_expired', 'settle_expired' ), array( 'not_evaluated', 'settle_expired' ), 'partial', array( $ni, 'settle_expired', 'settle_expired' ) ),
+			'absent, then unreadable'                => array( array( $t, 'snapshot_unavailable', 'snapshot_unavailable' ), array( 'not_evaluated', 'snapshot_unavailable' ), 'partial', array( $ni, 'snapshot_unavailable', 'snapshot_unavailable' ) ),
+		);
+	}
+
+	/**
+	 * Action Scheduler is not applicable only when every phase stored absence
+	 * at both captures; historical `not_installed` and every transition stay
+	 * `not_evaluated`, and the phases keep their reported reasons.
+	 *
+	 * @dataProvider provide_stored_action_scheduler_presence
+	 * @param array<int, string|null> $stored   Stored reason per phase.
+	 * @param array{string, string}   $expected Potential Impact status and reason.
+	 * @param string                  $overall  Overall Potential Impact status.
+	 * @param array<int, string>      $reported Reported reason per phase.
+	 */
+	public function test_potential_impact_without_action_scheduler( array $stored, array $expected, $overall, array $reported ) {
+		$report = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'settle_outcome'                      => 'admin_shutdown',
+					'options_final_diff'                  => self::options_diff_json( array(), array() ),
+					'cron_final_diff'                     => self::cron_diff_json(),
+					'action_scheduler_during_update_reason' => $stored[0],
+					'action_scheduler_post_update_reason' => $stored[1],
+					'action_scheduler_final_reason'       => $stored[2],
+				)
+			)
+		);
+		$signal = $report['potential_impact']['signals']['action_scheduler'];
+
+		$this->assertSame( $expected, array( $signal['status'], $signal['reason'] ) );
+		$this->assertNull( $signal['finding_count'] );
+		$this->assertSame( $overall, $report['potential_impact']['status'] );
+		$this->assertSame( $reported, array_column( self::action_scheduler( $report ), 'reason' ) );
+	}
+
+	/**
+	 * An unreadable Net result diff is `data_corrupt` for that signal only; the report is still built.
+	 */
+	public function test_potential_impact_with_a_corrupt_diff() {
+		$report = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'settle_outcome'              => 'admin_shutdown',
+					'options_final_diff'          => '{"schema":1,"added":"' . self::FAKE_SECRET . '"',
+					'cron_final_diff'             => self::cron_removal_json(),
+					'action_scheduler_final_diff' => self::cron_diff_json(),
+				)
+			)
+		);
+		$impact = $report['potential_impact'];
+
+		$this->assertSame( 'partial', $impact['status'] );
+		$this->assertSame( array( 'data_corrupt', null, 'data_corrupt' ), array_values( array_column( $impact['signals'], 'reason' ) ) );
+		$this->assertSame( array( 'recurring_cron_event_removed' ), array_column( $impact['findings'], 'code' ) );
+		$this->assertStringNotContainsString( self::FAKE_SECRET, (string) json_encode( $impact ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- No WordPress in unit tests.
+	}
+
+	/**
+	 * Historical reports: before WP-Cron (schema < 3) and Action Scheduler (schema < 4)
+	 * were captured, and rows without those columns at all. Options are still evaluated.
+	 */
+	public function test_potential_impact_of_historical_reports() {
+		$options = self::options_diff_json( array(), array( 'acme_cache' => array( str_repeat( 'x', 160000 ), 'yes' ) ) );
+
+		$not_captured    = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'settle_outcome'                => 'admin_shutdown',
+					'options_final_diff'            => $options,
+					'cron_final_reason'             => 'not_captured',
+					'action_scheduler_final_reason' => 'not_captured',
+				)
+			)
+		);
+		$without_columns = ( new AnalysisReadModel() )->report(
+			self::row(
+				array(
+					'settle_outcome'     => 'admin_shutdown',
+					'options_final_diff' => $options,
+				)
+			)
+		);
+
+		foreach ( array(
+			'not_captured' => $not_captured,
+			'not_recorded' => $without_columns,
+		) as $reason => $report ) {
+			$impact = $report['potential_impact'];
+			$this->assertSame( 'partial', $impact['status'] );
+			$this->assertSame( array( null, $reason, $reason ), array_values( array_column( $impact['signals'], 'reason' ) ) );
+			$this->assertSame( array( 'large_autoloaded_option' ), array_column( $impact['findings'], 'code' ) );
+		}
 	}
 }

@@ -285,6 +285,7 @@ describe( 'routes', () => {
 			page: 1,
 			phase: null,
 			signal: null,
+			item: null,
 		} );
 		expect(
 			parseRoute(
@@ -296,14 +297,111 @@ describe( 'routes', () => {
 			page: 2,
 			phase: 'post_update',
 			signal: 'action_scheduler',
+			item: null,
 		} );
 	} );
 
+	it( 'parses a located item on signal details only', () => {
+		expect(
+			parseRoute(
+				'?page=updatelens&analysis=42&signal=cron&phase=final&item=acme_sync'
+			)
+		).toMatchObject( {
+			signal: 'cron',
+			phase: 'final',
+			item: { name: 'acme_sync', group: null },
+		} );
+		// An empty group is a real Action Scheduler group ("no group").
+		expect(
+			parseRoute(
+				'?page=updatelens&analysis=42&signal=action_scheduler&item=a%26b%3Cscript%3E&group='
+			)
+		).toMatchObject( { item: { name: 'a&b<script>', group: '' } } );
+		expect(
+			parseRoute( '?page=updatelens&analysis=42&item=acme_sync' )
+		).toMatchObject( { signal: null, item: null } );
+		expect(
+			parseRoute(
+				'?page=updatelens&analysis=42&signal=cron&item=acme_sync&kind=removed'
+			)
+		).toMatchObject( { item: { name: 'acme_sync', kind: 'removed' } } );
+		// Unknown lists locate rows of every list.
+		expect(
+			parseRoute(
+				'?page=updatelens&analysis=42&signal=cron&item=acme_sync&kind=rescheduled'
+			)
+		).toMatchObject( { item: { name: 'acme_sync', kind: null } } );
+		expect(
+			parseRoute( '?page=updatelens&analysis=42&signal=cron&item=' )
+		).toMatchObject( { item: null } );
+	} );
+
+	it( 'parses and builds the index of a located finding', () => {
+		expect(
+			parseRoute(
+				'?page=updatelens&analysis=42&signal=cron&item=acme_sync&kind=changed&finding=0'
+			)
+		).toMatchObject( { item: { name: 'acme_sync', finding: 0 } } );
+		// Anything but a whole number locates by name only.
+		for ( const value of [ '-1', '1.5', 'x', '' ] ) {
+			expect(
+				parseRoute(
+					`?page=updatelens&analysis=42&signal=cron&item=acme_sync&finding=${ value }`
+				)
+			).toMatchObject( { item: { name: 'acme_sync', finding: null } } );
+		}
+		expect(
+			routeHref(
+				{
+					view: 'report',
+					id: 42,
+					page: 1,
+					phase: 'final',
+					signal: 'cron',
+					item: {
+						name: 'acme_sync',
+						group: null,
+						kind: 'changed',
+						finding: 3,
+					},
+				},
+				base
+			)
+		).toBe(
+			'/wp-admin/admin.php?page=updatelens&analysis=42&signal=cron&phase=final&item=acme_sync&kind=changed&finding=3'
+		);
+	} );
+
+	it( 'builds URLs with a located item, encoded', () => {
+		const route = {
+			view: 'report',
+			id: 42,
+			page: 1,
+			phase: 'final',
+			signal: 'action_scheduler',
+			item: { name: 'woo/hook & more', group: '' },
+		} as const;
+		const url = routeHref( route, base );
+		expect( url ).toBe(
+			'/wp-admin/admin.php?page=updatelens&analysis=42&signal=action_scheduler&phase=final&item=woo%2Fhook+%26+more&group='
+		);
+		expect( parseRoute( url.slice( url.indexOf( '?' ) ) ) ).toMatchObject( {
+			item: route.item,
+		} );
+		// Without a signal the item is dropped.
+		expect( routeHref( { ...route, signal: null }, base ) ).toBe(
+			'/wp-admin/admin.php?page=updatelens&analysis=42&phase=final'
+		);
+	} );
+
 	it.each( [
-		[ 'signal=Options', { phase: null, signal: null } ],
-		[ 'signal=as', { phase: null, signal: null } ],
-		[ 'phase=net', { phase: null, signal: null } ],
-		[ 'signal=cron&phase=final', { phase: 'final', signal: 'cron' } ],
+		[ 'signal=Options', { phase: null, signal: null, item: null } ],
+		[ 'signal=as', { phase: null, signal: null, item: null } ],
+		[ 'phase=net', { phase: null, signal: null, item: null } ],
+		[
+			'signal=cron&phase=final',
+			{ phase: 'final', signal: 'cron', item: null },
+		],
 	] )(
 		'falls back to the overview and default phase (%s)',
 		( query, view ) => {

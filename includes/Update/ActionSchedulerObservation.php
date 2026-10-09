@@ -35,10 +35,17 @@ defined( 'ABSPATH' ) || exit;
  * Phase dependencies: during_update needs BEFORE + IMMEDIATE, post_update
  * needs IMMEDIATE + SETTLED, final needs BEFORE + SETTLED. A phase is
  * available only when both of its captures are readable snapshots;
- * otherwise it carries the reason of the first capture that was not. So a
- * capture that fails (or an availability change, e.g. not installed before
- * the update and available after it) only affects the phases that need it,
- * and no diff is ever invented across an unavailable capture.
+ * otherwise it carries the reason of the first capture that failed. So a
+ * failing capture (or an availability change) only affects the phases that
+ * need it, and no diff is ever invented across an unavailable capture.
+ *
+ * Absence is resolved per phase from both captures, never from the first
+ * one alone: a capture that finds no Action Scheduler is kept as
+ * NOT_INSTALLED_MARKER in its temporary snapshot column, and the phase gets
+ * `not_installed_throughout` (absent at both), `newly_detected` (readable
+ * at the later capture) or the later capture's failure. Readable first and
+ * absent later is `no_longer_detected`. A phase whose later capture never
+ * happens gets the lifecycle reason (update failed, settle expired, …).
  */
 final class ActionSchedulerObservation {
 
@@ -51,6 +58,12 @@ final class ActionSchedulerObservation {
 	 * Temporary IMMEDIATE snapshot column.
 	 */
 	const IMMEDIATE_SNAPSHOT = 'action_scheduler_immediate_snapshot';
+
+	/**
+	 * Temporary snapshot column value for a capture that found no Action
+	 * Scheduler (never valid codec JSON). Cleared with the snapshots.
+	 */
+	const NOT_INSTALLED_MARKER = 'not_installed';
 
 	/**
 	 * Diff and reason column per phase.
@@ -142,6 +155,10 @@ final class ActionSchedulerObservation {
 	 * @return array<string, string|null>
 	 */
 	public function before( $before ) {
+		if ( ActionSchedulerPhaseReason::NOT_INSTALLED === $before ) {
+			// Resolved with the later captures: absence alone decides no phase.
+			return array( self::BEFORE_SNAPSHOT => self::NOT_INSTALLED_MARKER );
+		}
 		if ( is_string( $before ) ) {
 			return self::reasons( self::DEPENDENTS[ self::BEFORE_SNAPSHOT ], $before );
 		}
@@ -166,7 +183,9 @@ final class ActionSchedulerObservation {
 	public function immediate( array $row, $immediate ) {
 		$changes = array();
 
-		if ( is_string( $immediate ) ) {
+		if ( ActionSchedulerPhaseReason::NOT_INSTALLED === $immediate ) {
+			$changes[ self::IMMEDIATE_SNAPSHOT ] = self::NOT_INSTALLED_MARKER;
+		} elseif ( is_string( $immediate ) ) {
 			$changes += self::reasons( self::DEPENDENTS[ self::IMMEDIATE_SNAPSHOT ], $immediate );
 		} else {
 			try {
@@ -239,15 +258,16 @@ final class ActionSchedulerObservation {
 	 * The same changes without any Action Scheduler payload, for retrying a write that failed.
 	 *
 	 * Snapshots and diffs are dropped; every phase that loses its diff or a
-	 * snapshot it needs is marked `storage_failed`. Reasons already set stay.
-	 * Only Action Scheduler columns are touched.
+	 * snapshot it needs is marked `storage_failed`. Reasons and the
+	 * not-installed marker (no payload) stay. Only Action Scheduler columns
+	 * are touched.
 	 *
 	 * @param array<string, string|null> $changes Action Scheduler column changes.
 	 * @return array<string, string|null>
 	 */
 	public static function without_payload( array $changes ) {
 		foreach ( self::DEPENDENTS as $column => $phases ) {
-			if ( isset( $changes[ $column ] ) ) {
+			if ( isset( $changes[ $column ] ) && self::NOT_INSTALLED_MARKER !== $changes[ $column ] ) {
 				$changes[ $column ] = null;
 				foreach ( $phases as $phase ) {
 					if ( ! isset( $changes[ self::PHASES[ $phase ][1] ] ) ) {
@@ -279,11 +299,18 @@ final class ActionSchedulerObservation {
 	private function phase( $phase, $from, $to ) {
 		list( $diff_column, $reason_column ) = self::PHASES[ $phase ];
 
+		if ( ActionSchedulerPhaseReason::NOT_INSTALLED === $from ) {
+			if ( ActionSchedulerPhaseReason::NOT_INSTALLED === $to ) {
+				return array( $reason_column => ActionSchedulerPhaseReason::NOT_INSTALLED_THROUGHOUT );
+			}
+			// Present at the later capture: readable, or the reason it was not.
+			return array( $reason_column => is_string( $to ) ? $to : ActionSchedulerPhaseReason::NEWLY_DETECTED );
+		}
 		if ( is_string( $from ) ) {
 			return array( $reason_column => $from );
 		}
 		if ( is_string( $to ) ) {
-			return array( $reason_column => $to );
+			return array( $reason_column => ActionSchedulerPhaseReason::NOT_INSTALLED === $to ? ActionSchedulerPhaseReason::NO_LONGER_DETECTED : $to );
 		}
 
 		try {
@@ -305,6 +332,9 @@ final class ActionSchedulerObservation {
 	private function stored( array $row, $column ) {
 		if ( ! isset( $row[ $column ] ) ) {
 			return ActionSchedulerPhaseReason::NOT_CAPTURED;
+		}
+		if ( self::NOT_INSTALLED_MARKER === $row[ $column ] ) {
+			return ActionSchedulerPhaseReason::NOT_INSTALLED;
 		}
 
 		try {

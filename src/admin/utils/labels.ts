@@ -658,7 +658,27 @@ export function actionSchedulerUnavailableReasonText(
 			return {
 				title: __( 'Action Scheduler not detected', 'updatelens' ),
 				description: __(
-					'Action Scheduler was not active for this phase.',
+					// Older reports recorded only the start of a phase for this reason.
+					'Action Scheduler was not active at the start of this phase.',
+					'updatelens'
+				),
+			};
+		case 'newly_detected':
+			return {
+				title: __( 'Action Scheduler newly detected', 'updatelens' ),
+				description: __(
+					'Action Scheduler was not active at the start of this phase but was at its end, so the two states could not be compared.',
+					'updatelens'
+				),
+			};
+		case 'no_longer_detected':
+			return {
+				title: __(
+					'Action Scheduler no longer detected',
+					'updatelens'
+				),
+				description: __(
+					'Action Scheduler was active at the start of this phase but not at its end, so the two states could not be compared.',
 					'updatelens'
 				),
 			};

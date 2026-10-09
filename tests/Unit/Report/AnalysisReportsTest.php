@@ -372,7 +372,7 @@ final class AnalysisReportsTest extends TestCase {
 		$codec  = new OptionsDiffCodec();
 		$report = $this->reports()->report( 1 );
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'error' ), array_keys( $report ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'error' ), array_keys( $report ) );
 		$this->assertSame( 1, $report['id'] );
 		$this->assertSame( 'completed', $report['status'] );
 		$this->assertSame( 'admin_shutdown', $report['settle_outcome'] );
@@ -808,7 +808,7 @@ final class AnalysisReportsTest extends TestCase {
 		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
 		$report = $this->reports()->report( 1 );
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'error' ), array_keys( $report ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'error' ), array_keys( $report ) );
 		$this->assertSame( PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS, $report['observation_window_seconds'] );
 		$this->assertSame(
 			array_fill_keys(
@@ -929,12 +929,12 @@ final class AnalysisReportsTest extends TestCase {
 				'post_update'   => array(
 					'options'          => 'settle_expired',
 					'cron'             => 'settle_expired',
-					'action_scheduler' => 'not_installed',
+					'action_scheduler' => 'settle_expired',
 				),
 				'final'         => array(
 					'options'          => 'settle_expired',
 					'cron'             => 'settle_expired',
-					'action_scheduler' => 'not_installed',
+					'action_scheduler' => 'settle_expired',
 				),
 			),
 			self::availability( $report )
@@ -1294,16 +1294,18 @@ final class AnalysisReportsTest extends TestCase {
 
 	/**
 	 * Partial availability: Action Scheduler appeared after BEFORE. During and
-	 * Net are not_installed, After is available; no invented additions.
+	 * Net are newly_detected, After is available; no invented additions, and
+	 * Potential Impact does not treat it as absent.
 	 */
 	public function test_action_scheduler_partial_availability() {
 		$this->as_update( null, self::as_immediate(), self::as_settled() );
 		$report = $this->reports()->report( 1 );
 
 		$this->assertSame(
-			array( 'not_installed', true, 'not_installed' ),
+			array( 'newly_detected', true, 'newly_detected' ),
 			array_values( array_column( self::availability( $report ), 'action_scheduler' ) )
 		);
+		$this->assertSame( array( 'partial', 'not_evaluated', 'newly_detected' ), array( $report['potential_impact']['status'], $report['potential_impact']['signals']['action_scheduler']['status'], $report['potential_impact']['signals']['action_scheduler']['reason'] ) );
 		$this->assertSame( 4, $report['phases']['post_update']['action_scheduler']['summary']['before_action_count'] );
 		foreach ( $report['phases'] as $phase ) {
 			$this->assertTrue( $phase['options']['available'] );

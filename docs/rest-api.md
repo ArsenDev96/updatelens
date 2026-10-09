@@ -272,6 +272,7 @@ Before WP-Cron reporting, each phase _was_ the options object. It is now `phases
 - `settle_outcome`: `null` while open, else `admin_shutdown`, `follow_up`, `next_update`, `expired`, `not_applicable`, or `unknown`. `follow_up`: the post-update observation was taken by the follow-up request the updating administrator's browser sends once the WordPress update queue is idle; `admin_shutdown`: at the end of a later wp-admin page request.
 - `error`: `null` or `{"code": "…"}`, a sanitized identifier (e.g. `update_not_completed`, `fingerprint_context_changed`, or a WordPress updater code such as `incompatible_archive`). No messages, paths or URLs.
 - `observation_window_seconds`: length of the post-update observation window. Presentation derives its wording ("within 5 minutes") from it.
+- `potential_impact`: review rules evaluated on the Net result, with per-signal evaluation status (see [`potential_impact`](#potential_impact)). Added later; every other field is unchanged.
 - No user information, snapshots, fingerprints, fingerprint contexts, option values, WP-Cron arguments or Action Scheduler arguments are returned.
 
 ### Phases
@@ -347,29 +348,101 @@ An available `action_scheduler` object holds the stored Action Scheduler diff: w
 
 An unavailable `action_scheduler` object has `reason`. `not_installed` is a normal state, not an error: many sites have no Action Scheduler.
 
-| `reason`                           | Meaning                                                                                    |
-| ---------------------------------- | ------------------------------------------------------------------------------------------ |
-| `update_in_progress`               | The update has not reported back yet.                                                      |
-| `awaiting_settle`                  | Within the settle window; not settled yet.                                                 |
-| `not_installed`                    | No Action Scheduler was active at a capture this phase needs.                              |
-| `unsupported_store`                | Action Scheduler uses a data store UpdateLens does not support (custom or legacy posts).   |
-| `unsupported_schema`               | The Action Scheduler tables are not a supported version.                                   |
-| `unsupported_schedule`             | An active action has a schedule type that cannot be normalized safely.                     |
-| `malformed_action_scheduler_state` | Active actions contained data UpdateLens could not safely normalize.                       |
-| `snapshot_unavailable`             | A required snapshot could not be read (not initialized, read error, or unreadable stored). |
-| `fingerprint_context_changed`      | The two snapshots could not be compared (e.g. rotated salts).                              |
-| `not_captured`                     | Action Scheduler was not captured (the analysis predates Action Scheduler observation).    |
-| `storage_failed`                   | The Action Scheduler result could not be stored with the analysis.                         |
-| `analysis_failed`                  | Comparing the snapshots failed.                                                            |
-| `settle_expired`                   | No eligible request within the settle window.                                              |
-| `update_failed`                    | The WordPress update failed or did not report completion.                                  |
-| `analysis_abandoned`               | Stale, or another update ran in the same request.                                          |
-| `analysis_ended`                   | The overall analysis stopped (failed or incompatible) before this phase.                   |
-| `data_corrupt`                     | A diff is stored but could not be read (it is never returned).                             |
-| `not_recorded`                     | No Action Scheduler data and no other explanation.                                         |
-| `unknown`                          | An unrecognised stored reason (never reinterpreted).                                       |
+| `reason`                           | Meaning                                                                                        |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `update_in_progress`               | The update has not reported back yet.                                                          |
+| `awaiting_settle`                  | Within the settle window; not settled yet.                                                     |
+| `not_installed`                    | No Action Scheduler was active at either capture of this phase (see below for older analyses). |
+| `newly_detected`                   | No Action Scheduler at the phase's first capture; readable at its second.                      |
+| `no_longer_detected`               | Action Scheduler was readable at the phase's first capture but not active at its second.       |
+| `unsupported_store`                | Action Scheduler uses a data store UpdateLens does not support (custom or legacy posts).       |
+| `unsupported_schema`               | The Action Scheduler tables are not a supported version.                                       |
+| `unsupported_schedule`             | An active action has a schedule type that cannot be normalized safely.                         |
+| `malformed_action_scheduler_state` | Active actions contained data UpdateLens could not safely normalize.                           |
+| `snapshot_unavailable`             | A required snapshot could not be read (not initialized, read error, or unreadable stored).     |
+| `fingerprint_context_changed`      | The two snapshots could not be compared (e.g. rotated salts).                                  |
+| `not_captured`                     | Action Scheduler was not captured (the analysis predates Action Scheduler observation).        |
+| `storage_failed`                   | The Action Scheduler result could not be stored with the analysis.                             |
+| `analysis_failed`                  | Comparing the snapshots failed.                                                                |
+| `settle_expired`                   | No eligible request within the settle window.                                                  |
+| `update_failed`                    | The WordPress update failed or did not report completion.                                      |
+| `analysis_abandoned`               | Stale, or another update ran in the same request.                                              |
+| `analysis_ended`                   | The overall analysis stopped (failed or incompatible) before this phase.                       |
+| `data_corrupt`                     | A diff is stored but could not be read (it is never returned).                                 |
+| `not_recorded`                     | No Action Scheduler data and no other explanation.                                             |
+| `unknown`                          | An unrecognised stored reason (never reinterpreted).                                           |
 
 Analyses recorded before Action Scheduler observation report `not_captured` in every phase: their Options and WP-Cron data are unchanged.
+
+Absence is resolved from both captures of a phase: a phase is `not_installed` only when neither found Action Scheduler; one that appeared or disappeared between them is `newly_detected` (or the second capture's failure, e.g. `unsupported_store`) or `no_longer_detected`, and a phase whose second capture was never taken gets the lifecycle reason (`update_failed`, `settle_expired`, …). Analyses recorded by earlier UpdateLens versions stored `not_installed` as soon as a phase's first capture found no Action Scheduler, so for them `not_installed` says nothing about the phase's second capture. They are reported unchanged.
+
+### `potential_impact`
+
+Three fixed review rules evaluated on the **Net result** (`phases.final`) of the report, from the diffs already decoded for it (`Report\PotentialImpact`). Computed on every read; never stored, no extra data is collected. A finding is an observation that may be worth checking, not a confirmed problem, and never says that the updated plugin caused it. There are no severities or scores.
+
+- `phase`: always `final`.
+- `status`: `evaluated` (every applicable signal evaluated, at least one), `partial` (some evaluated, some not), `not_evaluated` (none). A `not_applicable` signal does not count either way. An evaluated report with no findings has `findings: []` and `finding_count: 0`; a signal that could not be checked has `finding_count: null`.
+- `signals.<signal>` (`options`, `cron`, `action_scheduler`): `status` (`evaluated`, `not_evaluated`, or for Action Scheduler only `not_applicable`), `reason` (the reason of `phases.final.<signal>`, see the tables above, e.g. `settle_expired`, `awaiting_settle`, `malformed_cron_state`, `not_installed`, `data_corrupt`, `not_captured`; `null` if evaluated), `rules` (the rule codes that signal runs), `finding_count`.
+- **Action Scheduler `not_applicable`**: only when Action Scheduler is known to have been absent at all three captures (BEFORE, IMMEDIATE and SETTLED): every phase recorded absence at both of its captures. There was no Action Scheduler state whose recurring schedules could change. Its `reason` is `not_installed`. Anything else is `not_evaluated` with the Net result's reason: Action Scheduler appearing (`newly_detected`) or disappearing (`no_longer_detected`) during the observation, capture or read failures, corrupt data, expired, failed or open observations, and analyses recorded before absence was resolved per phase (their `not_installed` cannot show absence at every capture). `not_evaluated` with `not_installed` therefore means "not detected in the Net result, absence throughout not shown".
+- `findings`: ordered by signal (`options`, `cron`, `action_scheduler`), then rule, then subject (option name or hook, byte-wise; schedule changes in the diff's order). Every finding has `code`, `signal`, its subject (`option`, or `hook` and for Action Scheduler `group`), `evidence`, `before` and `after`. Field sets are fixed per code.
+
+| `code`                         | Signal                     | When                                                                                                                                                                                                        |
+| ------------------------------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `large_autoloaded_option`      | `options`                  | An option is effectively autoloaded after the update, larger than 150,000 bytes (advisory review size, not a WordPress limit), and got there by being added, becoming autoloaded, or growing past the size. |
+| `recurring_cron_event_removed` | `cron`                     | More recurring instances of a hook were removed than recurring instances of that hook were added.                                                                                                           |
+| `recurring_schedule_changed`   | `cron`, `action_scheduler` | The same job (hook + arguments, and group) was recurring before and its recurrence configuration differs after.                                                                                             |
+
+**`large_autoloaded_option`**: `option`; `evidence.transition` (`added`, `became_autoloaded`, `grew_past_threshold`), `evidence.threshold_bytes`, `evidence.size_delta` (signed bytes, `null` if added), `evidence.value_changed` (`null` if added; `false` means only autoload changed); `before` (`null` if added) and `after`: `{size, autoload, is_autoloaded}` (raw autoload value and effective behavior). Options that were already large and autoloaded, removed options and options that are not autoloaded after are not findings. Site totals stay in `phases.final.options.summary`.
+
+**`recurring_cron_event_removed`**: `hook`; `evidence.removed_recurring_count`, `added_recurring_count`, `not_replaced_count` (removed minus added), `other_recorded_changes` (`added_one_time`, `rescheduled`, `changed`: other entries of this hook in the Net result); `before.removed_recurring` and `after.added_recurring`: `[{timestamp, schedule, interval}]` (`timestamp` = the run that was scheduled, `interval` `null` if not stored). Instances that did not change are never part of a diff, so the evidence describes recorded changes only: it **never says whether the hook has any event left**. A `rescheduled` or `changed` count above 0 means at least one instance of the hook is still scheduled. Arguments are not in the diff: a recurring addition of the same hook counts as a replacement. Removed one-time events are never findings.
+
+**`recurring_schedule_changed`**: `hook` (and `group` for Action Scheduler); `evidence.change`; `before` / `after` as in the signal's `changed` list: WP-Cron `{timestamp, schedule, interval, is_recurring}`, Action Scheduler `{timestamp, schedule_type, interval, cron_expression, is_recurring}`.
+
+| `evidence.change`         | Meaning                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------ |
+| `no_longer_recurring`     | Recurring before, one-time (or async) after.                                         |
+| `interval_changed`        | Both recurring by interval, both intervals known and different.                      |
+| `schedule_type_changed`   | Action Scheduler only: interval ↔ cron expression.                                   |
+| `cron_expression_changed` | Action Scheduler only: both cron, and the expressions differ in meaning (see below). |
+
+Not findings: next-run rescheduling (a normal run), Action Scheduler status changes (pending → in-progress) and actions that left the queue, one-time → recurring, WP-Cron schedule renames with the same interval, WP-Cron changes where an interval is not stored, and Action Scheduler cron expressions that are written differently but mean the same: case, `?` for `*`, `*/1` for `*`, leading zeros, month and weekday names for their numbers, and a trailing year field `*`. Expressions are returned as stored.
+
+Never included: option values, arguments, argument fingerprints, md5 event keys, fingerprint contexts, IDs, snapshots, raw stored JSON or explanatory text. Presentation turns the codes and evidence into localized wording (what changed, why it may matter, what to check next).
+
+```json
+"potential_impact": {
+  "phase": "final",
+  "status": "evaluated",
+  "signals": {
+    "options": { "status": "evaluated", "reason": null, "rules": ["large_autoloaded_option"], "finding_count": 1 },
+    "cron": { "status": "evaluated", "reason": null, "rules": ["recurring_cron_event_removed", "recurring_schedule_changed"], "finding_count": 1 },
+    "action_scheduler": { "status": "not_applicable", "reason": "not_installed", "rules": ["recurring_schedule_changed"], "finding_count": null }
+  },
+  "findings": [
+    {
+      "code": "large_autoloaded_option",
+      "signal": "options",
+      "option": "acme_feed_cache",
+      "evidence": { "transition": "became_autoloaded", "threshold_bytes": 150000, "size_delta": 0, "value_changed": false },
+      "before": { "size": 182340, "autoload": "off", "is_autoloaded": false },
+      "after": { "size": 182340, "autoload": "on", "is_autoloaded": true }
+    },
+    {
+      "code": "recurring_cron_event_removed",
+      "signal": "cron",
+      "hook": "acme_sync_feeds",
+      "evidence": {
+        "removed_recurring_count": 1,
+        "added_recurring_count": 0,
+        "not_replaced_count": 1,
+        "other_recorded_changes": { "added_one_time": 1, "rescheduled": 0, "changed": 0 }
+      },
+      "before": { "removed_recurring": [{ "timestamp": 1791223800, "schedule": "hourly", "interval": 3600 }] },
+      "after": { "added_recurring": [] }
+    }
+  ]
+}
+```
 
 ## `GET /updatelens/v1/baseline`
 

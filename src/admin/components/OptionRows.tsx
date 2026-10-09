@@ -56,6 +56,7 @@ export function OptionStateRow( {
 		<ChangeRow
 			kind={ kind }
 			name={ option.name }
+			record={ option }
 			facts={
 				<>
 					<span className="font-medium tabular-nums text-slate-700">
@@ -126,6 +127,7 @@ export function ChangedOptionRow( { option }: { option: ChangedOption } ) {
 		<ChangeRow
 			kind="changed"
 			name={ option.name }
+			record={ option }
 			facts={
 				<p className="flex flex-wrap items-baseline gap-x-2 sm:justify-end">
 					<span className="font-medium text-slate-800">

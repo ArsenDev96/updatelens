@@ -3,13 +3,16 @@ import { useId, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+import { useLocated } from '../utils/highlight';
+
 /** Rows of a diff list shown before "Show more". */
 export const DEFAULT_VISIBLE_DIFF_ROWS = 10;
 
 /**
  * One titled list of a diff (e.g. "Changed (12)"). Long lists show their
  * first DEFAULT_VISIBLE_DIFF_ROWS rows and a button for the rest; hidden
- * rows are not rendered. The total stays in the title.
+ * rows are not rendered. The total stays in the title. A list whose hidden
+ * rows include a located row (from a Potential Impact link) starts expanded.
  *
  * @param props            Props.
  * @param props.id         Section ID (unique within the panel).
@@ -45,7 +48,17 @@ export function DiffSection< T >( {
 	appearance?: 'default' | 'card';
 	icon?: ReactNode;
 } ) {
-	const [ expanded, setExpanded ] = useState( false );
+	const located = useLocated();
+	const [ expanded, setExpanded ] = useState(
+		() =>
+			located !== null &&
+			items.findIndex(
+				( item ) =>
+					typeof item === 'object' &&
+					item !== null &&
+					located.rows.has( item )
+			) >= DEFAULT_VISIBLE_DIFF_ROWS
+	);
 	const listId = useId();
 	const headingId = `${ id }-heading`;
 	const hidden = items.length - DEFAULT_VISIBLE_DIFF_ROWS;

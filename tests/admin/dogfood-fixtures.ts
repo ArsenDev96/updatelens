@@ -15,7 +15,7 @@ import type {
 	RescheduledCronEvent,
 } from '@/admin/types/api';
 
-import { COMPLETED, phases, T } from './fixtures';
+import { COMPLETED, phases, T, withImpact } from './fixtures';
 
 /**
  * Options phase from its lists; totals start at `options` options.
@@ -230,7 +230,7 @@ function report(
 		cron: cronPhase( 'update_request', {} ),
 	}
 ): AnalysisReport {
-	return {
+	return withImpact( {
 		...COMPLETED,
 		id,
 		plugin: {
@@ -251,7 +251,7 @@ function report(
 				final: final.cron,
 			}
 		),
-	};
+	} );
 }
 
 /** Rank Math 1.0.278 → 1.0.279: nothing changed in any phase or signal. */

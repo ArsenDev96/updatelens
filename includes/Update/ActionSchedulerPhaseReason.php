@@ -22,9 +22,12 @@ defined( 'ABSPATH' ) || exit;
  *
  * A phase compares two captures and is available only when both are
  * readable snapshots. Otherwise it gets the reason of the earlier capture
- * that was not, so a phase across an availability change (e.g. Action
+ * that failed, so a phase across an availability change (e.g. Action
  * Scheduler loaded only after the update) is unavailable, never an
- * invented diff of everything added or removed.
+ * invented diff of everything added or removed. Absence is not a failure:
+ * a phase whose earlier capture found no Action Scheduler is resolved only
+ * with its later capture (NOT_INSTALLED_THROUGHOUT, NEWLY_DETECTED or the
+ * later capture's failure).
  */
 final class ActionSchedulerPhaseReason {
 
@@ -32,6 +35,27 @@ final class ActionSchedulerPhaseReason {
 	 * Action Scheduler was not loaded: no active plugin bundles it. Normal on many sites.
 	 */
 	const NOT_INSTALLED = 'not_installed';
+
+	/**
+	 * Neither capture of the phase found Action Scheduler. Stored instead of
+	 * NOT_INSTALLED, which analyses recorded before absence was resolved per
+	 * phase stored when only the phase's first capture found no Action
+	 * Scheduler (the later one could have found it, or not). Reported as
+	 * `not_installed` (AnalysisReadModel).
+	 */
+	const NOT_INSTALLED_THROUGHOUT = 'not_installed_throughout';
+
+	/**
+	 * Action Scheduler was not loaded at the phase's earlier capture but was
+	 * readable at its later one (e.g. a plugin bundling it was activated).
+	 */
+	const NEWLY_DETECTED = 'newly_detected';
+
+	/**
+	 * Action Scheduler was readable at the phase's earlier capture but not
+	 * loaded at its later one (e.g. the plugin bundling it was removed).
+	 */
+	const NO_LONGER_DETECTED = 'no_longer_detected';
 
 	/**
 	 * Action Scheduler uses a data store UpdateLens does not read (custom
@@ -106,6 +130,9 @@ final class ActionSchedulerPhaseReason {
 	 */
 	const ALL = array(
 		self::NOT_INSTALLED,
+		self::NOT_INSTALLED_THROUGHOUT,
+		self::NEWLY_DETECTED,
+		self::NO_LONGER_DETECTED,
 		self::UNSUPPORTED_STORE,
 		self::UNSUPPORTED_SCHEMA,
 		self::UNSUPPORTED_SCHEDULE,

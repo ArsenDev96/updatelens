@@ -87,10 +87,13 @@ final class AnalysisReadModel {
 
 	/**
 	 * Stored Action Scheduler phase reasons passed through to the API
-	 * (ActionSchedulerPhaseReason). Any other stored value becomes `unknown`.
+	 * (ActionSchedulerPhaseReason), after ACTION_SCHEDULER_REPORTED_AS. Any
+	 * other stored value becomes `unknown`.
 	 */
 	const ACTION_SCHEDULER_REASONS = array(
 		ActionSchedulerPhaseReason::NOT_INSTALLED,
+		ActionSchedulerPhaseReason::NEWLY_DETECTED,
+		ActionSchedulerPhaseReason::NO_LONGER_DETECTED,
 		ActionSchedulerPhaseReason::UNSUPPORTED_STORE,
 		ActionSchedulerPhaseReason::UNSUPPORTED_SCHEMA,
 		ActionSchedulerPhaseReason::UNSUPPORTED_SCHEDULE,
@@ -104,6 +107,16 @@ final class AnalysisReadModel {
 		ActionSchedulerPhaseReason::UPDATE_FAILED,
 		ActionSchedulerPhaseReason::ANALYSIS_ABANDONED,
 		ActionSchedulerPhaseReason::ANALYSIS_ENDED,
+	);
+
+	/**
+	 * Stored Action Scheduler reasons reported under another code: absence at
+	 * both captures is `not_installed` in the API, as older analyses stored
+	 * it. Only Potential Impact tells the two apart (a stored
+	 * `not_installed` does not show what the phase's later capture found).
+	 */
+	const ACTION_SCHEDULER_REPORTED_AS = array(
+		ActionSchedulerPhaseReason::NOT_INSTALLED_THROUGHOUT => ActionSchedulerPhaseReason::NOT_INSTALLED,
 	);
 
 	/**
@@ -137,12 +150,20 @@ final class AnalysisReadModel {
 	private $action_scheduler_diff_codec;
 
 	/**
+	 * Potential Impact evaluation of the Net result.
+	 *
+	 * @var PotentialImpact
+	 */
+	private $potential_impact;
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
 		$this->diff_codec                  = new OptionsDiffCodec();
 		$this->cron_diff_codec             = new CronDiffCodec();
 		$this->action_scheduler_diff_codec = new ActionSchedulerDiffCodec();
+		$this->potential_impact            = new PotentialImpact();
 	}
 
 	/**
@@ -204,16 +225,29 @@ final class AnalysisReadModel {
 	/**
 	 * Full report (from AnalysisRepository::REPORT_COLUMNS).
 	 *
+	 * `potential_impact` is evaluated on the Net result phase built here (the
+	 * diffs decoded once for the report), on every read; it is never stored.
+	 * Action Scheduler is not applicable only when every phase stored
+	 * `not_installed_throughout` (absent at all three captures); older rows'
+	 * `not_installed` cannot show that.
+	 *
 	 * @param array<string, mixed> $row Analysis row.
 	 * @return array<string, mixed>
 	 */
 	public function report( array $row ) {
 		$metadata = $this->metadata( $row );
 		$phases   = array();
+		$absent   = true;
 
 		foreach ( self::PHASE_COLUMNS as $phase => $column ) {
 			list( $cron_diff, $cron_reason )                         = CronObservation::PHASES[ $phase ];
 			list( $action_scheduler_diff, $action_scheduler_reason ) = ActionSchedulerObservation::PHASES[ $phase ];
+
+			$stored_reason = self::field( $row, $action_scheduler_reason );
+			$absent        = $absent && null === self::field( $row, $action_scheduler_diff ) && ActionSchedulerPhaseReason::NOT_INSTALLED_THROUGHOUT === $stored_reason;
+			if ( is_string( $stored_reason ) && isset( self::ACTION_SCHEDULER_REPORTED_AS[ $stored_reason ] ) ) {
+				$stored_reason = self::ACTION_SCHEDULER_REPORTED_AS[ $stored_reason ];
+			}
 
 			$phases[ $phase ] = array(
 				'options'          => $this->phase( $phase, isset( $row[ $column ] ) ? $row[ $column ] : null, $metadata ),
@@ -227,7 +261,7 @@ final class AnalysisReadModel {
 				'action_scheduler' => $this->signal_phase(
 					$phase,
 					self::field( $row, $action_scheduler_diff ),
-					self::stored_reason( self::field( $row, $action_scheduler_reason ), self::ACTION_SCHEDULER_REASONS ),
+					self::stored_reason( $stored_reason, self::ACTION_SCHEDULER_REASONS ),
 					$metadata,
 					array( $this->action_scheduler_diff_codec, 'decode' )
 				),
@@ -242,6 +276,7 @@ final class AnalysisReadModel {
 			'timestamps'                 => $metadata['timestamps'],
 			'observation_window_seconds' => PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS,
 			'phases'                     => $phases,
+			'potential_impact'           => $this->potential_impact->evaluate( $phases, $absent ),
 			'error'                      => $metadata['error'],
 		);
 	}

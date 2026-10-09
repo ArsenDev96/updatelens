@@ -11,6 +11,7 @@ use Throwable;
 use UpdateLens\Core\Plugin;
 use UpdateLens\Report\AnalysisReadModel;
 use UpdateLens\Report\AnalysisReports;
+use UpdateLens\Report\PotentialImpact;
 use UpdateLens\Report\UnavailableReason;
 use UpdateLens\Update\ObservationPhase;
 use WP_Error;
@@ -68,6 +69,85 @@ final class AnalysesController extends WP_REST_Controller {
 			'description' => $description,
 			'type'        => 'object',
 			'properties'  => $properties,
+		);
+	}
+
+	/**
+	 * Schema of the Potential Impact evaluation of the Net result.
+	 *
+	 * @param string[] $cron_reasons             Possible WP-Cron reasons (superset of the Options reasons).
+	 * @param string[] $action_scheduler_reasons Possible Action Scheduler reasons.
+	 * @return array
+	 */
+	private static function potential_impact_schema( array $cron_reasons, array $action_scheduler_reasons ) {
+		$statuses = array( PotentialImpact::EVALUATED, PotentialImpact::NOT_EVALUATED, PotentialImpact::NOT_APPLICABLE );
+		$signals  = array();
+		foreach ( PotentialImpact::RULES as $signal => $rules ) {
+			$signals[ $signal ] = array(
+				'type'       => 'object',
+				'properties' => array(
+					'status'        => array(
+						'type' => 'string',
+						'enum' => $statuses,
+					),
+					'reason'        => array(
+						'description' => __( 'Why the signal was not evaluated: its Net result phase reason; null if evaluated.', 'updatelens' ),
+						'type'        => array( 'string', 'null' ),
+						'enum'        => array_merge( PotentialImpact::SIGNAL_ACTION_SCHEDULER === $signal ? $action_scheduler_reasons : $cron_reasons, array( null ) ),
+					),
+					'rules'         => array(
+						'type'  => 'array',
+						'items' => array(
+							'type' => 'string',
+							'enum' => $rules,
+						),
+					),
+					'finding_count' => array( 'type' => array( 'integer', 'null' ) ),
+				),
+			);
+		}
+
+		return array(
+			'description' => __( 'Review rules evaluated on the Net result: observations that may be worth checking, not confirmed problems or causes. Computed on every read, never stored.', 'updatelens' ),
+			'type'        => 'object',
+			'context'     => array( 'view' ),
+			'readonly'    => true,
+			'properties'  => array(
+				'phase'    => array(
+					'type' => 'string',
+					'enum' => array( ObservationPhase::FINAL ),
+				),
+				'status'   => array(
+					'type' => 'string',
+					'enum' => array( PotentialImpact::EVALUATED, PotentialImpact::PARTIAL, PotentialImpact::NOT_EVALUATED ),
+				),
+				'signals'  => array(
+					'type'       => 'object',
+					'properties' => $signals,
+				),
+				'findings' => array(
+					'type'  => 'array',
+					'items' => array(
+						'type'       => 'object',
+						'properties' => array(
+							'code'     => array(
+								'type' => 'string',
+								'enum' => array( PotentialImpact::LARGE_AUTOLOADED_OPTION, PotentialImpact::RECURRING_CRON_EVENT_REMOVED, PotentialImpact::RECURRING_SCHEDULE_CHANGED ),
+							),
+							'signal'   => array(
+								'type' => 'string',
+								'enum' => array_keys( PotentialImpact::RULES ),
+							),
+							'option'   => array( 'type' => 'string' ),
+							'hook'     => array( 'type' => 'string' ),
+							'group'    => array( 'type' => 'string' ),
+							'evidence' => array( 'type' => 'object' ),
+							'before'   => array( 'type' => array( 'object', 'null' ) ),
+							'after'    => array( 'type' => 'object' ),
+						),
+					),
+				),
+			),
 		);
 	}
 
@@ -301,6 +381,7 @@ final class AnalysesController extends WP_REST_Controller {
 						ObservationPhase::FINAL         => $phase,
 					),
 				),
+				'potential_impact'           => self::potential_impact_schema( $cron['properties']['reason']['enum'], $action_scheduler['properties']['reason']['enum'] ),
 			),
 		);
 

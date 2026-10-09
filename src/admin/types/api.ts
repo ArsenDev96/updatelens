@@ -69,6 +69,8 @@ export type ActionSchedulerUnavailableReason =
 	| 'update_in_progress'
 	| 'awaiting_settle'
 	| 'not_installed'
+	| 'newly_detected'
+	| 'no_longer_detected'
 	| 'unsupported_store'
 	| 'unsupported_schema'
 	| 'unsupported_schedule'
@@ -410,11 +412,145 @@ export interface ReportPhase {
 	action_scheduler: ActionSchedulerPhase;
 }
 
+/** Potential Impact rule codes. */
+export type ImpactRule =
+	| 'large_autoloaded_option'
+	| 'recurring_cron_event_removed'
+	| 'recurring_schedule_changed';
+
+/**
+ * Evaluation of one signal: `evaluated` (rules ran), `not_evaluated` (no Net
+ * result; `reason` says why) or `not_applicable` (Action Scheduler only:
+ * absent at every capture).
+ */
+export interface ImpactSignal {
+	status: 'evaluated' | 'not_evaluated' | 'not_applicable';
+	/** The Net result phase's reason; null if evaluated. */
+	reason: string | null;
+	rules: ImpactRule[];
+	/** Null if not evaluated. */
+	finding_count: number | null;
+}
+
+/** Size and autoload state of an option (never its value). */
+export interface ImpactOptionSide {
+	size: number;
+	/** Raw `autoload` column value. */
+	autoload: string;
+	is_autoloaded: boolean;
+}
+
+export interface LargeAutoloadedOptionFinding {
+	code: 'large_autoloaded_option';
+	signal: 'options';
+	option: string;
+	evidence: {
+		transition: 'added' | 'became_autoloaded' | 'grew_past_threshold';
+		threshold_bytes: number;
+		/** Null if added. */
+		size_delta: number | null;
+		/** Null if added; false: only autoload changed. */
+		value_changed: boolean | null;
+	};
+	/** Null if added. */
+	before: ImpactOptionSide | null;
+	after: ImpactOptionSide;
+}
+
+/** A recurring WP-Cron instance (arguments never included). */
+export interface ImpactCronInstance {
+	/** Unix timestamp of the scheduled run. */
+	timestamp: number;
+	schedule: string | null;
+	interval: number | null;
+}
+
+export interface RecurringCronEventRemovedFinding {
+	code: 'recurring_cron_event_removed';
+	signal: 'cron';
+	hook: string;
+	evidence: {
+		removed_recurring_count: number;
+		added_recurring_count: number;
+		not_replaced_count: number;
+		/**
+		 * Other entries of this hook in the Net result. Unchanged instances are
+		 * never in a diff: zero does not mean the hook has no events left.
+		 */
+		other_recorded_changes: {
+			added_one_time: number;
+			rescheduled: number;
+			changed: number;
+		};
+	};
+	before: { removed_recurring: ImpactCronInstance[] };
+	after: { added_recurring: ImpactCronInstance[] };
+}
+
+export type ScheduleChange =
+	| 'no_longer_recurring'
+	| 'interval_changed'
+	| 'schedule_type_changed'
+	| 'cron_expression_changed';
+
+export interface ImpactCronSide {
+	timestamp: number;
+	schedule: string | null;
+	interval: number | null;
+	is_recurring: boolean;
+}
+
+export interface CronScheduleChangedFinding {
+	code: 'recurring_schedule_changed';
+	signal: 'cron';
+	hook: string;
+	evidence: { change: ScheduleChange };
+	before: ImpactCronSide;
+	after: ImpactCronSide;
+}
+
+export interface ImpactActionSide {
+	timestamp: number;
+	schedule_type: ActionScheduleType;
+	interval: number | null;
+	cron_expression: string | null;
+	is_recurring: boolean;
+}
+
+export interface ActionScheduleChangedFinding {
+	code: 'recurring_schedule_changed';
+	signal: 'action_scheduler';
+	hook: string;
+	group: string;
+	evidence: { change: ScheduleChange };
+	before: ImpactActionSide;
+	after: ImpactActionSide;
+}
+
+export type ImpactFinding =
+	| LargeAutoloadedOptionFinding
+	| RecurringCronEventRemovedFinding
+	| CronScheduleChangedFinding
+	| ActionScheduleChangedFinding;
+
+/**
+ * Review rules evaluated on the Net result (always `final`, whatever phase
+ * is shown). Findings are observations worth a look, not problems.
+ */
+export interface PotentialImpact {
+	phase: 'final';
+	/** `evaluated`: every applicable signal; `partial`: some; `not_evaluated`: none. */
+	status: 'evaluated' | 'partial' | 'not_evaluated';
+	signals: Record< Provider, ImpactSignal >;
+	findings: ImpactFinding[];
+}
+
 /** GET /updatelens/v1/analyses/{id}. */
 export interface AnalysisReport extends AnalysisBase {
 	/** Length of the post-update observation window in seconds. */
 	observation_window_seconds: number;
 	phases: Record< PhaseKey, ReportPhase >;
+	potential_impact: PotentialImpact;
 }
 
 /** One history page with the pagination headers. */

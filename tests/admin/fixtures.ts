@@ -13,9 +13,12 @@ import type {
 	AvailableOptionsPhase,
 	CronPhase,
 	HistorySignal,
+	ImpactFinding,
 	MonitoringBaseline,
 	OptionsPhase,
 	PhaseKey,
+	PotentialImpact,
+	Provider,
 	ReportPhase,
 	UnavailableActionSchedulerPhase,
 	UnavailableCronPhase,
@@ -398,7 +401,103 @@ function cronEverywhere(
 	};
 }
 
-export const COMPLETED: AnalysisReport = {
+/**
+ * Potential Impact as the API reports it for these phases: every signal
+ * with a Net result evaluated (with the given findings), Action Scheduler
+ * absent at every phase not applicable, everything else not evaluated with
+ * its Net result reason. Fixture shape only; the rules are the API's.
+ *
+ * @param reportPhases Report phases.
+ * @param findings     Findings of the evaluated signals.
+ */
+export function impactOf(
+	reportPhases: Record< PhaseKey, ReportPhase >,
+	findings: ImpactFinding[] = []
+): PotentialImpact {
+	const providers: Provider[] = [ 'options', 'cron', 'action_scheduler' ];
+	const rules = {
+		options: [ 'large_autoloaded_option' ],
+		cron: [ 'recurring_cron_event_removed', 'recurring_schedule_changed' ],
+		action_scheduler: [ 'recurring_schedule_changed' ],
+	} as const;
+	const absent = (
+		[ 'during_update', 'post_update', 'final' ] as const
+	 ).every( ( key ) => {
+		const signal = reportPhases[ key ].action_scheduler;
+		return ! signal.available && signal.reason === 'not_installed';
+	} );
+	const signals = Object.fromEntries(
+		providers.map( ( provider ) => {
+			const final = reportPhases.final[ provider ];
+			if ( final.available ) {
+				return [
+					provider,
+					{
+						status: 'evaluated',
+						reason: null,
+						rules: [ ...rules[ provider ] ],
+						finding_count: findings.filter(
+							( finding ) => finding.signal === provider
+						).length,
+					},
+				];
+			}
+			return [
+				provider,
+				{
+					status:
+						provider === 'action_scheduler' && absent
+							? 'not_applicable'
+							: 'not_evaluated',
+					reason: final.reason,
+					rules: [ ...rules[ provider ] ],
+					finding_count: null,
+				},
+			];
+		} )
+	) as PotentialImpact[ 'signals' ];
+	const statuses = providers.map(
+		( provider ) => signals[ provider ].status
+	);
+	const evaluated = statuses.filter(
+		( status ) => status === 'evaluated'
+	).length;
+	const missing = statuses.filter(
+		( status ) => status === 'not_evaluated'
+	).length;
+	let status: PotentialImpact[ 'status' ] = 'partial';
+	if ( evaluated === 0 ) {
+		status = 'not_evaluated';
+	} else if ( missing === 0 ) {
+		status = 'evaluated';
+	}
+	return {
+		phase: 'final',
+		status,
+		signals,
+		findings: status === 'not_evaluated' ? [] : findings,
+	};
+}
+
+/**
+ * A report with Potential Impact derived from its phases (impactOf()).
+ *
+ * @param report   Report without (or with a stale) Potential Impact.
+ * @param findings Findings of the evaluated signals.
+ */
+export function withImpact(
+	report: Omit< AnalysisReport, 'potential_impact' > & {
+		potential_impact?: PotentialImpact;
+	},
+	findings: ImpactFinding[] = []
+): AnalysisReport {
+	return {
+		...report,
+		potential_impact: impactOf( report.phases, findings ),
+	};
+}
+
+export const COMPLETED: AnalysisReport = withImpact( {
 	id: 1,
 	plugin: {
 		file: 'updatelens-fixture-a/updatelens-fixture-a.php',
@@ -416,9 +515,9 @@ export const COMPLETED: AnalysisReport = {
 	observation_window_seconds: 300,
 	phases: phases( OPTIONS_ALL, CRON_ALL ),
 	error: null,
-};
+} );
 
-export const EXPIRED: AnalysisReport = {
+export const EXPIRED: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 2,
 	settle_outcome: 'expired',
@@ -444,9 +543,9 @@ export const EXPIRED: AnalysisReport = {
 			final: cronUnavailable( 'net_across_phases', 'settle_expired' ),
 		}
 	),
-};
+} );
 
-export const FAILED: AnalysisReport = {
+export const FAILED: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 3,
 	plugin: { ...COMPLETED.plugin, version_after: null },
@@ -464,9 +563,9 @@ export const FAILED: AnalysisReport = {
 		},
 		cronEverywhere( 'update_failed' )
 	),
-};
+} );
 
-export const INCOMPATIBLE: AnalysisReport = {
+export const INCOMPATIBLE: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 4,
 	status: 'incompatible',
@@ -492,9 +591,9 @@ export const INCOMPATIBLE: AnalysisReport = {
 			final: cronUnavailable( 'net_across_phases', 'analysis_ended' ),
 		}
 	),
-};
+} );
 
-export const CORRUPT_POST: AnalysisReport = {
+export const CORRUPT_POST: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 5,
 	phases: phases(
@@ -505,9 +604,9 @@ export const CORRUPT_POST: AnalysisReport = {
 		},
 		CRON_ALL
 	),
-};
+} );
 
-export const AWAITING: AnalysisReport = {
+export const AWAITING: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 6,
 	status: 'awaiting_settle',
@@ -531,10 +630,10 @@ export const AWAITING: AnalysisReport = {
 			final: cronUnavailable( 'net_across_phases', 'awaiting_settle' ),
 		}
 	),
-};
+} );
 
 /** Options complete; WP-Cron after-update lost (partial availability). */
-export const PARTIAL_CRON: AnalysisReport = {
+export const PARTIAL_CRON: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 7,
 	phases: phases( OPTIONS_ALL, {
@@ -545,17 +644,17 @@ export const PARTIAL_CRON: AnalysisReport = {
 		),
 		final: CRON_FINAL,
 	} ),
-};
+} );
 
 /** Options complete; the site's Cron state was malformed. */
-export const MALFORMED_CRON: AnalysisReport = {
+export const MALFORMED_CRON: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 8,
 	phases: phases( OPTIONS_ALL, cronEverywhere( 'malformed_cron_state' ) ),
-};
+} );
 
 /** Options unreadable in every phase, WP-Cron available. */
-export const CRON_ONLY: AnalysisReport = {
+export const CRON_ONLY: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 9,
 	phases: phases(
@@ -566,14 +665,14 @@ export const CRON_ONLY: AnalysisReport = {
 		},
 		CRON_ALL
 	),
-};
+} );
 
 /** A report from before WP-Cron observation (migrated history). */
-export const PRE_CRON: AnalysisReport = {
+export const PRE_CRON: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 10,
 	phases: phases( OPTIONS_ALL, cronEverywhere( 'not_captured' ) ),
-};
+} );
 
 /**
  * History flags of one signal, from the report's lists (the API computes

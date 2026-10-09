@@ -23,6 +23,7 @@ import {
 	FINAL,
 	phases,
 	T,
+	withImpact,
 } from './fixtures';
 
 /**
@@ -254,7 +255,7 @@ export const AS_FINAL = asPhase( 'net_across_phases', {
 } );
 
 /** WooCommerce 11.1.1 → 11.1.2 with all three signals available. */
-export const WOOCOMMERCE: AnalysisReport = {
+export const WOOCOMMERCE: AnalysisReport = withImpact( {
 	...COMPLETED,
 	id: 40,
 	plugin: {
@@ -280,7 +281,7 @@ export const WOOCOMMERCE: AnalysisReport = {
 			final: AS_FINAL,
 		}
 	),
-};
+} );
 
 /**
  * A report with the given signals of every phase: Options and WP-Cron
@@ -301,7 +302,7 @@ export function asReport(
 		action_scheduler: asPhase( association, {} ),
 		...signals( association ),
 	} );
-	return {
+	return withImpact( {
 		...COMPLETED,
 		id,
 		phases: {
@@ -309,14 +310,14 @@ export function asReport(
 			post_update: phase( 'observed_after_update' ),
 			final: phase( 'net_across_phases' ),
 		},
-	};
+	} );
 }
 
 /** WooCommerce with Action Scheduler unavailable for one reason in every phase. */
 export function asReasonReport(
 	reason: Parameters< typeof asEverywhere >[ 0 ]
 ): AnalysisReport {
-	return {
+	return withImpact( {
 		...WOOCOMMERCE,
 		id: 41,
 		phases: phases(
@@ -332,11 +333,11 @@ export function asReasonReport(
 			},
 			asEverywhere( reason )
 		),
-	};
+	} );
 }
 
 /** Net result Action Scheduler data unreadable; the other phases and signals intact. */
-export const AS_CORRUPT_FINAL: AnalysisReport = {
+export const AS_CORRUPT_FINAL: AnalysisReport = withImpact( {
 	...WOOCOMMERCE,
 	id: 42,
 	phases: {
@@ -349,7 +350,7 @@ export const AS_CORRUPT_FINAL: AnalysisReport = {
 			),
 		},
 	},
-};
+} );
 
 /**
  * A synthetic queue: `n` added actions of one hook and group (different

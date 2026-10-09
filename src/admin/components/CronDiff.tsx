@@ -446,6 +446,7 @@ function AddedEventRow( { event }: { event: CronEventState } ) {
 		<ChangeRow
 			kind="added"
 			name={ event.hook }
+			record={ event }
 			facts={
 				<StatePill>
 					{ recurrence( event.schedule, event.is_recurring ) }
@@ -468,6 +469,7 @@ function RemovedEventRow( { event }: { event: CronEventState } ) {
 		<ChangeRow
 			kind="removed"
 			name={ event.hook }
+			record={ event }
 			facts={
 				<StatePill>
 					{ recurrence( event.schedule, event.is_recurring ) }
@@ -498,6 +500,7 @@ function GoneEventRow( { event }: { event: CronEventState } ) {
 		<ChangeRow
 			kind="gone"
 			name={ event.hook }
+			record={ event }
 			facts={
 				<StatePill muted>
 					{ __( 'One-time', 'updatelens' ) } ·{ ' ' }
@@ -585,6 +588,7 @@ function ChangedEventRow( { event }: { event: ChangedCronEvent } ) {
 		<ChangeRow
 			kind="changed"
 			name={ event.hook }
+			record={ event }
 			facts={
 				<span className="font-medium text-slate-800">
 					{ __( 'Schedule changed', 'updatelens' ) }
@@ -610,6 +614,7 @@ function RescheduledEventRow( { event }: { event: RescheduledCronEvent } ) {
 		<ChangeRow
 			kind="rescheduled"
 			name={ event.hook }
+			record={ event }
 			quiet
 			facts={
 				<StatePill muted>

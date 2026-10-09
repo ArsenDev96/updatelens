@@ -466,6 +466,7 @@ function AddedActionRow( { action }: { action: ActionSchedulerActionState } ) {
 		<ChangeRow
 			kind="added"
 			name={ action.hook }
+			record={ action }
 			meta={ groupLine( action.group ) }
 			facts={
 				<StatePill>
@@ -510,6 +511,7 @@ function InactiveActionRow( {
 		<ChangeRow
 			kind="gone"
 			name={ action.hook }
+			record={ action }
 			meta={ groupLine( action.group ) }
 			facts={
 				<StatePill muted>
@@ -612,6 +614,7 @@ function ChangedActionRow( { action }: { action: ChangedAction } ) {
 		<ChangeRow
 			kind="changed"
 			name={ action.hook }
+			record={ action }
 			meta={ groupLine( action.group ) }
 			facts={
 				<span className="font-medium text-slate-800">
@@ -638,6 +641,7 @@ function RescheduledActionRow( { action }: { action: RescheduledAction } ) {
 		<ChangeRow
 			kind="rescheduled"
 			name={ action.hook }
+			record={ action }
 			meta={ groupLine( action.group ) }
 			quiet
 			facts={

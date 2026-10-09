@@ -3,8 +3,15 @@ import { Fragment } from 'react';
 
 import { cn } from '@/lib/utils';
 
-import type { Provider, ReportPhase } from '../types/api';
+import type {
+	ImpactFinding,
+	PhaseKey,
+	PotentialImpact as PotentialImpactData,
+	Provider,
+	ReportPhase,
+} from '../types/api';
 import type { PhaseChangeCounts } from '../utils/changes';
+import type { ImpactView } from '../utils/impact';
 import { formatCount } from '../utils/format';
 import {
 	observedChangesText,
@@ -16,11 +23,13 @@ import {
 } from '../utils/labels';
 import { AppLink } from './AppLink';
 import { Icon } from './Icon';
+import { PotentialImpact } from './PotentialImpact';
 
 /*
  * The overview of one phase: a summary panel with its total of observed
- * changes and plain sentences, then one card per signal that opens the
- * signal's details. No change rows here: they belong to the detail views.
+ * changes and plain sentences, Potential Impact (always the Net result),
+ * then one card per signal that opens the signal's details. No change rows
+ * here: they belong to the detail views.
  */
 
 /**
@@ -30,8 +39,15 @@ import { Icon } from './Icon';
  * @param props.data          Phase data of every signal.
  * @param props.counts        Change counts of the phase.
  * @param props.windowSeconds Observation window length from the API.
- * @param props.signalHref    Link target of a signal's details.
- * @param props.onOpenSignal  Opens a signal's details in the app.
+ * @param props.signalHref      Link target of a signal's details.
+ * @param props.onOpenSignal    Opens a signal's details in the app.
+ * @param props.impact          Potential Impact of the report (Net result).
+ * @param props.findingHref     Link target of a finding's signal details.
+ * @param props.onOpenFinding   Opens a finding's signal details in the app.
+ * @param props.onShowNetResult Selects the Net result phase; null if selected.
+ * @param props.phase           Selected phase (Potential Impact says when it is not the Net result).
+ * @param props.impactView      Expanded Potential Impact groups and disclosures.
+ * @param props.onImpactViewChange Updates them.
  */
 export function ReportOverview( {
 	data,
@@ -39,12 +55,26 @@ export function ReportOverview( {
 	windowSeconds,
 	signalHref,
 	onOpenSignal,
+	impact,
+	findingHref,
+	onOpenFinding,
+	onShowNetResult,
+	phase,
+	impactView,
+	onImpactViewChange,
 }: {
 	data: ReportPhase;
 	counts: PhaseChangeCounts;
 	windowSeconds: number;
 	signalHref: ( signal: Provider ) => string;
 	onOpenSignal: ( signal: Provider ) => void;
+	impact: PotentialImpactData;
+	findingHref: ( finding: ImpactFinding ) => string;
+	onOpenFinding: ( finding: ImpactFinding ) => void;
+	onShowNetResult: ( () => void ) | null;
+	phase: PhaseKey;
+	impactView: ImpactView;
+	onImpactViewChange: ( view: ImpactView ) => void;
 } ) {
 	return (
 		<div className="space-y-4">
@@ -52,6 +82,16 @@ export function ReportOverview( {
 				data={ data }
 				counts={ counts }
 				windowSeconds={ windowSeconds }
+			/>
+			<PotentialImpact
+				impact={ impact }
+				windowSeconds={ windowSeconds }
+				findingHref={ findingHref }
+				onOpenFinding={ onOpenFinding }
+				onShowNetResult={ onShowNetResult }
+				selectedPhase={ phase }
+				view={ impactView }
+				onViewChange={ onImpactViewChange }
 			/>
 			<ul
 				aria-label={ __( 'Signals', 'updatelens' ) }

@@ -1,5 +1,12 @@
 import { __, sprintf } from '@wordpress/i18n';
-import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	type RefObject,
+} from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -7,6 +14,12 @@ import { cn } from '@/lib/utils';
 
 import { getAnalysis } from '../api/analyses';
 import { AppLink } from '../components/AppLink';
+import {
+	findingListKind,
+	locate,
+	LocatedProvider,
+	type Located,
+} from '../utils/highlight';
 import { LoadError } from '../components/LoadError';
 import { PhaseTabs } from '../components/PhaseTabs';
 import { ReportOverview } from '../components/ReportOverview';
@@ -15,9 +28,15 @@ import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { Icon, type IconName } from '../components/Icon';
 import { useRequest } from '../hooks/use-request';
-import type { AnalysisReport, PhaseKey, Provider } from '../types/api';
+import type {
+	AnalysisReport,
+	ImpactFinding,
+	PhaseKey,
+	Provider,
+} from '../types/api';
 import { reportChangeCounts } from '../utils/changes';
-import { formatDateTime } from '../utils/format';
+import { formatCount, formatDateTime } from '../utils/format';
+import { COLLAPSED_IMPACT_VIEW, findingSubject } from '../utils/impact';
 import {
 	defaultPhase,
 	PHASE_KEYS,
@@ -30,7 +49,7 @@ import {
 	type Tone,
 } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
-import type { ReportRoute, Route } from '../utils/route';
+import type { ReportRoute, Route, RouteItem } from '../utils/route';
 import { TONE_ICON } from '../utils/tone';
 
 interface ReportPageProps {
@@ -124,20 +143,68 @@ function Report( {
 	const selected = initial === null ? null : ( route.phase ?? initial );
 	const { signal } = route;
 
+	// A located item (from a Potential Impact link) applies to the Net result
+	// of a signal's details only.
+	const item =
+		signal !== null && selected === 'final' ? ( route.item ?? null ) : null;
+
+	// Expanded Potential Impact groups survive a visit to a signal page.
+	const [ impactView, setImpactView ] = useState( COLLAPSED_IMPACT_VIEW );
+	// The finding last opened from the overview (its index): back on the
+	// overview, focus returns to its link instead of the title.
+	const returnTo = useRef< number | null >( null );
+
 	// After in-app navigation (also between overview and details), focus
 	// moves to the view's title. Switching phases keeps focus on the tab.
+	// With a located item, its first row is scrolled into view.
 	useEffect( () => {
-		if ( focusHeading ) {
-			heading.current?.focus();
+		if ( signal === null && returnTo.current !== null ) {
+			const link = heading.current
+				?.closest( 'article' )
+				?.querySelector< HTMLElement >(
+					`[data-updatelens-finding="${ returnTo.current }"]`
+				);
+			returnTo.current = null;
+			if ( link ) {
+				link.focus( { preventScroll: true } );
+				link.scrollIntoView?.( { block: 'center' } );
+				return;
+			}
 		}
-	}, [ focusHeading, signal ] );
+		if ( focusHeading ) {
+			heading.current?.focus( { preventScroll: item !== null } );
+		}
+		if ( item !== null ) {
+			heading.current
+				?.closest( 'article' )
+				?.querySelector( '[data-updatelens-located]' )
+				?.scrollIntoView?.( { block: 'center' } );
+		}
+	}, [ focusHeading, signal, item ] );
 
 	const at = ( next: Partial< ReportRoute > ): ReportRoute => ( {
 		...route,
 		...next,
 	} );
 	const selectPhase = ( phase: PhaseKey ) =>
-		onNavigate( at( { phase } ), true );
+		onNavigate( at( { phase, item: null } ), true );
+	const findingRoute = ( finding: ImpactFinding ): ReportRoute =>
+		at( {
+			signal: finding.signal,
+			phase: 'final',
+			item: {
+				name: findingSubject( finding ),
+				group:
+					finding.signal === 'action_scheduler'
+						? finding.group
+						: null,
+				// Options findings may be added or changed rows; the others
+				// are about one list.
+				kind: findingListKind( finding ),
+				// Lets the signal page identify the finding's own rows.
+				finding: report.potential_impact.findings.indexOf( finding ),
+			},
+		} );
 
 	if ( signal !== null ) {
 		return (
@@ -147,12 +214,14 @@ function Report( {
 				selected={ selected }
 				counts={ counts }
 				heading={ heading }
+				item={ item }
 				historyRoute={ { view: 'history', page: route.page } }
-				overviewRoute={ at( { signal: null } ) }
+				overviewRoute={ at( { signal: null, item: null } ) }
 				href={ href }
 				onNavigate={ onNavigate }
 				onSelectPhase={ selectPhase }
 				onRefresh={ onRefresh }
+				onClearItem={ () => onNavigate( at( { item: null } ), true ) }
 			/>
 		);
 	}
@@ -185,6 +254,7 @@ function Report( {
 				>
 					<ReportOverview
 						data={ report.phases[ selected ] }
+						phase={ selected }
 						counts={ counts[ selected ] }
 						windowSeconds={ report.observation_window_seconds }
 						signalHref={ ( provider: Provider ) =>
@@ -192,6 +262,25 @@ function Report( {
 						}
 						onOpenSignal={ ( provider: Provider ) =>
 							onNavigate( at( { signal: provider } ) )
+						}
+						impact={ report.potential_impact }
+						findingHref={ ( finding ) =>
+							href( findingRoute( finding ) )
+						}
+						onOpenFinding={ ( finding ) => {
+							returnTo.current =
+								report.potential_impact.findings.indexOf(
+									finding
+								);
+							onNavigate( findingRoute( finding ) );
+						} }
+						impactView={ impactView }
+						onImpactViewChange={ setImpactView }
+						onShowNetResult={
+							// Offered only when the Net result has data to show.
+							selected === 'final' || counts.final.total === null
+								? null
+								: () => selectPhase( 'final' )
 						}
 					/>
 				</PhaseTabs>
@@ -216,12 +305,14 @@ function Report( {
  * @param props.selected      Selected phase, null if no phase is available.
  * @param props.counts        Change counts of the report.
  * @param props.heading       Ref of the page title (focus after navigation).
+ * @param props.item          Rows located from Potential Impact, if any.
  * @param props.historyRoute  Route of the History.
  * @param props.overviewRoute Route of the report's overview.
  * @param props.href          Link target of a route.
  * @param props.onNavigate    In-app navigation.
  * @param props.onSelectPhase Selects a phase (keeps the signal).
  * @param props.onRefresh     Reloads the report (open analyses).
+ * @param props.onClearItem   Removes the located item from the URL.
  */
 function RefinedSignalView( {
 	report,
@@ -229,26 +320,34 @@ function RefinedSignalView( {
 	selected,
 	counts,
 	heading,
+	item,
 	historyRoute,
 	overviewRoute,
 	href,
 	onNavigate,
 	onSelectPhase,
 	onRefresh,
+	onClearItem,
 }: {
 	report: AnalysisReport;
 	signal: Provider;
 	selected: PhaseKey | null;
 	counts: ReturnType< typeof reportChangeCounts >;
 	heading: RefObject< HTMLHeadingElement >;
+	item: RouteItem | null;
 	historyRoute: Route;
 	overviewRoute: Route;
 	href: ( route: Route ) => string;
 	onNavigate: ( route: Route, replace?: boolean ) => void;
 	onSelectPhase: ( phase: PhaseKey ) => void;
 	onRefresh: () => void;
+	onClearItem: () => void;
 } ) {
 	const notice = reportNotice( report );
+	const located = useMemo(
+		() => ( item === null ? null : locate( report, signal, item ) ),
+		[ report, signal, item ]
+	);
 	const crumb =
 		'rounded font-medium text-primary no-underline hover:underline focus:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 	const separator = (
@@ -324,24 +423,35 @@ function RefinedSignalView( {
 				{ ( notice.open || notice.tone !== 'positive' ) && (
 					<StatusLine notice={ notice } onRefresh={ onRefresh } />
 				) }
+				{ located && (
+					<LocatedItem
+						located={ located }
+						signal={ signal }
+						onClear={ onClearItem }
+					/>
+				) }
 				{ selected && (
-					<PhaseTabs
-						counts={ {
-							during_update: counts.during_update[ signal ],
-							post_update: counts.post_update[ signal ],
-							final: counts.final[ signal ],
-						} }
-						selected={ selected }
-						onSelect={ onSelectPhase }
-					>
-						<SignalDetail
-							provider={ signal }
-							phase={ selected }
-							data={ report.phases[ selected ] }
-							count={ counts[ selected ][ signal ] }
-							windowSeconds={ report.observation_window_seconds }
-						/>
-					</PhaseTabs>
+					<LocatedProvider value={ located }>
+						<PhaseTabs
+							counts={ {
+								during_update: counts.during_update[ signal ],
+								post_update: counts.post_update[ signal ],
+								final: counts.final[ signal ],
+							} }
+							selected={ selected }
+							onSelect={ onSelectPhase }
+						>
+							<SignalDetail
+								provider={ signal }
+								phase={ selected }
+								data={ report.phases[ selected ] }
+								count={ counts[ selected ][ signal ] }
+								windowSeconds={
+									report.observation_window_seconds
+								}
+							/>
+						</PhaseTabs>
+					</LocatedProvider>
 				) }
 				<TechnicalDetails
 					report={ report }
@@ -350,6 +460,106 @@ function RefinedSignalView( {
 				/>
 			</article>
 		</div>
+	);
+}
+
+/**
+ * Which rows a Potential Impact link located on this page, with a way to
+ * clear the marks. The rows themselves are marked in their lists: as the
+ * finding's own only when its evidence identifies them, else neutrally as
+ * entries of the same hook.
+ *
+ * @param props         Props.
+ * @param props.located Located rows.
+ * @param props.signal  Signal of the page.
+ * @param props.onClear Removes the marks.
+ */
+function LocatedItem( {
+	located,
+	signal,
+	onClear,
+}: {
+	located: Located;
+	signal: Provider;
+	onClear: () => void;
+} ) {
+	const { item, precision, rows, ambiguous } = located;
+	const count = rows.size;
+	let text: string;
+	if ( precision === 'exact' ) {
+		if ( signal === 'options' ) {
+			text = __(
+				'Showing the Net result with this option highlighted:',
+				'updatelens'
+			);
+		} else {
+			text =
+				count === 1
+					? __(
+							'Showing the Net result with the entry of this finding highlighted:',
+							'updatelens'
+						)
+					: sprintf(
+							/* translators: %s: number of entries (2 or more). */
+							__(
+								'Showing the Net result with the %s entries of this finding highlighted:',
+								'updatelens'
+							),
+							formatCount( count )
+						);
+		}
+	} else if ( ambiguous ) {
+		text = sprintf(
+			/* translators: %s: number of entries (2 or more). */
+			__(
+				'Showing the Net result. %s entries of this hook match this finding. Arguments are not shown, so UpdateLens cannot tell which one the finding refers to; they are marked as entries of the same hook:',
+				'updatelens'
+			),
+			formatCount( count )
+		);
+	} else if ( count > 0 ) {
+		text = __(
+			'Showing the Net result. The exact entry of this finding could not be identified; entries of the same hook are marked:',
+			'updatelens'
+		);
+	} else {
+		text = __(
+			'Showing the Net result. No entry of this finding was found in it:',
+			'updatelens'
+		);
+	}
+
+	return (
+		<section
+			aria-label={ __( 'Located from Potential Impact', 'updatelens' ) }
+			data-precision={ precision }
+			className={ cn(
+				'flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-3 text-sm',
+				precision === 'exact'
+					? 'border-tint-border bg-tint'
+					: 'bg-card/70'
+			) }
+		>
+			<p className="min-w-0 flex-1 basis-64 leading-relaxed text-slate-700">
+				{ text }{ ' ' }
+				<code className="break-all bg-transparent p-0 font-mono text-[13px] font-medium text-slate-900">
+					{ item.name }
+				</code>
+				{ item.group !== null && item.group !== '' && (
+					<span className="text-muted-foreground">
+						{ ' · ' }
+						{ sprintf(
+							/* translators: %s: Action Scheduler group slug. */
+							__( 'Group: %s', 'updatelens' ),
+							item.group
+						) }
+					</span>
+				) }
+			</p>
+			<Button variant="outline" size="sm" onClick={ onClear }>
+				{ __( 'Clear highlight', 'updatelens' ) }
+			</Button>
+		</section>
 	);
 }
 

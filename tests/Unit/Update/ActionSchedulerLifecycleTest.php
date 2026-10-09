@@ -400,14 +400,14 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 	}
 
 	/**
-	 * No Action Scheduler on the site (the common case): every phase `not_installed`,
-	 * options and Cron exactly as with a working queue.
+	 * No Action Scheduler on the site (the common case): every phase absent at
+	 * both captures, options and Cron exactly as with a working queue.
 	 */
 	public function test_not_installed() {
 		$row = $this->lifecycle( null, null, null );
 
 		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'] );
-		$this->assertSame( self::all( ActionSchedulerPhaseReason::NOT_INSTALLED ), self::availability( $row ) );
+		$this->assertSame( self::all( ActionSchedulerPhaseReason::NOT_INSTALLED_THROUGHOUT ), self::availability( $row ) );
 		$this->assertSame( $this->reference_other_signals(), self::other_signals( $row ) );
 		$this->assert_terminal( $row );
 	}
@@ -502,39 +502,150 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 	}
 
 	/**
-	 * Action Scheduler loaded only after the update (e.g. the updated plugin
-	 * started bundling it): no diff is invented across the change; only the
-	 * phase with two snapshots is available.
+	 * Presence of Action Scheduler at BEFORE, IMMEDIATE and SETTLED (A = absent,
+	 * P = readable, F = present but unreadable): the stored phase reasons and
+	 * the Potential Impact status of Action Scheduler.
+	 *
+	 * Absence never resolves a phase from its first capture alone: only a
+	 * phase absent at both captures is `not_installed_throughout`, and only an
+	 * analysis absent at all three captures is not applicable.
+	 *
+	 * @return array<string, array{mixed, mixed, mixed, array<string, string>, array{string, string|null}}>
 	 */
-	public function test_becomes_available_after_before() {
-		$row = $this->lifecycle( null, self::as_immediate(), self::as_settled() );
+	public function presence_transitions() {
+		$a  = null;
+		$f  = ActionSchedulerUnavailableException::unsupported_store();
+		$t  = ActionSchedulerPhaseReason::NOT_INSTALLED_THROUGHOUT;
+		$n  = ActionSchedulerPhaseReason::NEWLY_DETECTED;
+		$g  = ActionSchedulerPhaseReason::NO_LONGER_DETECTED;
+		$us = ActionSchedulerPhaseReason::UNSUPPORTED_STORE;
+		$ok = 'available';
 
+		$phases = static function ( $during, $post, $net ) {
+			return array(
+				'during_update' => $during,
+				'post_update'   => $post,
+				'final'         => $net,
+			);
+		};
+
+		return array(
+			'A A A: absent throughout'            => array( $a, $a, $a, $phases( $t, $t, $t ), array( 'not_applicable', 'not_installed' ) ),
+			'A A P: newly detected at settle'     => array( $a, $a, self::as_settled(), $phases( $t, $n, $n ), array( 'not_evaluated', $n ) ),
+			'A P P: newly detected with update'   => array( $a, self::as_immediate(), self::as_settled(), $phases( $n, $ok, $n ), array( 'not_evaluated', $n ) ),
+			'A P A: detected only in between'     => array( $a, self::as_immediate(), $a, $phases( $n, $g, $t ), array( 'not_evaluated', 'not_installed' ) ),
+			'P A A: gone with the update'         => array( self::as_before(), $a, $a, $phases( $g, $t, $g ), array( 'not_evaluated', $g ) ),
+			'P P A: gone at settle'               => array( self::as_before(), self::as_immediate(), $a, $phases( $ok, $g, $g ), array( 'not_evaluated', $g ) ),
+			'P A P: gone in between'              => array( self::as_before(), $a, self::as_settled(), $phases( $g, $n, $ok ), array( 'evaluated', null ) ),
+			'A A F: unreadable at settle'         => array( $a, $a, $f, $phases( $t, $us, $us ), array( 'not_evaluated', $us ) ),
+			'A F P: unreadable after update'      => array( $a, $f, self::as_settled(), $phases( $us, $us, $n ), array( 'not_evaluated', $n ) ),
+			'F A A: unreadable before the update' => array( $f, $a, $a, $phases( $us, $t, $us ), array( 'not_evaluated', $us ) ),
+			'P F A: unreadable, then gone'        => array( self::as_before(), $f, $a, $phases( $us, $us, $g ), array( 'not_evaluated', $g ) ),
+		);
+	}
+
+	/**
+	 * Every availability change keeps its own reason, and no diff is invented across it.
+	 *
+	 * @dataProvider presence_transitions
+	 * @param mixed                      $before    BEFORE state.
+	 * @param mixed                      $immediate IMMEDIATE state.
+	 * @param mixed                      $settled   SETTLED state.
+	 * @param array<string, string>      $expected  Stored reason (or 'available') per phase.
+	 * @param array{string, string|null} $impact    Potential Impact status and reason of Action Scheduler.
+	 */
+	public function test_presence_transitions( $before, $immediate, $settled, array $expected, array $impact ) {
+		$row = $this->lifecycle( $before, $immediate, $settled );
+
+		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'] );
+		$this->assertSame( $expected, self::availability( $row ) );
+		$this->assertSame( $this->reference_other_signals(), self::other_signals( $row ) );
+		$this->assert_terminal( $row );
+
+		$report = $this->report();
+		$signal = $report['potential_impact']['signals']['action_scheduler'];
+		$this->assertSame( $impact, array( $signal['status'], $signal['reason'] ) );
+		$this->assertSame( 'not_evaluated' === $impact[0] ? 'partial' : 'evaluated', $report['potential_impact']['status'] );
+		foreach ( $report['phases'] as $phase ) {
+			$reason = isset( $phase['action_scheduler']['reason'] ) ? $phase['action_scheduler']['reason'] : null;
+			$this->assertNotSame( ActionSchedulerPhaseReason::NOT_INSTALLED_THROUGHOUT, $reason, 'Reported as not_installed.' );
+		}
+	}
+
+	/**
+	 * Absent at BEFORE and the update fails: the lifecycle reason, never
+	 * `not_installed` from the first capture alone.
+	 */
+	public function test_absent_then_update_failed() {
+		$request = $this->site->request();
+		$this->site->start( $request, self::PLUGIN );
+		$this->assertSame( ActionSchedulerObservation::NOT_INSTALLED_MARKER, $this->site->repository->rows[1]['action_scheduler_before_snapshot'] );
+		$this->assertSame( self::all( null ), self::availability( $this->site->repository->rows[1] ), 'Absence alone resolves no phase.' );
+
+		$request->update_finished( self::PLUGIN, 'download_failed', null );
+		$request->request_ending( true );
+		$row = $this->site->repository->rows[1];
+
+		$this->assertSame( AnalysisStatus::FAILED, $row['status'] );
+		$this->assertSame( self::all( ActionSchedulerPhaseReason::UPDATE_FAILED ), self::availability( $row ) );
+		$this->assert_terminal( $row );
+		$signal = $this->report()['potential_impact']['signals']['action_scheduler'];
+		$this->assertSame( array( 'not_evaluated', 'update_failed' ), array( $signal['status'], $signal['reason'] ) );
+	}
+
+	/**
+	 * Absent at BEFORE and IMMEDIATE, then the settle window expires: SETTLED was
+	 * never captured, so only the during-update phase is known to be absent.
+	 */
+	public function test_absent_then_expired() {
+		$this->site->update( self::PLUGIN );
+		$this->site->action_scheduler = self::as_settled();
+		$this->site->time            += PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS + 1;
+		$this->site->admin_page();
+		$row = $this->site->repository->rows[1];
+
+		$this->assertSame( SettleOutcome::EXPIRED, $row['settle_outcome'] );
 		$this->assertSame(
 			array(
-				'during_update' => ActionSchedulerPhaseReason::NOT_INSTALLED,
-				'post_update'   => 'available',
-				'final'         => ActionSchedulerPhaseReason::NOT_INSTALLED,
+				'during_update' => ActionSchedulerPhaseReason::NOT_INSTALLED_THROUGHOUT,
+				'post_update'   => ActionSchedulerPhaseReason::SETTLE_EXPIRED,
+				'final'         => ActionSchedulerPhaseReason::SETTLE_EXPIRED,
 			),
 			self::availability( $row )
 		);
+		$this->assert_terminal( $row );
+		$this->assertSame( 'not_evaluated', $this->report()['potential_impact']['signals']['action_scheduler']['status'] );
+	}
+
+	/**
+	 * Absent at BEFORE, and the analysis is abandoned: no phase claims absence.
+	 */
+	public function test_absent_then_abandoned() {
+		$this->site->start( $this->site->request(), self::PLUGIN );
+		$this->site->time += PluginUpdateAnalyzer::STALE_AFTER_SECONDS + 1;
+		$this->site->admin_page();
+		$row = $this->site->repository->rows[1];
+
+		$this->assertSame( AnalysisStatus::ABANDONED, $row['status'] );
+		$this->assertSame( self::all( ActionSchedulerPhaseReason::ANALYSIS_ABANDONED ), self::availability( $row ) );
 		$this->assert_terminal( $row );
 	}
 
 	/**
-	 * Action Scheduler gone at settle (the plugin bundling it was removed): later phases unavailable.
+	 * Report of the first analysis.
+	 *
+	 * @return array
 	 */
-	public function test_becomes_unavailable_at_settle() {
-		$row = $this->lifecycle( self::as_before(), self::as_immediate(), null );
-
-		$this->assertSame(
-			array(
-				'during_update' => 'available',
-				'post_update'   => ActionSchedulerPhaseReason::NOT_INSTALLED,
-				'final'         => ActionSchedulerPhaseReason::NOT_INSTALLED,
-			),
-			self::availability( $row )
+	private function report() {
+		$reports = new AnalysisReports(
+			$this->site->repository,
+			$this->site->request(),
+			static function () {
+				return true;
+			}
 		);
-		$this->assert_terminal( $row );
+
+		return $reports->report( 1 );
 	}
 
 	/**
@@ -967,8 +1078,9 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 		$this->assertIsString( $attempts[0]['cron_before_snapshot'] );
 		$this->assertNull( $attempts[1]['cron_before_snapshot'] );
 		foreach ( $attempts as $attempt ) {
-			$this->assertSame( ActionSchedulerPhaseReason::NOT_INSTALLED, $attempt['action_scheduler_during_update_reason'] );
-			$this->assertArrayNotHasKey( 'action_scheduler_before_snapshot', $attempt );
+			// The not-installed marker is no payload: kept, so no extra attempt.
+			$this->assertSame( ActionSchedulerObservation::NOT_INSTALLED_MARKER, $attempt['action_scheduler_before_snapshot'] );
+			$this->assertArrayNotHasKey( 'action_scheduler_during_update_reason', $attempt );
 		}
 		$this->assertSame( array(), $this->site->repository->rows );
 	}
@@ -1075,7 +1187,7 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 			$this->assertSame( ActionSchedulerPhaseReason::MALFORMED_STATE, ActionSchedulerPhaseReason::from_malformed( $malformed ) );
 		}
 		$this->assertSame( ActionSchedulerPhaseReason::ALL, array_values( array_unique( ActionSchedulerPhaseReason::ALL ) ) );
-		$this->assertCount( 14, ActionSchedulerPhaseReason::ALL );
+		$this->assertCount( 17, ActionSchedulerPhaseReason::ALL );
 	}
 
 	/**
@@ -1106,11 +1218,23 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 			foreach ( array_keys( $output[1]['phases'] ) as $phase ) {
 				unset( $output[0]['items'][0]['phases'][ $phase ]['action_scheduler'], $output[1]['phases'][ $phase ]['action_scheduler'] );
 			}
+			// Potential Impact: the overall status summarizes all signals; the others' evaluation and findings stay the same.
+			unset( $output[1]['potential_impact']['status'], $output[1]['potential_impact']['signals']['action_scheduler'] );
+			$output[1]['potential_impact']['findings'] = array_values(
+				array_filter(
+					$output[1]['potential_impact']['findings'],
+					static function ( array $finding ) {
+						return 'action_scheduler' !== $finding['signal'];
+					}
+				)
+			);
 			return $output;
 		};
 		$this->assertSame( $without_action_scheduler( $outputs[1] ), $without_action_scheduler( $outputs[0] ) );
 		$this->assertTrue( $outputs[0][1]['phases']['final']['action_scheduler']['available'] );
 		$this->assertSame( 'not_installed', $outputs[1][1]['phases']['final']['action_scheduler']['reason'] );
+		$this->assertSame( array( 'evaluated', 'evaluated' ), array( $outputs[0][1]['potential_impact']['status'], $outputs[0][1]['potential_impact']['signals']['action_scheduler']['status'] ) );
+		$this->assertSame( array( 'evaluated', 'not_applicable', 'not_installed' ), array( $outputs[1][1]['potential_impact']['status'], $outputs[1][1]['potential_impact']['signals']['action_scheduler']['status'], $outputs[1][1]['potential_impact']['signals']['action_scheduler']['reason'] ) );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Unit test.
 		$json = json_encode( $outputs[0] );
 		foreach ( array( self::FAKE_SECRET, 'hooks.example.test', 'token', 'fingerprint', 'as-args-hmac', 'snapshot' ) as $needle ) {

@@ -25,7 +25,10 @@ defined( 'ABSPATH' ) || exit;
  * - `upgrader_install_package_result` (last): the per-plugin result.
  * - `upgrader_process_complete` (last, after core's own handlers): the update
  *   finished; capture the immediate state.
- * - `shutdown` (last): fail unfinished analyses; settle on later admin pages.
+ * - `shutdown` (last): fail unfinished analyses; settle on later admin pages
+ *   that SettleEligibility allows.
+ * - `wp_ajax_updatelens_settle`: the follow-up request the updating
+ *   administrator's browser sends after the update (FollowUpRequest).
  */
 final class PluginUpdateTracker {
 
@@ -70,6 +73,7 @@ final class PluginUpdateTracker {
 		add_filter( 'upgrader_install_package_result', array( $this, 'on_install_package_result' ), PHP_INT_MAX, 2 );
 		add_action( 'upgrader_process_complete', array( $this, 'on_process_complete' ), PHP_INT_MAX, 2 );
 		add_action( 'shutdown', array( $this, 'on_shutdown' ), PHP_INT_MAX );
+		add_action( 'wp_ajax_' . FollowUpRequest::ACTION, array( $this, 'on_follow_up' ) );
 	}
 
 	/**
@@ -163,13 +167,62 @@ final class PluginUpdateTracker {
 	 */
 	public function on_shutdown() {
 		try {
-			$active_now = (array) get_option( 'active_plugins', array() );
-			$changed    = array_merge( array_diff( $this->active_at_boot, $active_now ), array_diff( $active_now, $this->active_at_boot ) );
-
-			$this->analyzer->request_ending( self::is_admin_page_request(), array_values( $changed ) );
+			$this->analyzer->request_ending( self::may_settle_at_shutdown(), $this->activation_changed() );
 		} catch ( Throwable $e ) {
 			return;
 		}
+	}
+
+	/**
+	 * The follow-up request after a successful update (`admin-ajax.php`,
+	 * logged-in users only). Responds with one FollowUpRequest result per
+	 * listed plugin; never with snapshot or diff data.
+	 *
+	 * @return void
+	 */
+	public function on_follow_up() {
+		if ( false === check_ajax_referer( FollowUpRequest::NONCE_ACTION, false, false ) ) {
+			wp_send_json_error( array( 'code' => 'invalid_nonce' ), 403 );
+		}
+		if ( ! current_user_can( FollowUpRequest::CAPABILITY ) ) {
+			wp_send_json_error( array( 'code' => 'forbidden' ), 403 );
+		}
+
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Every entry is validated by FollowUpRequest::plugins() (strict basename pattern).
+		$plugins = FollowUpRequest::plugins( isset( $_POST['plugins'] ) ? wp_unslash( $_POST['plugins'] ) : null );
+		if ( null === $plugins ) {
+			wp_send_json_error( array( 'code' => 'invalid_request' ), 400 );
+		}
+
+		// The settled snapshot is written even if the browser goes away meanwhile.
+		ignore_user_abort( true );
+
+		try {
+			$results = $this->analyzer->settle_follow_up( $plugins, get_current_user_id(), $this->activation_changed() );
+		} catch ( Throwable $e ) {
+			wp_send_json_error( array( 'code' => 'failed' ), 500 );
+		}
+
+		$response = array();
+		foreach ( $results as $plugin => $result ) {
+			$response[] = array(
+				'plugin' => $plugin,
+				'result' => $result,
+			);
+		}
+
+		wp_send_json_success( array( 'results' => $response ) );
+	}
+
+	/**
+	 * Plugins whose active state changed during this request.
+	 *
+	 * @return string[]
+	 */
+	private function activation_changed() {
+		$active_now = (array) get_option( 'active_plugins', array() );
+
+		return array_values( array_merge( array_diff( $this->active_at_boot, $active_now ), array_diff( $active_now, $this->active_at_boot ) ) );
 	}
 
 	/**
@@ -182,12 +235,23 @@ final class PluginUpdateTracker {
 	}
 
 	/**
-	 * A wp-admin page request: not Ajax, cron, WP-CLI or REST.
+	 * Whether this request may settle analyses at shutdown (SettleEligibility).
 	 *
 	 * @return bool
 	 */
-	private static function is_admin_page_request() {
-		return self::is_interactive_admin() && ! wp_doing_ajax();
+	private static function may_settle_at_shutdown() {
+		return SettleEligibility::may_settle_at_shutdown(
+			array(
+				'is_admin'           => is_admin(),
+				'doing_ajax'         => wp_doing_ajax(),
+				'doing_cron'         => wp_doing_cron(),
+				'is_cli'             => defined( 'WP_CLI' ) && WP_CLI,
+				'is_rest'            => defined( 'REST_REQUEST' ) && REST_REQUEST,
+				'logged_in'          => is_user_logged_in(),
+				'can_update_plugins' => current_user_can( SettleEligibility::CAPABILITY ),
+				'admin_init_done'    => did_action( 'admin_init' ) > 0,
+			)
+		);
 	}
 
 	/**

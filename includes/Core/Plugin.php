@@ -7,6 +7,7 @@
 
 namespace UpdateLens\Core;
 
+use UpdateLens\Admin\AdminAssets;
 use UpdateLens\Admin\AdminPage;
 use UpdateLens\Rest\AnalysesController;
 use UpdateLens\Rest\BaselineController;
@@ -84,6 +85,10 @@ final class Plugin {
 		// schema existed get it here, since activation does not run again.
 		if ( ! is_multisite() && Schema::maybe_upgrade() ) {
 			( new PluginUpdateTracker( PluginUpdateAnalyzer::create() ) )->register();
+
+			if ( is_admin() ) {
+				add_action( 'admin_enqueue_scripts', array( AdminAssets::class, 'enqueue_update_follow_up' ), 20 );
+			}
 		}
 	}
 

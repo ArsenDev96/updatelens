@@ -35,7 +35,7 @@ final class SchemaTest extends TestCase {
 	 * Version 3 columns: provider-prefixed, without obsolete v1/v2 names.
 	 */
 	public function test_columns() {
-		$this->assertSame( 4, Schema::VERSION );
+		$this->assertSame( 5, Schema::VERSION );
 		$this->assertSame(
 			array(
 				'id',
@@ -50,6 +50,7 @@ final class SchemaTest extends TestCase {
 				'started_at',
 				'updated_at',
 				'settle_deadline',
+				'immediate_captured_at',
 				'completed_at',
 				'options_before_snapshot',
 				'options_immediate_snapshot',

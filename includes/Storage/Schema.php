@@ -28,8 +28,10 @@ final class Schema {
 	 * 3: options columns prefixed `options_`; WP-Cron snapshot, diff and
 	 *    reason columns.
 	 * 4: Action Scheduler snapshot, diff and reason columns.
+	 * 5: immediate_captured_at (Unix time of the IMMEDIATE observation with
+	 *    microseconds), so a later request can prove it started afterwards.
 	 */
-	const VERSION = 4;
+	const VERSION = 5;
 
 	/**
 	 * Column renames: current name => [ definition, earlier names, newest first ].
@@ -215,6 +217,7 @@ final class Schema {
   started_at datetime NOT NULL,
   updated_at datetime NOT NULL,
   settle_deadline datetime DEFAULT NULL,
+  immediate_captured_at decimal(16,6) DEFAULT NULL,
   completed_at datetime DEFAULT NULL,
   options_before_snapshot longtext DEFAULT NULL,
   options_immediate_snapshot longtext DEFAULT NULL,

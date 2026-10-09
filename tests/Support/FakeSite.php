@@ -119,9 +119,11 @@ final class FakeSite {
 	/**
 	 * A new "request".
 	 *
+	 * @param float|null $started_at When the request started. Default: half a
+	 *                               second after the current fake time.
 	 * @return PluginUpdateAnalyzer
 	 */
-	public function request() {
+	public function request( $started_at = null ) {
 		$capture = function () {
 			++$this->captures;
 
@@ -168,7 +170,8 @@ final class FakeSite {
 			function () {
 				return $this->time;
 			},
-			$capture_action_scheduler
+			$capture_action_scheduler,
+			null === $started_at ? $this->time + 0.5 : (float) $started_at
 		);
 	}
 

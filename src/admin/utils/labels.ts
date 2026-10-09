@@ -860,6 +860,11 @@ export function settleOutcomeText(
 				'Observation completed on the next admin request.',
 				'updatelens'
 			);
+		case 'follow_up':
+			return __(
+				'Observation completed in a follow-up request after the update.',
+				'updatelens'
+			);
 		case 'next_update':
 			return __(
 				'Observation completed before another plugin update began.',

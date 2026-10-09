@@ -37,10 +37,29 @@ final class OptionNoiseFilter {
 	 * Excluded exact option names.
 	 *
 	 * - `cron`: WP-Cron events, which get their own snapshot provider.
+	 * - HOSTING_UPDATE_CHECK_PREFIX + `update_core`, `update_plugins` or
+	 *   `update_themes`: see HOSTING_UPDATE_CHECK_PREFIX.
 	 */
 	const EXCLUDED_NAMES = array(
 		'cron',
+		self::HOSTING_UPDATE_CHECK_PREFIX . 'update_core',
+		self::HOSTING_UPDATE_CHECK_PREFIX . 'update_plugins',
+		self::HOSTING_UPDATE_CHECK_PREFIX . 'update_themes',
 	);
+
+	/**
+	 * Prefix of three persistent options found on WP Engine sites whose values
+	 * have the fields of WordPress update-check records (like core's update site
+	 * transients, excluded above). They appear to be hosting-managed update-check
+	 * metadata; their exact writer is unverified.
+	 *
+	 * Only the three exact names in EXCLUDED_NAMES are excluded, never this
+	 * prefix: other `wpe_*` options may be settings and stay in the snapshot.
+	 * The names are assembled from this prefix because Plugin Check reports
+	 * update-transient names written out in a file as updater code. UpdateLens
+	 * never reads or changes update data; it only leaves these names out.
+	 */
+	const HOSTING_UPDATE_CHECK_PREFIX = 'wpe_site_transient_';
 
 	/**
 	 * Whether an option should be left out of the snapshot.

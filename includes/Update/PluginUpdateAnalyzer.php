@@ -41,11 +41,16 @@ defined( 'ABSPATH' ) || exit;
  * created, so the update request's own shutdown never settles them.
  *
  * Observation rules:
- * - Settling happens at shutdown of a later wp-admin page request, or right
- *   before another update starts (whichever comes first), and only within
+ * - Settling happens in the follow-up request the updating administrator's
+ *   browser sends after the update (settle_follow_up()), at shutdown of a
+ *   later eligible wp-admin page request (request_ending()), or right before
+ *   another update starts (whichever comes first), and only within
  *   SETTLE_WINDOW_SECONDS of the update; after that the analysis completes
  *   with outcome `expired` and no settled snapshot, so late settling never
  *   collects unrelated site activity.
+ * - A follow-up or page request settles an analysis only if it started after
+ *   the analysis's IMMEDIATE observation was taken (immediate_captured_at, in
+ *   microseconds), so it included the updated plugin files from the start.
  * - If another update starts in the request that created an analysis, that
  *   analysis is abandoned: its settled state would include the other update.
  * - A request that activates or deactivates the plugin does not settle it.
@@ -113,11 +118,18 @@ final class PluginUpdateAnalyzer {
 	private $action_scheduler;
 
 	/**
-	 * Returns the current Unix time.
+	 * Returns the current Unix time (seconds, with or without fractions).
 	 *
 	 * @var callable
 	 */
 	private $now;
+
+	/**
+	 * Unix time (with microseconds) at which this PHP request started, or null if unknown.
+	 *
+	 * @var float|null
+	 */
+	private $request_started_at;
 
 	/**
 	 * Snapshot persistence format.
@@ -163,20 +175,27 @@ final class PluginUpdateAnalyzer {
 	 * @param callable|null      $now          Returns the current Unix time. Default time().
 	 * @param callable|null      $capture_action_scheduler Returns a fresh ActionSchedulerSnapshot.
 	 *                                         Null: no Action Scheduler (`not_installed`).
+	 * @param float|null         $request_started_at Unix time (with microseconds) at which this
+	 *                                         request started. Null: unknown, so this request
+	 *                                         never settles analyses of earlier requests.
 	 */
-	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null ) {
-		$this->repository       = $repository;
-		$this->capture          = $capture;
-		$this->cron             = new CronObservation( $capture_cron );
-		$this->action_scheduler = new ActionSchedulerObservation( $capture_action_scheduler );
-		$this->now              = null === $now ? 'time' : $now;
-		$this->snapshot_codec   = new OptionsSnapshotCodec();
-		$this->diff_codec       = new OptionsDiffCodec();
-		$this->diff_builder     = new OptionsDiffBuilder();
+	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null, ?float $request_started_at = null ) {
+		$this->repository         = $repository;
+		$this->capture            = $capture;
+		$this->cron               = new CronObservation( $capture_cron );
+		$this->action_scheduler   = new ActionSchedulerObservation( $capture_action_scheduler );
+		$this->now                = null === $now ? 'microtime' : $now;
+		$this->request_started_at = $request_started_at;
+		$this->snapshot_codec     = new OptionsSnapshotCodec();
+		$this->diff_codec         = new OptionsDiffCodec();
+		$this->diff_builder       = new OptionsDiffBuilder();
 	}
 
 	/**
 	 * Analyzer wired to the running site. The snapshot providers are created on first use.
+	 *
+	 * The request start is PHP's `REQUEST_TIME_FLOAT` (taken before WordPress
+	 * loads any plugin file); the clock is `microtime( true )`, the same clock.
 	 *
 	 * @return self
 	 */
@@ -207,7 +226,18 @@ final class PluginUpdateAnalyzer {
 			return $action_scheduler_provider->capture();
 		};
 
-		return new self( new AnalysisRepository( $wpdb ), $capture, $capture_cron, null, $capture_action_scheduler );
+		$request_started_at = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) && is_numeric( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : null;
+
+		return new self(
+			new AnalysisRepository( $wpdb ),
+			$capture,
+			$capture_cron,
+			static function () {
+				return microtime( true );
+			},
+			$capture_action_scheduler,
+			$request_started_at
+		);
 	}
 
 	/**
@@ -320,7 +350,10 @@ final class PluginUpdateAnalyzer {
 			return;
 		}
 
-		$now = $this->now();
+		// Taken after the IMMEDIATE captures (the files were replaced before them):
+		// a request that started later included the new plugin files.
+		$captured_at = $this->precise_now();
+		$now         = (int) floor( $captured_at );
 		$this->transition(
 			$row,
 			array(
@@ -329,6 +362,7 @@ final class PluginUpdateAnalyzer {
 				'options_during_update_diff' => $during_update_json,
 				'options_immediate_snapshot' => $immediate_json,
 				'settle_deadline'            => self::datetime( $now + self::SETTLE_WINDOW_SECONDS ),
+				'immediate_captured_at'      => sprintf( '%.6F', $captured_at ),
 				'updated_at'                 => self::datetime( $now ),
 			),
 			$this->cron->immediate( $row, $cron_immediate ),
@@ -340,23 +374,27 @@ final class PluginUpdateAnalyzer {
 	 * The request is ending (WordPress `shutdown`).
 	 *
 	 * Fails analyses this request started whose update never reported back.
-	 * On a wp-admin page request that ran no update, also abandons stale
-	 * analyses, expires those past their settle window and settles the rest.
+	 * On an eligible wp-admin page request that ran no update (see
+	 * SettleEligibility), also abandons stale analyses, expires those past
+	 * their settle window and settles the rest that this request may settle.
 	 *
-	 * A plugin activated or deactivated during this request (e.g. the
-	 * reactivation request after update.php) did not run a full request
-	 * lifecycle with its new code, so its analysis waits for a later request.
+	 * Not settled here (they wait for a later request, or expire):
+	 * - analyses whose IMMEDIATE observation was taken after this request
+	 *   started: this request may have loaded the old plugin files;
+	 * - analyses of a plugin activated or deactivated during this request
+	 *   (e.g. the reactivation request after update.php), which did not run a
+	 *   full request lifecycle with its new code.
 	 *
-	 * @param bool     $is_admin_page_request Whether this is a wp-admin page request (not Ajax, cron, CLI or REST).
-	 * @param string[] $activation_changed    Plugins whose active state changed during this request.
+	 * @param bool     $may_settle         Whether this request may settle (SettleEligibility::may_settle_at_shutdown()).
+	 * @param string[] $activation_changed Plugins whose active state changed during this request.
 	 * @return void
 	 */
-	public function request_ending( $is_admin_page_request, array $activation_changed = array() ) {
+	public function request_ending( $may_settle, array $activation_changed = array() ) {
 		foreach ( $this->request_analyses as $id ) {
 			$this->fail_if_captured( $id );
 		}
 
-		if ( ! $is_admin_page_request || $this->update_seen ) {
+		if ( ! $may_settle || $this->update_seen ) {
 			return;
 		}
 
@@ -386,7 +424,7 @@ final class PluginUpdateAnalyzer {
 				continue;
 			}
 
-			if ( in_array( $row['plugin_file'], $activation_changed, true ) ) {
+			if ( in_array( $row['plugin_file'], $activation_changed, true ) || ! $this->started_after_immediate( $row ) ) {
 				continue;
 			}
 
@@ -401,6 +439,141 @@ final class PluginUpdateAnalyzer {
 			}
 			$this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::ADMIN_SHUTDOWN );
 		}
+	}
+
+	/**
+	 * Take the post-update observation the updating administrator's browser
+	 * asked for after a successful update (FollowUpRequest).
+	 *
+	 * Only the open analyses of the listed plugins are considered, and only
+	 * those started by $user_id; other pending analyses are left for their own
+	 * follow-up, a later page request, the next update or expiry. An analysis is
+	 * settled only if it awaits a settled snapshot, its settle window is open
+	 * and this request started after its IMMEDIATE observation (so the request
+	 * runs the new plugin code). One snapshot is shared by all settled analyses,
+	 * as at shutdown. Compare-and-set writes make concurrent settle attempts
+	 * safe: exactly one wins, the others report a conflict.
+	 *
+	 * @param string[] $plugin_files       Plugin basenames (validated by FollowUpRequest::plugins()).
+	 * @param int      $user_id            Current user ID.
+	 * @param string[] $activation_changed Plugins whose active state changed during this request.
+	 * @return array<string, string> Plugin file => FollowUpRequest result code.
+	 */
+	public function settle_follow_up( array $plugin_files, $user_id, array $activation_changed = array() ) {
+		$results  = array();
+		$eligible = array();
+		foreach ( $plugin_files as $plugin_file ) {
+			$row                     = null;
+			$results[ $plugin_file ] = $this->follow_up_candidate( $plugin_file, (int) $user_id, $activation_changed, $row );
+			if ( null === $results[ $plugin_file ] ) {
+				$eligible[ $plugin_file ] = $row;
+			}
+		}
+
+		if ( array() === $eligible ) {
+			return $results;
+		}
+
+		try {
+			$snapshot = call_user_func( $this->capture );
+		} catch ( Throwable $e ) {
+			foreach ( array_keys( $eligible ) as $plugin_file ) {
+				$results[ $plugin_file ] = FollowUpRequest::CAPTURE_FAILED; // Still awaiting a settled snapshot.
+			}
+			return $results;
+		}
+		$cron_snapshot             = $this->cron->capture();
+		$action_scheduler_snapshot = $this->action_scheduler->capture();
+
+		foreach ( $eligible as $plugin_file => $row ) {
+			$results[ $plugin_file ] = $this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::FOLLOW_UP );
+		}
+
+		return $results;
+	}
+
+	/**
+	 * Whether a plugin's open analysis may be settled by a follow-up request.
+	 *
+	 * Expires the analysis if its settle window has passed.
+	 *
+	 * @param string     $plugin_file        Plugin basename.
+	 * @param int        $user_id            Current user ID.
+	 * @param string[]   $activation_changed Plugins whose active state changed during this request.
+	 * @param array|null $row                Set to the open analysis when eligible.
+	 * @return string|null Null if eligible, otherwise the FollowUpRequest result code.
+	 */
+	private function follow_up_candidate( $plugin_file, $user_id, array $activation_changed, &$row ) {
+		if ( $this->update_seen ) {
+			return FollowUpRequest::NOT_READY; // Never settle around an update of this request.
+		}
+
+		try {
+			$open = $this->repository->find_open_for_plugin( $plugin_file );
+		} catch ( Throwable $e ) {
+			return FollowUpRequest::STORAGE_FAILED;
+		}
+
+		if ( null === $open || in_array( (int) $open['id'], $this->request_analyses, true ) ) {
+			return FollowUpRequest::NOT_PENDING;
+		}
+		if ( $user_id <= 0 || (int) $open['user_id'] !== $user_id ) {
+			return FollowUpRequest::NOT_ALLOWED;
+		}
+		if ( AnalysisStatus::AWAITING_SETTLE !== $open['status'] ) {
+			return FollowUpRequest::NOT_READY; // The update is still running.
+		}
+		if ( ! $this->is_settle_window_open( $open ) ) {
+			return self::follow_up_result( $this->expire( $open ), FollowUpRequest::EXPIRED );
+		}
+		if ( in_array( $plugin_file, $activation_changed, true ) || ! $this->started_after_immediate( $open ) ) {
+			return FollowUpRequest::NOT_READY;
+		}
+
+		$row = $open;
+
+		return null;
+	}
+
+	/**
+	 * Follow-up result of a transition this request attempted.
+	 *
+	 * @param bool|null $applied Result of transition().
+	 * @param string    $result  Result code if the transition was applied.
+	 * @return string FollowUpRequest result code.
+	 */
+	private static function follow_up_result( $applied, $result ) {
+		if ( true === $applied ) {
+			return $result;
+		}
+
+		return false === $applied ? FollowUpRequest::CONFLICT : FollowUpRequest::STORAGE_FAILED;
+	}
+
+	/**
+	 * Whether this request started after an analysis's IMMEDIATE observation was taken.
+	 *
+	 * Then the request included the updated plugin files from its start. Uses
+	 * `immediate_captured_at` (microseconds), so requests starting in the same
+	 * second as IMMEDIATE are ordered correctly. Analyses recorded before that
+	 * column existed only have a whole second (`updated_at`): there, only a
+	 * request that started in a later second is certainly later.
+	 *
+	 * @param array $row Open analysis in `awaiting_settle`.
+	 * @return bool
+	 */
+	private function started_after_immediate( array $row ) {
+		if ( null === $this->request_started_at ) {
+			return false;
+		}
+
+		if ( isset( $row['immediate_captured_at'] ) && is_numeric( $row['immediate_captured_at'] ) ) {
+			return $this->request_started_at > (float) $row['immediate_captured_at'];
+		}
+
+		$immediate = empty( $row['updated_at'] ) ? false : strtotime( $row['updated_at'] . ' UTC' );
+
+		return false !== $immediate && floor( $this->request_started_at ) > $immediate;
 	}
 
 	/**
@@ -499,26 +672,26 @@ final class PluginUpdateAnalyzer {
 	 * @param OptionsSnapshot                $settled      Settled options snapshot.
 	 * @param CronSnapshot|string            $cron_settled Settled Cron snapshot or the reason it is unavailable.
 	 * @param ActionSchedulerSnapshot|string $action_scheduler_settled Settled Action Scheduler snapshot or the reason it is unavailable.
-	 * @param string                         $outcome      SettleOutcome::ADMIN_SHUTDOWN or NEXT_UPDATE.
-	 * @return void
+	 * @param string                         $outcome      SettleOutcome::ADMIN_SHUTDOWN, FOLLOW_UP or NEXT_UPDATE.
+	 * @return string FollowUpRequest result code: SETTLED only if this call stored the diffs.
 	 */
 	private function settle( array $open, OptionsSnapshot $settled, $cron_settled, $action_scheduler_settled, $outcome ) {
 		try {
 			$row = $this->repository->find( (int) $open['id'] );
 		} catch ( Throwable $e ) {
-			return;
+			return FollowUpRequest::STORAGE_FAILED;
 		}
 		if ( null === $row || AnalysisStatus::AWAITING_SETTLE !== $row['status'] ) {
-			return;
+			return FollowUpRequest::CONFLICT; // Settled, expired or ended by another request meanwhile.
 		}
 
 		$before = $this->decode_snapshot( $row, 'options_before_snapshot', $outcome );
 		if ( null === $before ) {
-			return;
+			return FollowUpRequest::ANALYSIS_FAILED;
 		}
 		$immediate = $this->decode_snapshot( $row, 'options_immediate_snapshot', $outcome );
 		if ( null === $immediate ) {
-			return;
+			return FollowUpRequest::ANALYSIS_FAILED;
 		}
 
 		try {
@@ -526,13 +699,13 @@ final class PluginUpdateAnalyzer {
 			$final_json       = $this->diff_codec->encode( $this->diff_builder->build( $before, $settled ) );
 		} catch ( IncompatibleSnapshotsException $e ) {
 			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED, $outcome );
-			return;
+			return FollowUpRequest::ANALYSIS_FAILED;
 		} catch ( Throwable $e ) {
 			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, $outcome );
-			return;
+			return FollowUpRequest::ANALYSIS_FAILED;
 		}
 
-		$this->transition(
+		$applied = $this->transition(
 			$row,
 			array(
 				'status'                   => AnalysisStatus::COMPLETED,
@@ -542,6 +715,8 @@ final class PluginUpdateAnalyzer {
 			$this->cron->settle( $row, $cron_settled ),
 			$this->action_scheduler->settle( $row, $action_scheduler_settled )
 		);
+
+		return self::follow_up_result( $applied, FollowUpRequest::SETTLED );
 	}
 
 	/**
@@ -552,15 +727,15 @@ final class PluginUpdateAnalyzer {
 	 * No late snapshot is taken.
 	 *
 	 * @param array $row Open analysis in `awaiting_settle`.
-	 * @return void
+	 * @return bool|null Result of transition(); false if the analysis changed meanwhile.
 	 */
 	private function expire( array $row ) {
 		$row = $this->with_signal_columns( $row );
 		if ( null === $row ) {
-			return;
+			return false;
 		}
 
-		$this->transition(
+		return $this->transition(
 			$row,
 			array( 'status' => AnalysisStatus::COMPLETED ) + $this->closing_changes( SettleOutcome::EXPIRED ),
 			$this->cron->close( $row, CronPhaseReason::SETTLE_EXPIRED ),
@@ -745,18 +920,21 @@ final class PluginUpdateAnalyzer {
 	 * @param array $changes      Column values.
 	 * @param array $cron_changes Cron column values.
 	 * @param array $action_scheduler_changes Action Scheduler column values.
-	 * @return void
+	 * @return bool|null True if applied, false if the analysis was no longer in
+	 *                   the row's status (another request changed it first),
+	 *                   null if it could not be stored.
 	 */
 	private function transition( array $row, array $changes, array $cron_changes = array(), array $action_scheduler_changes = array() ) {
 		foreach ( self::attempts( $changes, $cron_changes, $action_scheduler_changes ) as $attempt ) {
 			try {
-				$this->repository->transition( (int) $row['id'], $row['status'], $attempt );
-				return;
+				return (bool) $this->repository->transition( (int) $row['id'], $row['status'], $attempt );
 			} catch ( Throwable $e ) {
 				continue; // Retry without the next signal payload, if any is left.
 			}
 		}
+
 		// All attempts failed: left open; a later request settles, expires or abandons it.
+		return null;
 	}
 
 	/**
@@ -843,12 +1021,26 @@ final class PluginUpdateAnalyzer {
 	}
 
 	/**
-	 * Current Unix time from the injected clock.
+	 * Current Unix time from the injected clock, in whole seconds.
 	 *
 	 * @return int
 	 */
 	private function now() {
-		return (int) call_user_func( $this->now );
+		return (int) floor( $this->precise_now() );
+	}
+
+	/**
+	 * Current Unix time from the injected clock, with fractions if the clock has them.
+	 *
+	 * @return float
+	 */
+	private function precise_now() {
+		$now = $this->now;
+		if ( 'microtime' === $now ) {
+			return microtime( true );
+		}
+
+		return (float) call_user_func( $now );
 	}
 
 	/**

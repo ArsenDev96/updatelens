@@ -15,7 +15,12 @@ export type AnalysisStatus =
 	| 'unknown';
 
 export type SettleOutcome =
-	'admin_shutdown' | 'next_update' | 'expired' | 'not_applicable' | 'unknown';
+	| 'admin_shutdown'
+	| 'follow_up'
+	| 'next_update'
+	| 'expired'
+	| 'not_applicable'
+	| 'unknown';
 
 export type PhaseKey = 'during_update' | 'post_update' | 'final';
 

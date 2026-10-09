@@ -33,6 +33,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 		'started_at'                            => '',
 		'updated_at'                            => '',
 		'settle_deadline'                       => null,
+		'immediate_captured_at'                 => null,
 		'completed_at'                          => null,
 		'options_before_snapshot'               => null,
 		'options_immediate_snapshot'            => null,
@@ -126,6 +127,15 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	public $rows = array();
 
 	/**
+	 * Runs once before the next transition (then cleared): lets a test make
+	 * another "request" change the analysis between a read and a
+	 * compare-and-set write.
+	 *
+	 * @var callable|null
+	 */
+	public $before_transition = null;
+
+	/**
 	 * When true, every write throws like a failed query.
 	 *
 	 * @var bool
@@ -167,6 +177,12 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	 * @throws RuntimeException On failure.
 	 */
 	public function transition( $id, $from_status, array $changes ) {
+		if ( null !== $this->before_transition ) {
+			$hook                    = $this->before_transition;
+			$this->before_transition = null;
+			$hook( $id );
+		}
+
 		$this->write( $changes );
 		if ( ! isset( $this->rows[ $id ] ) || $this->rows[ $id ]['status'] !== $from_status ) {
 			return false;

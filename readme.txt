@@ -17,7 +17,7 @@ UpdateLens observes what changes around a WordPress plugin update.
 When you update a single plugin from wp-admin, UpdateLens records which options (names, sizes and autoload state), which WP-Cron events (hooks, times and schedules) and, on sites that use Action Scheduler, which pending or in-progress Action Scheduler actions (hooks, groups, times and schedules) changed:
 
 * During update: inside WordPress's plugin-update request.
-* After update: until the next wp-admin page you open, within 5 minutes. Other site activity can also appear here.
+* After update: until a short follow-up request your browser sends once the update has finished (or, if that does not happen, the next wp-admin page you open), within 5 minutes. Other site activity can also appear here.
 * Net result: before the update compared with the end of the observation.
 
 The UpdateLens admin menu lists the analyzed updates and shows a report for each one. Reports show observed changes, not proof of what the plugin caused.
@@ -85,9 +85,9 @@ Manual updates of a single plugin from WordPress admin: Update now on the Plugin
 
 UpdateLens compares the active (pending or in-progress) Action Scheduler actions at its observation points; it does not record execution history. An action that is queued and completed entirely between two observation points is in neither comparison, so it does not appear.
 
-= Why does the After update phase need another page view? =
+= When does the After update phase end? =
 
-The After update phase ends at the next wp-admin page you open within 5 minutes of the update, so that changes made when the updated plugin first runs are included. If no admin page is opened within that window, the During update phase is still reported.
+After a successful update from the Plugins screen, your browser sends one short follow-up request to your own site once the update queue is idle. That request runs the updated plugin's new code for the first time, so changes made then are included; you do not need to open another page. If the follow-up does not arrive (for example, you closed the tab before the update finished), the next wp-admin page you open within 5 minutes ends the phase instead. If neither happens within that window, the During update phase is still reported. The follow-up is one observation, not proof that all of the plugin's migrations or background tasks have finished.
 
 == Changelog ==
 

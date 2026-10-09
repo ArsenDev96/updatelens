@@ -23,9 +23,12 @@ defined( 'ABSPATH' ) || exit;
 class AnalysisRepository {
 
 	/**
-	 * Columns returned for open analyses: enough to decide what to do, without snapshots.
+	 * Columns returned for open analyses: enough to decide what to do, without
+	 * snapshots. `user_id` (who started the update) is used only to match a
+	 * follow-up request to its analysis; `updated_at` and `immediate_captured_at`
+	 * tell when the IMMEDIATE observation was taken.
 	 */
-	const OPEN_COLUMNS = 'id, plugin_file, status, started_at, settle_deadline';
+	const OPEN_COLUMNS = 'id, plugin_file, status, user_id, started_at, updated_at, settle_deadline, immediate_captured_at';
 
 	/**
 	 * Report metadata columns. Never snapshots, user IDs or stored error messages.

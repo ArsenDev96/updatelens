@@ -403,6 +403,16 @@ final class AnalysisReadModelTest extends TestCase {
 	}
 
 	/**
+	 * Every known settle outcome is passed through, including `follow_up`.
+	 */
+	public function test_known_settle_outcomes() {
+		foreach ( array( 'admin_shutdown', 'follow_up', 'next_update', 'expired', 'not_applicable' ) as $outcome ) {
+			$report = ( new AnalysisReadModel() )->report( self::row( array( 'settle_outcome' => $outcome ) ) );
+			$this->assertSame( $outcome, $report['settle_outcome'] );
+		}
+	}
+
+	/**
 	 * Unknown status, outcome and unsafe error codes become `unknown`; nothing is reinterpreted as completed.
 	 */
 	public function test_unknown_values() {

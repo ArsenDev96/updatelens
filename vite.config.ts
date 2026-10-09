@@ -37,7 +37,9 @@ const DEV_CORS_ORIGIN =
 export default defineConfig( {
 	plugins: [
 		v4wp( {
-			input: 'src/admin/main.tsx',
+			// The admin app, and the update follow-up script loaded on the
+			// WordPress update screens (AdminAssets::FOLLOW_UP_ENTRY).
+			input: [ 'src/admin/main.tsx', 'src/admin/update-follow-up.ts' ],
 			outDir: 'assets/admin/dist',
 		} ),
 		wpExternals,

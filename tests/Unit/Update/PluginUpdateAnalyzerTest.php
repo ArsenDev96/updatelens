@@ -102,9 +102,12 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 	/**
 	 * A new "request".
 	 *
+	 * @param float|null $started_at When the request started. Default: half a
+	 *                               second after the current fake time, so it
+	 *                               started after everything that happened so far.
 	 * @return PluginUpdateAnalyzer
 	 */
-	private function request() {
+	private function request( $started_at = null ) {
 		$capture = function () {
 			if ( $this->capture_fails ) {
 				throw new RuntimeException( 'capture failed' );
@@ -137,7 +140,9 @@ final class PluginUpdateAnalyzerTest extends TestCase {
 			},
 			function () {
 				return $this->time;
-			}
+			},
+			null,
+			null === $started_at ? $this->time + 0.5 : (float) $started_at
 		);
 	}
 

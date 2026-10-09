@@ -163,6 +163,9 @@ describe( 'labels', () => {
 		expect( settleOutcomeText( 'admin_shutdown', 300 ) ).toBe(
 			'Observation completed on the next admin request.'
 		);
+		expect( settleOutcomeText( 'follow_up', 300 ) ).toBe(
+			'Observation completed in a follow-up request after the update.'
+		);
 		expect( settleOutcomeText( 'next_update', 300 ) ).toContain(
 			'before another plugin update began'
 		);

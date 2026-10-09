@@ -269,7 +269,7 @@ Before WP-Cron reporting, each phase _was_ the options object. It is now `phases
 
 - `plugin.file`: plugin basename (`dir/file.php`), or `null` if the stored value is not a valid basename. `version_after` is `null` until the update finished.
 - `status`: `captured`, `awaiting_settle`, `completed`, `failed`, `incompatible`, `abandoned`, or `unknown` (unrecognised stored value; never reinterpreted).
-- `settle_outcome`: `null` while open, else `admin_shutdown`, `next_update`, `expired`, `not_applicable`, or `unknown`.
+- `settle_outcome`: `null` while open, else `admin_shutdown`, `follow_up`, `next_update`, `expired`, `not_applicable`, or `unknown`. `follow_up`: the post-update observation was taken by the follow-up request the updating administrator's browser sends once the WordPress update queue is idle; `admin_shutdown`: at the end of a later wp-admin page request.
 - `error`: `null` or `{"code": "…"}`, a sanitized identifier (e.g. `update_not_completed`, `fingerprint_context_changed`, or a WordPress updater code such as `incompatible_archive`). No messages, paths or URLs.
 - `observation_window_seconds`: length of the post-update observation window. Presentation derives its wording ("within 5 minutes") from it.
 - No user information, snapshots, fingerprints, fingerprint contexts, option values, WP-Cron arguments or Action Scheduler arguments are returned.

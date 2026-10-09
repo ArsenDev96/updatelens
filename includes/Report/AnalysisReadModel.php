@@ -62,6 +62,7 @@ final class AnalysisReadModel {
 	 */
 	const SETTLE_OUTCOMES = array(
 		SettleOutcome::ADMIN_SHUTDOWN,
+		SettleOutcome::FOLLOW_UP,
 		SettleOutcome::NEXT_UPDATE,
 		SettleOutcome::EXPIRED,
 		SettleOutcome::NOT_APPLICABLE,

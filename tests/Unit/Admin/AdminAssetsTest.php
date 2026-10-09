@@ -50,6 +50,30 @@ final class AdminAssetsTest extends TestCase {
 	}
 
 	/**
+	 * The update follow-up script is its own manifest entry, without styles.
+	 */
+	public function test_follow_up_entry_files() {
+		$manifest = self::manifest() + array(
+			AdminAssets::FOLLOW_UP_ENTRY => array(
+				'file'    => 'assets/update-follow-up-Bf3kq1xZ.js',
+				'name'    => 'update-follow-up',
+				'src'     => AdminAssets::FOLLOW_UP_ENTRY,
+				'isEntry' => true,
+			),
+		);
+
+		$this->assertSame(
+			array(
+				'script' => 'assets/update-follow-up-Bf3kq1xZ.js',
+				'styles' => array(),
+			),
+			AdminAssets::entry_files( $manifest, AdminAssets::FOLLOW_UP_ENTRY )
+		);
+		$this->assertNull( AdminAssets::entry_files( self::manifest(), AdminAssets::FOLLOW_UP_ENTRY ), 'Missing entry.' );
+		$this->assertSame( 'src/admin/update-follow-up.ts', AdminAssets::FOLLOW_UP_ENTRY );
+	}
+
+	/**
 	 * The manifest of this checkout (when built) is readable.
 	 */
 	public function test_built_manifest() {
@@ -65,6 +89,11 @@ final class AdminAssetsTest extends TestCase {
 		foreach ( $files['styles'] as $style ) {
 			$this->assertFileExists( dirname( $file ) . '/' . $style );
 		}
+
+		$follow_up = AdminAssets::entry_files( json_decode( (string) file_get_contents( $file ), true ), AdminAssets::FOLLOW_UP_ENTRY ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local test file.
+		$this->assertNotNull( $follow_up );
+		$this->assertFileExists( dirname( $file ) . '/' . $follow_up['script'] );
+		$this->assertSame( array(), $follow_up['styles'] );
 	}
 
 	/**

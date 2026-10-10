@@ -150,6 +150,60 @@ final class AnalysisRepositoryTest extends TestCase {
 	}
 
 	/**
+	 * Site check AFTER writes: one claim per analysis and one write per check,
+	 * each a guarded UPDATE written out as a literal template.
+	 */
+	public function test_site_check_after_writes() {
+		$repository                = new AnalysisRepository( $this->wpdb );
+		$this->wpdb->query_results = array( 1, 0, 1, 1, 0 );
+
+		$this->assertTrue( $repository->claim_site_check_after( 5, 7, 'completed', 'follow_up', 1760090000.25 ) );
+		$this->assertFalse( $repository->claim_site_check_after( 5, 7, 'completed', 'follow_up', 1760090001.0 ), 'Already claimed.' );
+		$this->assertTrue( $repository->record_site_check_after( 5, 7, array( 'site_check_home_after', 'site_check_home_after_reason' ), '{"schema":2}', null ) );
+		$this->assertTrue( $repository->record_site_check_after( 5, 7, array( 'site_check_rest_after', 'site_check_rest_after_reason' ), '{"schema":2}', 'overlapping_update' ) );
+		$this->assertFalse( $repository->record_site_check_after( 5, 7, array( 'site_check_rest_after', 'site_check_rest_after_reason' ), null, 'rate_limited' ) );
+
+		$guard = 'WHERE id = %d AND user_id = %d AND site_check_after_started_at IS NOT NULL AND %i IS NULL AND %i IS NULL';
+		$this->assertSame(
+			array(
+				array( 'UPDATE %i SET site_check_after_started_at = %s WHERE id = %d AND user_id = %d AND status = %s AND settle_outcome = %s AND site_check_after_started_at IS NULL', array( 'wp_updatelens_analyses', '1760090000.250000', 5, 7, 'completed', 'follow_up' ) ),
+				array( 'UPDATE %i SET site_check_after_started_at = %s WHERE id = %d AND user_id = %d AND status = %s AND settle_outcome = %s AND site_check_after_started_at IS NULL', array( 'wp_updatelens_analyses', '1760090001.000000', 5, 7, 'completed', 'follow_up' ) ),
+				array( "UPDATE %i SET %i = %s $guard", array( 'wp_updatelens_analyses', 'site_check_home_after', '{"schema":2}', 5, 7, 'site_check_home_after', 'site_check_home_after_reason' ) ),
+				array( "UPDATE %i SET %i = %s, %i = %s $guard", array( 'wp_updatelens_analyses', 'site_check_rest_after', '{"schema":2}', 'site_check_rest_after_reason', 'overlapping_update', 5, 7, 'site_check_rest_after', 'site_check_rest_after_reason' ) ),
+				array( "UPDATE %i SET %i = %s $guard", array( 'wp_updatelens_analyses', 'site_check_rest_after_reason', 'rate_limited', 5, 7, 'site_check_rest_after', 'site_check_rest_after_reason' ) ),
+			),
+			$this->wpdb->prepared
+		);
+	}
+
+	/**
+	 * Only the AFTER columns can be written, never both values NULL; a
+	 * failed write throws; the site check read selects no snapshots or diffs.
+	 */
+	public function test_site_check_columns() {
+		$repository = new AnalysisRepository( $this->wpdb );
+		foreach ( array( array( array( 'status', 'site_check_home_after_reason' ), '{}', null ), array( array( 'site_check_home_after', 'site_check_rest_after_reason' ), '{}', null ), array( array( 'site_check_home_after', 'site_check_home_after_reason' ), null, null ) ) as $case ) {
+			try {
+				$repository->record_site_check_after( 5, 7, $case[0], $case[1], $case[2] );
+				$this->fail( 'Accepted.' );
+			} catch ( \InvalidArgumentException $e ) {
+				$this->assertSame( array(), $this->wpdb->prepared );
+			}
+		}
+
+		$this->wpdb->row = array( 'id' => '5' );
+		$this->assertSame( array( 'id' => '5' ), $repository->find_site_checks( 5 ) );
+		$this->assertSame( array( 'SELECT ' . AnalysisRepository::SITE_CHECK_COLUMNS . ' FROM %i WHERE id = %d', array( 'wp_updatelens_analyses', 5 ) ), $this->wpdb->prepared[0] );
+		foreach ( array_map( 'trim', explode( ',', AnalysisRepository::SITE_CHECK_COLUMNS ) ) as $column ) {
+			$this->assertDoesNotMatchRegularExpression( '/_(snapshot|diff)$|^options_|^cron_|^action_scheduler_/', $column );
+		}
+
+		$this->wpdb->query_results = array( false );
+		$this->expectException( RuntimeException::class );
+		$repository->claim_site_check_after( 5, 7, 'completed', 'follow_up', 1.0 );
+	}
+
+	/**
 	 * A failed unread query throws like every other read.
 	 */
 	public function test_unread_query_failure_throws() {

@@ -24,19 +24,23 @@ defined( 'ABSPATH' ) || exit;
  * requests are strictly ordered and never lose each other's entries; no
  * timestamp decides the order.
  *
- * - begin(): every WordPress upgrader download in a request (plugins,
+ * - begin(): the first WordPress upgrader download in a request (plugins,
  *   themes, core, translations; any user, also cron and WP-CLI) adds the
- *   request and increments the sequence. It returns the state just before:
- *   the generation (`epoch:sequence`) and whether other updates were
- *   running.
+ *   request and increments the sequence; later downloads of the same
+ *   request change nothing. It returns the state just before: the
+ *   generation (`epoch:sequence`) and whether other updates were running.
  * - end(): at the end of that request, removes it and increments again.
- * - quiet_generation(): when a site check session starts, the current
- *   generation, or null while any update is running.
+ *   So a request that updates alone moves the sequence exactly twice.
+ * - quiet_generation() / current(): when a site check session starts or
+ *   an AFTER result arrives, the current generation and whether any update
+ *   is running.
  *
  * A baseline whose session recorded generation G is usable for an update
  * only if that update's begin() saw exactly G with nothing else running:
  * any update that started or ended in between (another plugin, another
- * administrator, a queued update) moved the sequence. A missing or
+ * administrator, a queued update) moved the sequence. AFTER checks of that
+ * update are clean only at G + 2 (advance()), from their start until their
+ * report is accepted: then no other update began or ended since. A missing or
  * unreadable ledger starts a new random epoch, so no earlier generation can
  * match by accident. Entries of requests that never reached their end
  * (killed processes) expire after STALE_AFTER_SECONDS.
@@ -152,6 +156,18 @@ final class UpdateActivity {
 	 * @return string|null Null while an update runs, or if storage failed.
 	 */
 	public function quiet_generation() {
+		$current = $this->current();
+
+		return null === $current || $current['running'] ? null : $current['generation'];
+	}
+
+	/**
+	 * The current generation and whether any update is running; creates the
+	 * ledger if it is missing or unreadable (with a new epoch).
+	 *
+	 * @return array{generation: string, running: bool}|null Null if storage failed.
+	 */
+	public function current() {
 		try {
 			for ( $write = 0; $write < self::MAX_WRITES; $write++ ) {
 				$stored = $this->store->get( self::STORAGE_KEY );
@@ -163,13 +179,47 @@ final class UpdateActivity {
 					}
 				}
 
-				return array() === $this->live( $state['running'] ) ? self::generation( $state ) : null;
+				return array(
+					'generation' => self::generation( $state ),
+					'running'    => array() !== $this->live( $state['running'] ),
+				);
 			}
 		} catch ( Throwable $e ) {
 			return null;
 		}
 
 		return null;
+	}
+
+	/**
+	 * The generation $steps changes after another one, in the same epoch.
+	 *
+	 * @param mixed $generation Generation.
+	 * @param int   $steps      Changes (begin and end of one request: 2).
+	 * @return string|null Null if $generation is not a generation or the sequence would overflow.
+	 */
+	public static function advance( $generation, $steps ) {
+		if ( ! self::is_generation( $generation ) ) {
+			return null;
+		}
+		list( $epoch, $sequence ) = explode( ':', $generation );
+		if ( (int) $sequence > UpdateActivityCodec::MAX_SEQUENCE - $steps ) {
+			return null;
+		}
+
+		return $epoch . ':' . ( (int) $sequence + $steps );
+	}
+
+	/**
+	 * Whether two generations belong to the same epoch (the ledger was not
+	 * recreated in between).
+	 *
+	 * @param string $first  Generation.
+	 * @param string $second Generation.
+	 * @return bool
+	 */
+	public static function same_epoch( $first, $second ) {
+		return self::is_generation( $first ) && self::is_generation( $second ) && 0 === strncmp( $first, $second, 2 * self::EPOCH_BYTES + 1 );
 	}
 
 	/**
@@ -191,8 +241,19 @@ final class UpdateActivity {
 				$state   = $known ? $state : $this->new_state( 0 );
 				$running = $this->live( $state['running'] );
 				$others  = array_diff_key( $running, array( $token => true ) );
+				if ( $known && isset( $running[ $token ] ) ) {
+					// Another download of the same request (translations after a
+					// plugin update): nothing new, so every request moves the
+					// sequence exactly twice (begin, end) and AFTER checks can
+					// tell the next generation (SiteCheckAfter).
+					return array(
+						'generation'     => self::generation( $state ),
+						'others_running' => array() !== $others,
+						'at'             => $now,
+					);
+				}
 
-				$running[ $token ] = isset( $running[ $token ] ) ? $running[ $token ] : $now;
+				$running[ $token ] = $now;
 				if ( count( $running ) > UpdateActivityCodec::MAX_RUNNING ) {
 					asort( $running );
 					$running = array_slice( $running, -UpdateActivityCodec::MAX_RUNNING, null, true );

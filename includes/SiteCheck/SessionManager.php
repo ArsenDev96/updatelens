@@ -128,13 +128,17 @@ final class SessionManager {
 	 * @param array<string, string> $targets Target fingerprint per check to open (one or both
 	 *                                       checks; a BEFORE start opens only the due ones).
 	 * @param string|null           $generation Updater activity generation now (UpdateActivity::quiet_generation()), or null.
+	 * @param int|null              $analysis   AFTER sessions: the analysis they belong to (required); BEFORE: null.
 	 * @return array `code` STARTED with `purpose`, `expires_in` and `sessions`
 	 *               (per check, in CheckDefinition order: `definition`,
 	 *               `session` = marker, `secret`); RATE_LIMITED with
 	 *               `retry_after`; INVALID_REQUEST or UNAVAILABLE.
 	 */
-	public function start( $user, $login, $purpose, array $targets, $generation = null ) {
+	public function start( $user, $login, $purpose, array $targets, $generation = null, $analysis = null ) {
 		if ( ! in_array( $purpose, CheckSession::PURPOSES, true ) ) {
+			return array( 'code' => self::INVALID_REQUEST );
+		}
+		if ( CheckSession::PURPOSE_AFTER === $purpose ? ! is_int( $analysis ) || $analysis < 1 : null !== $analysis ) {
 			return array( 'code' => self::INVALID_REQUEST );
 		}
 		$definitions = array();
@@ -174,6 +178,7 @@ final class SessionManager {
 						'created_at'  => $now,
 						'expires_at'  => $now + CheckSession::TTL,
 						'generation'  => $generation,
+						'analysis'    => $analysis,
 					)
 				);
 				$key     = CheckSession::storage_key( $marker );
@@ -242,8 +247,9 @@ final class SessionManager {
 	 * @param mixed  $marker Session marker (request input).
 	 * @param mixed  $secret Session secret (request input).
 	 * @param mixed  $report Report JSON (request input, see ReportValidator).
-	 * @return array `code` ACCEPTED with `check`, `purpose` and `result`
-	 *               (CheckResult, not for output); INVALID_REPORT with
+	 * @return array `code` ACCEPTED with `check`, `purpose`, `analysis`
+	 *               (AFTER sessions; else null) and `result` (CheckResult,
+	 *               not for output); INVALID_REPORT with
 	 *               `detail` (InvalidCheckReportException reason);
 	 *               INVALID_REQUEST, SESSION_UNAVAILABLE, NOT_OWNER or
 	 *               ALREADY_REPORTED.
@@ -279,10 +285,11 @@ final class SessionManager {
 		}
 
 		return array(
-			'code'    => self::ACCEPTED,
-			'check'   => $session->get_check(),
-			'purpose' => $session->get_purpose(),
-			'result'  => new CheckResult(
+			'code'     => self::ACCEPTED,
+			'check'    => $session->get_check(),
+			'purpose'  => $session->get_purpose(),
+			'analysis' => $session->get_analysis(),
+			'result'   => new CheckResult(
 				$session->get_check(),
 				$session->get_definition_version(),
 				new CheckContext( $session->get_target(), $definition->get_auth(), $session->get_user(), $session->get_login() ),

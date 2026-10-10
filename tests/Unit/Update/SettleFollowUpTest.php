@@ -13,6 +13,7 @@ use UpdateLens\Tests\Support\FakeSite;
 use UpdateLens\Update\AnalysisStatus;
 use UpdateLens\Update\FollowUpRequest;
 use UpdateLens\Update\PluginUpdateAnalyzer;
+use UpdateLens\Update\RequestStart;
 use UpdateLens\Update\SettleOutcome;
 
 /**
@@ -429,6 +430,86 @@ final class SettleFollowUpTest extends TestCase {
 		$this->site->time = self::T + 0.9;
 		$this->site->request( self::T + 0.7 )->request_ending( true );
 
+		$this->assertSame( SettleOutcome::ADMIN_SHUTDOWN, $this->row()['settle_outcome'] );
+	}
+
+	/**
+	 * A follow-up is ordered by when its request started, never by when it is
+	 * evaluated: every case below is evaluated 5 s after IMMEDIATE (processing
+	 * delayed). IMMEDIATE is stored with microseconds; a start within the same
+	 * recorded microsecond is not later.
+	 *
+	 * @dataProvider follow_up_starts
+	 *
+	 * @param float  $offset   Request start relative to IMMEDIATE, in seconds.
+	 * @param string $expected FollowUpRequest result.
+	 */
+	public function test_follow_up_start_relative_to_immediate( $offset, $expected ) {
+		$immediate = self::T + 0.6;
+		$this->update( self::PLUGIN, self::USER, $immediate );
+		$this->assertSame( '1767225600.600000', $this->row()['immediate_captured_at'] );
+
+		$this->site->time = $immediate + 5;
+		$this->assertSame( array( self::PLUGIN => $expected ), $this->site->request( $immediate + $offset )->settle_follow_up( array( self::PLUGIN ), self::USER ) );
+
+		if ( FollowUpRequest::SETTLED === $expected ) {
+			$this->assertSame( SettleOutcome::FOLLOW_UP, $this->row()['settle_outcome'] );
+		} else {
+			$this->assertAwaiting( $this->row() );
+		}
+	}
+
+	/**
+	 * Request starts around IMMEDIATE.
+	 *
+	 * @return array
+	 */
+	public function follow_up_starts() {
+		return array(
+			'clearly after (2 s)'                    => array( 2.0, FollowUpRequest::SETTLED ),
+			'a few ms after (3 ms)'                  => array( 0.003, FollowUpRequest::SETTLED ),
+			'1 ms after'                             => array( 0.001, FollowUpRequest::SETTLED ),
+			'2 microseconds after'                   => array( 0.000002, FollowUpRequest::SETTLED ),
+			'same recorded instant'                  => array( 0.0, FollowUpRequest::NOT_READY ),
+			'same recorded microsecond (+0.4 us)'    => array( 0.0000004, FollowUpRequest::NOT_READY ),
+			'a few ms before (3 ms)'                 => array( -0.003, FollowUpRequest::NOT_READY ),
+			'running when IMMEDIATE was taken (2 s)' => array( -2.0, FollowUpRequest::NOT_READY ),
+		);
+	}
+
+	/**
+	 * Regression, measured on Apache (Windows) with Chrome: the browser sent
+	 * the follow-up 10.4 ms after IMMEDIATE, but `REQUEST_TIME_FLOAT` (the web
+	 * server's coarse clock) read 0.279 ms before it, so the follow-up was
+	 * answered `not_ready`. WordPress's `$timestart` (PHP's clock, the clock of
+	 * IMMEDIATE) read 24.5 ms after it: that start settles.
+	 */
+	public function test_follow_up_ordered_on_the_clock_of_immediate() {
+		$this->site->time = 1791660984.862182;
+		$this->update( self::PLUGIN, self::USER, 1791660985.588322 );
+		$this->assertSame( '1791660985.588322', $this->row()['immediate_captured_at'] );
+
+		$this->site->time = 1791660985.924212; // The follow-up handler runs.
+		$this->assertSame( array( self::PLUGIN => FollowUpRequest::NOT_READY ), $this->site->request( 1791660985.588043 )->settle_follow_up( array( self::PLUGIN ), self::USER ), 'The web server\'s request time.' );
+		$this->assertAwaiting( $this->row() );
+
+		$start = RequestStart::from( 1791660985.612818, $this->site->time );
+		$this->assertSame( array( self::PLUGIN => FollowUpRequest::SETTLED ), $this->site->request( $start )->settle_follow_up( array( self::PLUGIN ), self::USER ) );
+		$this->assertSame( SettleOutcome::FOLLOW_UP, $this->row()['settle_outcome'] );
+	}
+
+	/**
+	 * A page request that started a few milliseconds before IMMEDIATE and ends
+	 * long after it never settles; one that started a few milliseconds after does.
+	 */
+	public function test_page_request_start_in_milliseconds() {
+		$this->update( self::PLUGIN, self::USER, self::T + 0.6 );
+
+		$this->site->time = self::T + 4;
+		$this->site->request( self::T + 0.597 )->request_ending( true );
+		$this->assertAwaiting( $this->row() );
+
+		$this->site->request( self::T + 0.603 )->request_ending( true );
 		$this->assertSame( SettleOutcome::ADMIN_SHUTDOWN, $this->row()['settle_outcome'] );
 	}
 

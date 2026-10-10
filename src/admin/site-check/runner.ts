@@ -8,7 +8,9 @@
  *
  * The BEFORE baseline scheduler (baseline.ts) calls it with `before`, for
  * which the server may open only the due checks or none (`not_needed`);
- * nothing calls it with `after` yet. Targets, tokens and timing come only
+ * the update follow-up (update-follow-up/afterChecks.ts) calls it with
+ * `after` and the analysis its follow-up settled, for which the server opens
+ * only the checks with a baseline, or none. Targets, tokens and timing come only
  * from the start response; the report secret only ever travels in the
  * report's POST body. No response content is kept or sent.
  */
@@ -49,6 +51,8 @@ export interface RunnerSettings {
 
 export interface RunnerOptions {
 	purpose: Purpose;
+	/** `after` runs: the analysis they belong to (from the follow-up response). */
+	analysis?: number;
 	/** Cancels the run: in-flight requests are aborted, nothing more is reported. */
 	signal?: AbortSignal;
 	fetch?: typeof fetch;
@@ -88,8 +92,8 @@ export type CheckOutcome =
 
 export interface RunResult {
 	/**
-	 * `started`; `not_needed` (a `before` start that the server answered
-	 * without opening a session); or why no check could run.
+	 * `started`; `not_needed` (a start that the server answered without
+	 * opening a session); or why no check could run.
 	 */
 	status: 'started' | 'not_needed' | 'start_failed' | 'cancelled';
 	/** Start failure: the server's error code, `http_<status>`, `network_error` or `invalid_response`. */
@@ -164,7 +168,12 @@ export async function runSiteChecks(
 	if (
 		! sameOrigin( settings.ajaxUrl, page ) ||
 		typeof settings.nonce !== 'string' ||
-		settings.nonce === ''
+		settings.nonce === '' ||
+		( options.purpose === 'after' &&
+			! (
+				Number.isSafeInteger( options.analysis ) &&
+				( options.analysis as number ) > 0
+			) )
 	) {
 		return notStarted( 'start_failed', 'invalid_settings' );
 	}
@@ -179,6 +188,9 @@ export async function runSiteChecks(
 				action: START_ACTION,
 				_ajax_nonce: settings.nonce,
 				purpose: options.purpose,
+				...( options.purpose === 'after'
+					? { analysis: String( options.analysis ) }
+					: {} ),
 			},
 			signal
 		);
@@ -191,8 +203,7 @@ export async function runSiteChecks(
 			...( started.retryAfter ? { retryAfter: started.retryAfter } : {} ),
 		};
 	}
-	const notNeeded =
-		options.purpose === 'before' ? parseNotNeeded( started.data ) : null;
+	const notNeeded = parseNotNeeded( started.data, options.purpose );
 	if ( notNeeded ) {
 		return {
 			status: 'not_needed',

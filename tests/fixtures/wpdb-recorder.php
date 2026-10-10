@@ -78,6 +78,19 @@ class wpdb {
 		return $this->results;
 	}
 
+	/**
+	 * Return value of get_row() (default null).
+	 *
+	 * @var array|null
+	 */
+	public $row = null;
+
+	public function get_row( $sql, $output = null ) {
+		$this->queries[] = $sql;
+
+		return $this->row;
+	}
+
 	public function get_var( $sql ) {
 		$this->queries[] = $sql;
 

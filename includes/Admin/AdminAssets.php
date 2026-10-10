@@ -9,7 +9,9 @@
 
 namespace UpdateLens\Admin;
 
+use UpdateLens\SiteCheck\AjaxEndpoints;
 use UpdateLens\SiteCheck\BaselinePage;
+use UpdateLens\SiteCheck\Settings;
 use UpdateLens\Update\FollowUpRequest;
 use WP_HTML_Tag_Processor;
 
@@ -124,7 +126,9 @@ final class AdminAssets {
 	 * Ajax and fires `wp-plugin-update-success`) and only for users who may
 	 * update plugins. The script asks once, after the update queue is idle, for
 	 * the post-update observation of the plugins it updated (FollowUpRequest).
-	 * It has no user-facing text.
+	 * With site checks enabled (single site), it then runs the AFTER site
+	 * checks of the analyses that request settled (`siteChecks`: the site
+	 * check nonce). It has no user-facing text.
 	 *
 	 * @return void
 	 */
@@ -143,17 +147,19 @@ final class AdminAssets {
 			return;
 		}
 
-		wp_enqueue_script( self::FOLLOW_UP_HANDLE, UPDATELENS_URL . self::DIST_DIR . $files['script'], array( 'jquery', 'updates' ), UPDATELENS_VERSION, true );
-		wp_localize_script(
-			self::FOLLOW_UP_HANDLE,
-			self::FOLLOW_UP_SETTINGS,
-			array(
-				'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
-				'action'     => FollowUpRequest::ACTION,
-				'nonce'      => wp_create_nonce( FollowUpRequest::NONCE_ACTION ),
-				'selfPlugin' => plugin_basename( UPDATELENS_FILE ),
-			)
+		$settings = array(
+			'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
+			'action'     => FollowUpRequest::ACTION,
+			'nonce'      => wp_create_nonce( FollowUpRequest::NONCE_ACTION ),
+			'selfPlugin' => plugin_basename( UPDATELENS_FILE ),
 		);
+		if ( ! is_multisite() && Settings::is_enabled() && current_user_can( AjaxEndpoints::CAPABILITY ) ) {
+			// AFTER site checks of the analyses the follow-up settles (Update\SiteCheckAfter).
+			$settings['siteChecks'] = array( 'nonce' => wp_create_nonce( AjaxEndpoints::NONCE_ACTION ) );
+		}
+
+		wp_enqueue_script( self::FOLLOW_UP_HANDLE, UPDATELENS_URL . self::DIST_DIR . $files['script'], array( 'jquery', 'updates' ), UPDATELENS_VERSION, true );
+		wp_localize_script( self::FOLLOW_UP_HANDLE, self::FOLLOW_UP_SETTINGS, $settings );
 		add_filter( 'script_loader_tag', array( self::class, 'add_module_type' ), 10, 2 );
 	}
 

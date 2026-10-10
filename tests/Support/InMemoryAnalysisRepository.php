@@ -60,6 +60,12 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 		'site_check_home_before_reason'         => null,
 		'site_check_rest_before'                => null,
 		'site_check_rest_before_reason'         => null,
+		'site_check_update_started_at'          => null,
+		'site_check_after_started_at'           => null,
+		'site_check_home_after'                 => null,
+		'site_check_home_after_reason'          => null,
+		'site_check_rest_after'                 => null,
+		'site_check_rest_after_reason'          => null,
 		'error_code'                            => null,
 		'error_message'                         => null,
 	);
@@ -361,6 +367,82 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 		}
 
 		return isset( $this->rows[ $id ] ) ? self::project( $this->rows[ $id ], AnalysisRepository::REPORT_COLUMNS ) : null;
+	}
+
+	/**
+	 * Row projected like SITE_CHECK_COLUMNS.
+	 *
+	 * @param int $id ID.
+	 * @return array|null
+	 * @throws RuntimeException On failure.
+	 */
+	public function find_site_checks( $id ) {
+		if ( $this->fail_reads ) {
+			throw new RuntimeException( 'read failed' );
+		}
+
+		return isset( $this->rows[ $id ] ) ? self::project( $this->rows[ $id ], AnalysisRepository::SITE_CHECK_COLUMNS ) : null;
+	}
+
+	/**
+	 * Claim the AFTER run (compare-and-set, like the real query).
+	 *
+	 * @param int    $id         ID.
+	 * @param int    $user_id    User.
+	 * @param string $status     Required status.
+	 * @param string $outcome    Required settle outcome.
+	 * @param float  $started_at Time.
+	 * @return bool
+	 * @throws RuntimeException On failure.
+	 */
+	public function claim_site_check_after( $id, $user_id, $status, $outcome, $started_at ) {
+		$changes = array( 'site_check_after_started_at' => sprintf( '%.6F', (float) $started_at ) );
+		$this->write( $changes );
+		$row = isset( $this->rows[ $id ] ) ? $this->rows[ $id ] : null;
+		if ( null === $row || (int) $row['user_id'] !== (int) $user_id || $row['status'] !== $status || $row['settle_outcome'] !== $outcome || null !== $row['site_check_after_started_at'] ) {
+			return false;
+		}
+		$this->rows[ $id ] = array_merge( $row, $changes );
+
+		return true;
+	}
+
+	/**
+	 * Store an AFTER result/reason once (guarded like the real query).
+	 *
+	 * @param int         $id      ID.
+	 * @param int         $user_id User.
+	 * @param string[]    $columns Result and reason column.
+	 * @param string|null $result  Result JSON.
+	 * @param string|null $reason  Reason.
+	 * @return bool
+	 * @throws \InvalidArgumentException If the columns are not allowed.
+	 */
+	public function record_site_check_after( $id, $user_id, array $columns, $result, $reason ) {
+		if ( ! in_array( $columns, AnalysisRepository::SITE_CHECK_AFTER_COLUMNS, true ) || ( null === $result && null === $reason ) ) {
+			throw new \InvalidArgumentException( 'Invalid UpdateLens site check columns.' );
+		}
+		if ( null !== $this->before_transition ) {
+			$hook                    = $this->before_transition;
+			$this->before_transition = null;
+			$hook( $id );
+		}
+		list( $result_column, $reason_column ) = $columns;
+		$changes                               = array_filter(
+			array(
+				$result_column => $result,
+				$reason_column => $reason,
+			),
+			'is_string'
+		);
+		$this->write( $changes );
+		$row = isset( $this->rows[ $id ] ) ? $this->rows[ $id ] : null;
+		if ( null === $row || (int) $row['user_id'] !== (int) $user_id || null === $row['site_check_after_started_at'] || null !== $row[ $result_column ] || null !== $row[ $reason_column ] ) {
+			return false;
+		}
+		$this->rows[ $id ] = array_merge( $row, $changes );
+
+		return true;
 	}
 
 	/**

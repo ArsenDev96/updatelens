@@ -7,6 +7,7 @@
 
 namespace UpdateLens\Storage;
 
+use InvalidArgumentException;
 use RuntimeException;
 use UpdateLens\Update\AnalysisStatus;
 use wpdb;
@@ -56,7 +57,28 @@ class AnalysisRepository {
 	 * Action Scheduler phase diffs and the Cron and Action Scheduler phase
 	 * reasons. Never snapshots.
 	 */
-	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff, cron_during_update_diff, cron_post_update_diff, cron_final_diff, cron_during_update_reason, cron_post_update_reason, cron_final_reason, action_scheduler_during_update_diff, action_scheduler_post_update_diff, action_scheduler_final_diff, action_scheduler_during_update_reason, action_scheduler_post_update_reason, action_scheduler_final_reason';
+	const REPORT_COLUMNS = self::REPORT_METADATA_COLUMNS . ', options_during_update_diff, options_post_update_diff, options_final_diff, cron_during_update_diff, cron_post_update_diff, cron_final_diff, cron_during_update_reason, cron_post_update_reason, cron_final_reason, action_scheduler_during_update_diff, action_scheduler_post_update_diff, action_scheduler_final_diff, action_scheduler_during_update_reason, action_scheduler_post_update_reason, action_scheduler_final_reason, ' . self::SITE_CHECK_RESULT_COLUMNS;
+
+	/**
+	 * Site check columns (BEFORE and AFTER results and reasons, when the
+	 * update began, when the AFTER run was claimed).
+	 */
+	const SITE_CHECK_RESULT_COLUMNS = 'site_check_home_before, site_check_home_before_reason, site_check_rest_before, site_check_rest_before_reason, site_check_update_started_at, site_check_after_started_at, site_check_home_after, site_check_home_after_reason, site_check_rest_after, site_check_rest_after_reason';
+
+	/**
+	 * Columns read to decide about a site check AFTER run (find_site_checks()):
+	 * lifecycle state, owner and the site check columns. Never snapshots or diffs.
+	 */
+	const SITE_CHECK_COLUMNS = 'id, user_id, status, settle_outcome, completed_at, ' . self::SITE_CHECK_RESULT_COLUMNS;
+
+	/**
+	 * Per check, the AFTER result column and its reason column
+	 * (record_site_check_after() writes only these).
+	 */
+	const SITE_CHECK_AFTER_COLUMNS = array(
+		array( 'site_check_home_after', 'site_check_home_after_reason' ),
+		array( 'site_check_rest_after', 'site_check_rest_after_reason' ),
+	);
 
 	/**
 	 * Database.
@@ -342,6 +364,84 @@ class AnalysisRepository {
 		$this->assert_no_error();
 
 		return $row ? $row : null;
+	}
+
+	/**
+	 * One analysis's site check state (SITE_CHECK_COLUMNS), by primary key.
+	 *
+	 * @param int $id Analysis ID.
+	 * @return array<string, mixed>|null
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function find_site_checks( $id ) {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- Custom table; must not be cached. Column list is a class constant.
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT ' . self::SITE_CHECK_COLUMNS . ' FROM %i WHERE id = %d', $this->table, (int) $id ), ARRAY_A );
+		$this->assert_no_error();
+
+		return $row ? $row : null;
+	}
+
+	/**
+	 * Claim the one site check AFTER run of an analysis: sets
+	 * `site_check_after_started_at` only if it is still NULL and the analysis
+	 * belongs to the user and has the given status and settle outcome
+	 * (compare-and-set, so concurrent or repeated starts claim it once).
+	 *
+	 * @param int    $id         Analysis ID.
+	 * @param int    $user_id    Updating user.
+	 * @param string $status     Required status.
+	 * @param string $outcome    Required settle outcome.
+	 * @param float  $started_at Unix time with microseconds.
+	 * @return bool Whether this call claimed it.
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function claim_site_check_after( $id, $user_id, $status, $outcome, $started_at ) {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; compare-and-set, never cached.
+		$updated = $wpdb->query( $wpdb->prepare( 'UPDATE %i SET site_check_after_started_at = %s WHERE id = %d AND user_id = %d AND status = %s AND settle_outcome = %s AND site_check_after_started_at IS NULL', $this->table, sprintf( '%.6F', (float) $started_at ), (int) $id, (int) $user_id, (string) $status, (string) $outcome ) );
+		if ( false === $updated ) {
+			throw new RuntimeException( 'UpdateLens could not update the analysis.' );
+		}
+
+		return 1 === (int) $updated;
+	}
+
+	/**
+	 * Store one check's AFTER result and/or reason, once: only while both of
+	 * its columns are NULL, the AFTER run was claimed and the analysis belongs
+	 * to the user. A second report, a replay or a concurrent write changes
+	 * nothing.
+	 *
+	 * @param int         $id      Analysis ID.
+	 * @param int         $user_id Updating user.
+	 * @param string[]    $columns Result and reason column (one of SITE_CHECK_AFTER_COLUMNS).
+	 * @param string|null $result  Result JSON, or null.
+	 * @param string|null $reason  Reason code, or null (not both null).
+	 * @return bool Whether this call stored it.
+	 * @throws InvalidArgumentException If the columns or values are not allowed.
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function record_site_check_after( $id, $user_id, array $columns, $result, $reason ) {
+		if ( ! in_array( $columns, self::SITE_CHECK_AFTER_COLUMNS, true ) || ( null === $result && null === $reason ) ) {
+			throw new InvalidArgumentException( 'Invalid UpdateLens site check columns.' );
+		}
+		$wpdb                                  = $this->wpdb;
+		list( $result_column, $reason_column ) = $columns;
+		if ( null !== $result && null !== $reason ) {
+			$query = $wpdb->prepare( 'UPDATE %i SET %i = %s, %i = %s WHERE id = %d AND user_id = %d AND site_check_after_started_at IS NOT NULL AND %i IS NULL AND %i IS NULL', $this->table, $result_column, (string) $result, $reason_column, (string) $reason, (int) $id, (int) $user_id, $result_column, $reason_column );
+		} elseif ( null !== $result ) {
+			$query = $wpdb->prepare( 'UPDATE %i SET %i = %s WHERE id = %d AND user_id = %d AND site_check_after_started_at IS NOT NULL AND %i IS NULL AND %i IS NULL', $this->table, $result_column, (string) $result, (int) $id, (int) $user_id, $result_column, $reason_column );
+		} else {
+			$query = $wpdb->prepare( 'UPDATE %i SET %i = %s WHERE id = %d AND user_id = %d AND site_check_after_started_at IS NOT NULL AND %i IS NULL AND %i IS NULL', $this->table, $reason_column, (string) $reason, (int) $id, (int) $user_id, $result_column, $reason_column );
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- Custom table; prepared above from literal templates, never cached.
+		$updated = $wpdb->query( $query );
+		if ( false === $updated ) {
+			throw new RuntimeException( 'UpdateLens could not update the analysis.' );
+		}
+
+		return 1 === (int) $updated;
 	}
 
 	/**

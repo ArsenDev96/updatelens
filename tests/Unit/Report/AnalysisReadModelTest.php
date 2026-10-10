@@ -304,7 +304,7 @@ final class AnalysisReadModelTest extends TestCase {
 	public function test_report_whitelists_fields() {
 		$report = ( new AnalysisReadModel() )->report( self::row() );
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'error' ), array_keys( $report ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'site_checks', 'error' ), array_keys( $report ) );
 		$this->assertSame( 300, $report['observation_window_seconds'] );
 		foreach ( $report['phases'] as $phase ) {
 			$this->assertSame( array( 'options', 'cron', 'action_scheduler' ), array_keys( $phase ) );

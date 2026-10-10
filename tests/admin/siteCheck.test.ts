@@ -1273,3 +1273,139 @@ describe( 'attemptPassed agrees with PHP (tests/fixtures/site-check-attempts.jso
 		}
 	);
 } );
+
+describe( 'runSiteChecks: AFTER runs', () => {
+	const runAfter = async (
+		srv: ReturnType< typeof server >,
+		analysis?: number
+	) => {
+		const promise = runSiteChecks( SETTINGS, {
+			purpose: 'after',
+			analysis,
+			fetch: srv.fetch,
+			now: () => Date.now(),
+			location: LOCATION,
+		} );
+		await vi.advanceTimersByTimeAsync( 60000 );
+		return promise;
+	};
+	const startFields = ( srv: ReturnType< typeof server > ) =>
+		Object.fromEntries(
+			new URLSearchParams( String( srv.calls[ 0 ].init?.body ) )
+		);
+
+	it( 'starts with the analysis the follow-up settled and reports both checks', async () => {
+		const srv = server( {
+			start: () => ajax( startData( { purpose: 'after' } ) ),
+		} );
+		const result = await runAfter( srv, 42 );
+
+		expect( startFields( srv ) ).toEqual( {
+			action: 'updatelens_site_check_start',
+			_ajax_nonce: 'n0nce',
+			purpose: 'after',
+			analysis: '42',
+		} );
+		expect( result.status ).toBe( 'started' );
+		expect( result.checks.home.status ).toBe( 'reported' );
+		expect( result.checks.rest.status ).toBe( 'reported' );
+		expect( srv.reports ).toHaveLength( 2 );
+	} );
+
+	it( 'runs only the checks the server opened (those with a baseline)', async () => {
+		const data = startData( { purpose: 'after' } );
+		const srv = server( {
+			start: () =>
+				ajax( {
+					...data,
+					checks: [ ( data.checks as unknown[] )[ 1 ] ],
+				} ),
+		} );
+		const result = await runAfter( srv, 42 );
+
+		expect( result.checks.home ).toEqual( {
+			check: 'home',
+			status: 'not_run',
+			error: 'not_issued',
+		} );
+		expect( result.checks.rest.status ).toBe( 'reported' );
+		expect( srv.counts ).toEqual( { home: 0, rest: 1 } );
+	} );
+
+	it.each( [ 'no_baseline', 'overlapping_update', 'update_order_unknown' ] )(
+		'runs nothing when the server answers not_needed: %s',
+		async ( reason ) => {
+			const srv = server( {
+				start: () =>
+					ajax( { code: 'not_needed', purpose: 'after', reason } ),
+			} );
+			const result = await runAfter( srv, 42 );
+
+			expect( result.status ).toBe( 'not_needed' );
+			expect( result.reason ).toBe( reason );
+			expect( srv.counts ).toEqual( { home: 0, rest: 0 } );
+			expect( srv.reports ).toHaveLength( 0 );
+		}
+	);
+
+	it( 'rejects BEFORE answers to an AFTER start, and AFTER answers to a BEFORE start', async () => {
+		const fresh = server( {
+			start: () =>
+				ajax( {
+					code: 'not_needed',
+					purpose: 'before',
+					reason: 'fresh',
+				} ),
+		} );
+		expect( ( await runAfter( fresh, 42 ) ).error ).toBe(
+			'invalid_response'
+		);
+		const wrong = server( {
+			start: () =>
+				ajax( {
+					code: 'not_needed',
+					purpose: 'after',
+					reason: 'fresh',
+				} ),
+		} );
+		expect( ( await runAfter( wrong, 42 ) ).error ).toBe(
+			'invalid_response'
+		);
+		const after = server( {
+			start: () =>
+				ajax( {
+					code: 'not_needed',
+					purpose: 'after',
+					reason: 'no_baseline',
+				} ),
+		} );
+		expect( ( await run( after ) ).error ).toBe( 'invalid_response' );
+	} );
+
+	it.each( [ undefined, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1 ] )(
+		'sends nothing without a valid analysis: %s',
+		async ( analysis ) => {
+			const srv = server();
+			const result = await runAfter( srv, analysis );
+
+			expect( result.status ).toBe( 'start_failed' );
+			expect( result.error ).toBe( 'invalid_settings' );
+			expect( srv.calls ).toHaveLength( 0 );
+		}
+	);
+
+	it.each( [
+		[ 'already started', 'already_started', 409 ],
+		[ 'not eligible', 'not_eligible', 409 ],
+		[ 'another login', 'not_owner', 403 ],
+	] )( 'reports a refused start: %s', async ( _name, code, status ) => {
+		const srv = server( {
+			start: () => ajax( { code }, status, false ),
+		} );
+		const result = await runAfter( srv, 42 );
+
+		expect( result.status ).toBe( 'start_failed' );
+		expect( result.error ).toBe( code );
+		expect( srv.counts ).toEqual( { home: 0, rest: 0 } );
+	} );
+} );

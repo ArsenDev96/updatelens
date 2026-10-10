@@ -35,7 +35,7 @@ final class SchemaTest extends TestCase {
 	 * Version 3 columns: provider-prefixed, without obsolete v1/v2 names.
 	 */
 	public function test_columns() {
-		$this->assertSame( 6, Schema::VERSION );
+		$this->assertSame( 7, Schema::VERSION );
 		$this->assertSame(
 			array(
 				'id',
@@ -77,6 +77,12 @@ final class SchemaTest extends TestCase {
 				'site_check_home_before_reason',
 				'site_check_rest_before',
 				'site_check_rest_before_reason',
+				'site_check_update_started_at',
+				'site_check_after_started_at',
+				'site_check_home_after',
+				'site_check_home_after_reason',
+				'site_check_rest_after',
+				'site_check_rest_after_reason',
 				'error_code',
 				'error_message',
 			),

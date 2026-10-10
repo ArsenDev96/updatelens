@@ -18,6 +18,11 @@ use UpdateLens\SiteCheck\FrontendMarker;
 use UpdateLens\SiteCheck\RateLimiter;
 use UpdateLens\SiteCheck\SessionManager;
 use UpdateLens\SiteCheck\UpdateActivity;
+use UpdateLens\Storage\SiteCheckResultCodec;
+use UpdateLens\Tests\Support\FakeSite;
+use UpdateLens\Tests\Support\InMemoryAnalysisRepository;
+use UpdateLens\Update\PluginUpdateTracker;
+use UpdateLens\Update\SiteCheckAfter;
 use UpdateLens\Storage\Schema;
 use UpdateLens\Tests\Support\InMemoryBaselineStore;
 use UpdateLens\Tests\Support\InMemorySessionStore;
@@ -91,6 +96,13 @@ final class SiteCheckWordPressTest extends TestCase {
 	private $activity;
 
 	/**
+	 * Analyses (AFTER runs).
+	 *
+	 * @var InMemoryAnalysisRepository
+	 */
+	private $analyses;
+
+	/**
 	 * Load the stand-ins and build the manager.
 	 *
 	 * @before
@@ -114,6 +126,7 @@ final class SiteCheckWordPressTest extends TestCase {
 			},
 			'random_bytes'
 		);
+		$this->analyses       = new InMemoryAnalysisRepository();
 		$meta                 = &$this->meta;
 		$this->manager        = new SessionManager(
 			$this->store,
@@ -148,7 +161,14 @@ final class SiteCheckWordPressTest extends TestCase {
 			function () {
 				return $this->has_updates;
 			},
-			$this->activity
+			$this->activity,
+			new SiteCheckAfter(
+				$this->analyses,
+				$this->activity,
+				function () {
+					return $this->time;
+				}
+			)
 		);
 		try {
 			'start' === $action ? $endpoints->on_start() : $endpoints->on_report();
@@ -264,12 +284,13 @@ final class SiteCheckWordPressTest extends TestCase {
 				),
 				429,
 			),
-			array_values( $this->call( 'start', array( 'purpose' => 'after' ) ) )
+			array_values( $this->call( 'start', array( 'purpose' => 'before' ) ) )
 		);
 
-		$this->store->puts_before_failure   = 0;
-		$GLOBALS['updatelens_test']['user'] = 8;
-		$this->assertSame( array( false, array( 'code' => 'unavailable' ), 503 ), array_values( $this->call( 'start', array( 'purpose' => 'after' ) ) ) );
+		$this->store->puts_before_failure    = 0;
+		$GLOBALS['updatelens_test']['user']  = 8;
+		$GLOBALS['updatelens_test']['token'] = 'login-session-token-of-user-8';
+		$this->assertSame( array( false, array( 'code' => 'unavailable' ), 503 ), array_values( $this->call( 'start', array( 'purpose' => 'before' ) ) ) );
 	}
 
 	/**
@@ -735,10 +756,8 @@ final class SiteCheckWordPressTest extends TestCase {
 		$this->assertSame( $sessions, $this->store->values, 'No session was opened.' );
 		$this->assertSame( $starts, $this->meta, 'No start was counted.' );
 
-		// AFTER runs ignore baselines and update availability.
-		$after = $this->call( 'start', array( 'purpose' => 'after' ) )['data'];
-		$this->assertSame( array( 'home', 'rest' ), array_column( $after['checks'], 'check' ) );
-		$this->assertArrayNotHasKey( 'refresh_in', $after );
+		// AFTER runs need their analysis.
+		$this->assertSame( array( false, array( 'code' => 'invalid_request' ), 400 ), array_values( $this->call( 'start', array( 'purpose' => 'after' ) ) ) );
 	}
 
 	/**
@@ -746,10 +765,12 @@ final class SiteCheckWordPressTest extends TestCase {
 	 * fails (its session is used up).
 	 */
 	public function test_report_storage() {
-		$after  = array_column( $this->call( 'start', array( 'purpose' => 'after' ) )['data']['checks'], null, 'check' );
+		$id     = $this->settled_analysis();
+		$after  = array_column( $this->call( 'start', $this->after_start( $id ) )['data']['checks'], null, 'check' );
 		$result = $this->report_check( $after['home'], array( F::home() ) );
 		$this->assertTrue( $result['success'] );
 		$this->assertArrayNotHasKey( 'baseline', $result['data'] );
+		$this->assertSame( 'saved', $result['data']['after'] );
 		$this->assertSame( array(), $this->baseline_store->values );
 
 		$checks                            = $this->start();
@@ -757,6 +778,271 @@ final class SiteCheckWordPressTest extends TestCase {
 		$this->assertSame( array( false, array( 'code' => 'unavailable' ), 503 ), array_values( $this->report_check( $checks['home'], array( F::home() ) ) ) );
 		$this->assertSame( array( false, array( 'code' => 'session_unavailable' ), 410 ), array_values( $this->report_check( $checks['home'], array( F::home() ) ) ) );
 		$this->assertSame( array(), $this->baseline_store->values );
+	}
+
+	/**
+	 * A plugin update of user 7 that the follow-up settled a second ago, with
+	 * BEFORE baselines of the current login session attached: the ledger
+	 * moved from their generation by exactly this update's begin and end.
+	 *
+	 * @param array    $row    Column overrides.
+	 * @param string[] $checks Checks with an attached baseline.
+	 * @return int Analysis ID.
+	 */
+	private function settled_analysis( array $row = array(), array $checks = array( 'home', 'rest' ) ) {
+		$hasher     = new ContextHasher( 'test-site-salt' );
+		$urls       = AjaxEndpoints::target_urls();
+		$codec      = new SiteCheckResultCodec();
+		$generation = $this->activity->quiet_generation();
+		$token      = $this->activity->new_token();
+		$started    = $this->time + 0.5;
+		$columns    = array();
+		foreach ( array( 'home', 'rest' ) as $check ) {
+			if ( ! in_array( $check, $checks, true ) ) {
+				$columns[ "site_check_{$check}_before_reason" ] = 'missing';
+				continue;
+			}
+			$columns[ "site_check_{$check}_before" ] = $codec->encode(
+				F::result(
+					$check,
+					array( 'home' === $check ? F::home() : F::rest() ),
+					array(
+						'session'      => $hasher->session( 'login-session-token-of-user-7' ),
+						'target'       => $hasher->target( $urls[ $check ] ),
+						'started_at'   => $this->time - 5,
+						'completed_at' => $this->time - 4,
+						'generation'   => $generation,
+					)
+				)
+			);
+		}
+		$this->activity->begin( $token );
+		$this->activity->end( $token );
+		$this->time += 3;
+
+		return $this->analyses->create(
+			array_merge(
+				array(
+					'plugin_file'                  => 'acme/acme.php',
+					'user_id'                      => 7,
+					'status'                       => 'completed',
+					'settle_outcome'               => 'follow_up',
+					'started_at'                   => gmdate( 'Y-m-d H:i:s', (int) $started ),
+					'completed_at'                 => gmdate( 'Y-m-d H:i:s', (int) $this->time - 1 ),
+					'site_check_update_started_at' => sprintf( '%.6F', $started ),
+				),
+				$columns,
+				$row
+			)
+		);
+	}
+
+	/**
+	 * POST fields of an AFTER start.
+	 *
+	 * @param mixed $analysis Analysis ID.
+	 * @return array
+	 */
+	private function after_start( $analysis ) {
+		return array(
+			'purpose'  => 'after',
+			'analysis' => (string) $analysis,
+		);
+	}
+
+	/**
+	 * An AFTER start opens sessions bound to the analysis, once; each report
+	 * is stored in that analysis, once, independently per check.
+	 */
+	public function test_after_start_and_reports() {
+		$id       = $this->settled_analysis();
+		$response = $this->call( 'start', $this->after_start( $id ) );
+		$this->assertTrue( $response['success'] );
+		$this->assertSame( array( 'started', 'after' ), array( $response['data']['code'], $response['data']['purpose'] ) );
+		$this->assertArrayNotHasKey( 'refresh_in', $response['data'] );
+		$checks = array_column( $response['data']['checks'], null, 'check' );
+		$this->assertSame( array( 'home', 'rest' ), array_keys( $checks ) );
+		$this->assertSame( $id, $this->manager->find_live( 'home', $checks['home']['session'] )->get_analysis() );
+		$this->assertNotNull( $this->analyses->rows[ $id ]['site_check_after_started_at'] );
+
+		$this->assertSame( array( false, array( 'code' => 'already_started' ), 409 ), array_values( $this->call( 'start', $this->after_start( $id ) ) ), 'One AFTER run per analysis.' );
+
+		$home = $this->report_check( $checks['home'], array( F::home( array( 'status' => 500 ) ), F::home( array( 'status' => 500 ) ) ) );
+		$this->assertSame(
+			array(
+				'code'    => 'accepted',
+				'check'   => 'home',
+				'purpose' => 'after',
+				'verdict' => 'fail',
+				'reason'  => 'server_error',
+				'after'   => 'saved',
+			),
+			$home['data']
+		);
+		$stored = ( new SiteCheckResultCodec() )->decode( $this->analyses->rows[ $id ]['site_check_home_after'] );
+		$this->assertSame( array( 'fail', 7 ), array( $stored->get_verdict(), $stored->get_context()->get_user() ) );
+		$this->assertNull( $this->analyses->rows[ $id ]['site_check_home_after_reason'] );
+		$this->assertNull( $this->analyses->rows[ $id ]['site_check_rest_after'], 'REST is still running.' );
+		$this->assertSame( array( false, array( 'code' => 'session_unavailable' ), 410 ), array_values( $this->report_check( $checks['home'], array( F::home() ) ) ), 'Replay.' );
+
+		// Another update begins while the REST request is in flight.
+		$this->activity->begin( $this->activity->new_token() );
+		$rest = $this->report_check( $checks['rest'], array( F::rest() ) );
+		$this->assertSame( array( true, 'pass', 'saved' ), array( $rest['success'], $rest['data']['verdict'], $rest['data']['after'] ) );
+		$this->assertSame( 'overlapping_update', $this->analyses->rows[ $id ]['site_check_rest_after_reason'], 'Kept, never compared.' );
+		$this->assertNotNull( $this->analyses->rows[ $id ]['site_check_rest_after'] );
+		$this->assertNull( $this->analyses->rows[ $id ]['site_check_home_after_reason'], 'The homepage result is unaffected.' );
+	}
+
+	/**
+	 * Who may start an AFTER run, and when.
+	 */
+	public function test_after_start_refusals() {
+		foreach ( array( '', '0', '-1', 'abc', '1.5', '99999999999999999999' ) as $value ) {
+			$this->assertSame( array( false, array( 'code' => 'invalid_request' ), 400 ), array_values( $this->call( 'start', $this->after_start( $value ) ) ), "analysis '$value'" );
+		}
+		$this->assertSame( array( false, array( 'code' => 'not_eligible' ), 409 ), array_values( $this->call( 'start', $this->after_start( 99 ) ) ), 'Unknown analysis.' );
+
+		$id                                  = $this->settled_analysis();
+		$GLOBALS['updatelens_test']['user']  = 8;
+		$GLOBALS['updatelens_test']['token'] = 'login-session-token-of-user-8';
+		$this->assertSame( array( false, array( 'code' => 'not_owner' ), 403 ), array_values( $this->call( 'start', $this->after_start( $id ) ) ), 'Another administrator.' );
+		$GLOBALS['updatelens_test']['user']  = 7;
+		$GLOBALS['updatelens_test']['token'] = 'second-browser-of-user-7';
+		$this->assertSame( array( false, array( 'code' => 'not_owner' ), 403 ), array_values( $this->call( 'start', $this->after_start( $id ) ) ), 'Another login session.' );
+		$GLOBALS['updatelens_test']['token'] = 'login-session-token-of-user-7';
+		$this->assertNull( $this->analyses->rows[ $id ]['site_check_after_started_at'], 'Refusals claim nothing.' );
+
+		foreach ( array( array( 'settle_outcome' => 'admin_shutdown' ), array( 'settle_outcome' => 'next_update' ), array( 'settle_outcome' => 'expired' ), array( 'status' => 'failed' ), array( 'status' => 'awaiting_settle' ) ) as $row ) {
+			$this->assertSame( array( false, array( 'code' => 'not_eligible' ), 409 ), array_values( $this->call( 'start', $this->after_start( $this->settled_analysis( $row ) ) ) ), implode( ',', $row ) );
+		}
+
+		$late        = $this->settled_analysis();
+		$this->time += 61;
+		$this->assertSame( array( false, array( 'code' => 'not_eligible' ), 409 ), array_values( $this->call( 'start', $this->after_start( $late ) ) ), 'Too long after the update completed.' );
+		$this->assertSame( array(), $this->store->values, 'No session was opened.' );
+	}
+
+	/**
+	 * AFTER starts that run nothing: no baseline, or another update since.
+	 */
+	public function test_after_start_not_needed() {
+		$none = $this->settled_analysis( array(), array() );
+		$this->assertSame(
+			array(
+				true,
+				array(
+					'code'    => 'not_needed',
+					'purpose' => 'after',
+					'reason'  => 'no_baseline',
+				),
+				null,
+			),
+			array_values( $this->call( 'start', $this->after_start( $none ) ) )
+		);
+
+		$id = $this->settled_analysis( array(), array( 'rest' ) );
+		// Another administrator's update ran after this one ended.
+		$other = $this->activity->new_token();
+		$this->activity->begin( $other );
+		$this->activity->end( $other );
+		$this->assertSame(
+			array(
+				true,
+				array(
+					'code'    => 'not_needed',
+					'purpose' => 'after',
+					'reason'  => 'overlapping_update',
+				),
+				null,
+			),
+			array_values( $this->call( 'start', $this->after_start( $id ) ) )
+		);
+		$this->assertSame( array( null, 'overlapping_update' ), array( $this->analyses->rows[ $id ]['site_check_home_after_reason'], $this->analyses->rows[ $id ]['site_check_rest_after_reason'] ), 'Stored for the checks that would have run.' );
+		$this->assertSame( array( false, array( 'code' => 'already_started' ), 409 ), array_values( $this->call( 'start', $this->after_start( $id ) ) ) );
+		$this->assertSame( array(), $this->store->values, 'No session was opened.' );
+	}
+
+	/**
+	 * A claimed AFTER run whose sessions cannot open keeps why.
+	 */
+	public function test_after_start_failures_are_stored() {
+		for ( $i = 0; $i < 12; $i++ ) {
+			$this->start();
+		}
+		$id = $this->settled_analysis();
+		$this->assertSame( 429, $this->call( 'start', $this->after_start( $id ) )['status'] );
+		$this->assertSame( array( 'rate_limited', 'rate_limited' ), array( $this->analyses->rows[ $id ]['site_check_home_after_reason'], $this->analyses->rows[ $id ]['site_check_rest_after_reason'] ) );
+
+		$this->time                      += 700;
+		$this->store->puts_before_failure = 0;
+		$failed                           = $this->settled_analysis();
+		$this->assertSame( array( false, array( 'code' => 'unavailable' ), 503 ), array_values( $this->call( 'start', $this->after_start( $failed ) ) ) );
+		$this->assertSame( 'session_failed', $this->analyses->rows[ $failed ]['site_check_home_after_reason'] );
+	}
+
+	/**
+	 * The follow-up response names exactly the analysis it settled and
+	 * whether its AFTER checks should start (opt-in on, a baseline attached).
+	 */
+	public function test_follow_up_response_names_the_settled_analysis() {
+		$site          = new FakeSite( array( 'acme_version' => array( '1.0.0', 'yes' ) ), 1760090000 );
+		$respond       = function ( array $plugins ) use ( $site ) {
+			$site->time += 1;
+			$_POST       = array( 'plugins' => $plugins );
+			try {
+				( new PluginUpdateTracker( $site->request(), $this->activity, new SiteCheckAfter( $site->repository, $this->activity, 'microtime' ) ) )->on_follow_up();
+			} catch ( \UpdateLensTestJsonResponse $response ) {
+				return $response->data['results'];
+			}
+			$this->fail( 'No response.' );
+		};
+		$with_baseline = function ( $id ) use ( $site ) {
+			$site->repository->rows[ $id ]['site_check_update_started_at'] = sprintf( '%.6F', $site->time - 1.5 );
+			$site->repository->rows[ $id ]['site_check_rest_before']       = ( new SiteCheckResultCodec() )->encode( F::before( 'rest', array( F::rest() ) ) );
+		};
+
+		$site->update( 'acme/acme.php' );
+		$this->assertSame(
+			array(
+				array(
+					'plugin'      => 'acme/acme.php',
+					'result'      => 'settled',
+					'analysis'    => 1,
+					'site_checks' => false,
+				),
+				array(
+					'plugin' => 'gone/gone.php',
+					'result' => 'not_pending',
+				),
+			),
+			$respond( array( 'acme/acme.php', 'gone/gone.php' ) ),
+			'No baseline: no AFTER checks.'
+		);
+
+		$site->update( 'other/other.php' );
+		$with_baseline( 2 );
+		$this->assertSame(
+			array(
+				array(
+					'plugin' => 'acme/acme.php',
+					'result' => 'not_pending',
+				),
+				array(
+					'plugin'      => 'other/other.php',
+					'result'      => 'settled',
+					'analysis'    => 2,
+					'site_checks' => true,
+				),
+			),
+			$respond( array( 'acme/acme.php', 'other/other.php' ) ),
+			'Exactly the analysis this request settled.'
+		);
+
+		$site->update( 'other/other.php' );
+		$with_baseline( 3 );
+		$GLOBALS['updatelens_test']['options'] = array();
+		$this->assertFalse( $respond( array( 'other/other.php' ) )[0]['site_checks'], 'Site checks turned off.' );
 	}
 
 	/**

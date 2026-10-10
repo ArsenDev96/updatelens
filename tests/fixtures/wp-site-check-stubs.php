@@ -62,7 +62,7 @@ function add_filter( $hook, $callback, $priority = 10, $args = 1 ) {
 }
 
 function check_ajax_referer( $action = -1, $query_arg = false, $stop = true ) {
-	return $GLOBALS['updatelens_test']['nonce_valid'] && 'updatelens_site_check' === $action ? 1 : false;
+	return $GLOBALS['updatelens_test']['nonce_valid'] && in_array( $action, array( 'updatelens_site_check', 'updatelens_settle' ), true ) ? 1 : false;
 }
 
 function current_user_can( $capability ) {

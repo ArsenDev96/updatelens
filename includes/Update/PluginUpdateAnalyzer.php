@@ -187,9 +187,10 @@ final class PluginUpdateAnalyzer {
 	 * @param callable|null             $now          Returns the current Unix time. Default time().
 	 * @param callable|null             $capture_action_scheduler Returns a fresh ActionSchedulerSnapshot.
 	 *                                                Null: no Action Scheduler (`not_installed`).
-	 * @param float|null                $request_started_at Unix time (with microseconds) at which this
-	 *                                                request started. Null: unknown, so this request
-	 *                                                never settles analyses of earlier requests.
+	 * @param float|null                $request_started_at Unix time (with microseconds, same clock as
+	 *                                                $now) at which this request started. Null:
+	 *                                                unknown, so this request never settles
+	 *                                                analyses of earlier requests.
 	 * @param SiteCheckObservation|null $site_checks BEFORE site check baselines attached when an
 	 *                                         analysis is created. Null: the columns are not written.
 	 */
@@ -209,8 +210,9 @@ final class PluginUpdateAnalyzer {
 	/**
 	 * Analyzer wired to the running site. The snapshot providers are created on first use.
 	 *
-	 * The request start is PHP's `REQUEST_TIME_FLOAT` (taken before WordPress
-	 * loads any plugin file); the clock is `microtime( true )`, the same clock.
+	 * The request start is WordPress's `$timestart` (RequestStart, taken before
+	 * any drop-in or plugin file loads); the clock is `microtime( true )`, the
+	 * same clock.
 	 *
 	 * @return self
 	 */
@@ -241,8 +243,6 @@ final class PluginUpdateAnalyzer {
 			return $action_scheduler_provider->capture();
 		};
 
-		$request_started_at = isset( $_SERVER['REQUEST_TIME_FLOAT'] ) && is_numeric( $_SERVER['REQUEST_TIME_FLOAT'] ) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : null;
-
 		return new self(
 			new AnalysisRepository( $wpdb ),
 			$capture,
@@ -251,7 +251,7 @@ final class PluginUpdateAnalyzer {
 				return microtime( true );
 			},
 			$capture_action_scheduler,
-			$request_started_at,
+			RequestStart::get(),
 			SiteCheckObservation::from_wordpress()
 		);
 	}
@@ -472,12 +472,16 @@ final class PluginUpdateAnalyzer {
 	 * as at shutdown. Compare-and-set writes make concurrent settle attempts
 	 * safe: exactly one wins, the others report a conflict.
 	 *
-	 * @param string[] $plugin_files       Plugin basenames (validated by FollowUpRequest::plugins()).
-	 * @param int      $user_id            Current user ID.
-	 * @param string[] $activation_changed Plugins whose active state changed during this request.
+	 * @param string[]                $plugin_files       Plugin basenames (validated by FollowUpRequest::plugins()).
+	 * @param int                     $user_id            Current user ID.
+	 * @param string[]                $activation_changed Plugins whose active state changed during this request.
+	 * @param array<string, int>|null $settled            Set to plugin file => ID of each analysis this
+	 *                                                    call settled (result SETTLED), so the response
+	 *                                                    names exactly those analyses.
 	 * @return array<string, string> Plugin file => FollowUpRequest result code.
 	 */
-	public function settle_follow_up( array $plugin_files, $user_id, array $activation_changed = array() ) {
+	public function settle_follow_up( array $plugin_files, $user_id, array $activation_changed = array(), &$settled = null ) {
+		$settled  = array();
 		$results  = array();
 		$eligible = array();
 		foreach ( $plugin_files as $plugin_file ) {
@@ -505,6 +509,9 @@ final class PluginUpdateAnalyzer {
 
 		foreach ( $eligible as $plugin_file => $row ) {
 			$results[ $plugin_file ] = $this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::FOLLOW_UP );
+			if ( FollowUpRequest::SETTLED === $results[ $plugin_file ] ) {
+				$settled[ $plugin_file ] = (int) $row['id'];
+			}
 		}
 
 		return $results;
@@ -573,9 +580,12 @@ final class PluginUpdateAnalyzer {
 	 *
 	 * Then the request included the updated plugin files from its start. Uses
 	 * `immediate_captured_at` (microseconds), so requests starting in the same
-	 * second as IMMEDIATE are ordered correctly. Analyses recorded before that
-	 * column existed only have a whole second (`updated_at`): there, only a
-	 * request that started in a later second is certainly later.
+	 * second as IMMEDIATE are ordered correctly. It is stored rounded to the
+	 * microsecond, so the request start is compared at that resolution, rounded
+	 * down: a start within the same recorded microsecond is not later. Analyses
+	 * recorded before that column existed only have a whole second
+	 * (`updated_at`): there, only a request that started in a later second is
+	 * certainly later.
 	 *
 	 * @param array $row Open analysis in `awaiting_settle`.
 	 * @return bool
@@ -586,7 +596,8 @@ final class PluginUpdateAnalyzer {
 		}
 
 		if ( isset( $row['immediate_captured_at'] ) && is_numeric( $row['immediate_captured_at'] ) ) {
-			return $this->request_started_at > (float) $row['immediate_captured_at'];
+			// Whole microseconds as floats (exact up to 2^53, also on 32-bit PHP).
+			return floor( $this->request_started_at * 1000000 ) > round( (float) $row['immediate_captured_at'] * 1000000 );
 		}
 
 		$immediate = empty( $row['updated_at'] ) ? false : strtotime( $row['updated_at'] . ' UTC' );

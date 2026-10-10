@@ -8,6 +8,7 @@
 namespace UpdateLens\Update;
 
 use Throwable;
+use UpdateLens\SiteCheck\Settings;
 use UpdateLens\SiteCheck\UpdateActivity;
 
 defined( 'ABSPATH' ) || exit;
@@ -74,14 +75,23 @@ final class PluginUpdateTracker {
 	private $activity_token = null;
 
 	/**
+	 * AFTER site checks (created on first use).
+	 *
+	 * @var SiteCheckAfter|null
+	 */
+	private $after;
+
+	/**
 	 * Constructor. Create on `plugins_loaded`, after active plugins are loaded.
 	 *
 	 * @param PluginUpdateAnalyzer $analyzer Lifecycle orchestration.
 	 * @param UpdateActivity|null  $activity Updater activity ledger (default: options table).
+	 * @param SiteCheckAfter|null  $after    AFTER site checks (default: analyses table and ledger).
 	 */
-	public function __construct( PluginUpdateAnalyzer $analyzer, ?UpdateActivity $activity = null ) {
+	public function __construct( PluginUpdateAnalyzer $analyzer, ?UpdateActivity $activity = null, ?SiteCheckAfter $after = null ) {
 		$this->analyzer       = $analyzer;
 		$this->activity       = $activity;
+		$this->after          = $after;
 		$this->active_at_boot = (array) get_option( 'active_plugins', array() );
 	}
 
@@ -251,7 +261,9 @@ final class PluginUpdateTracker {
 	/**
 	 * The follow-up request after a successful update (`admin-ajax.php`,
 	 * logged-in users only). Responds with one FollowUpRequest result per
-	 * listed plugin; never with snapshot or diff data.
+	 * listed plugin; never with snapshot or diff data. A plugin whose analysis
+	 * this request settled also gets that analysis's `analysis` ID and
+	 * `site_checks` (whether to start its AFTER site checks now).
 	 *
 	 * @return void
 	 */
@@ -272,21 +284,51 @@ final class PluginUpdateTracker {
 		// The settled snapshot is written even if the browser goes away meanwhile.
 		ignore_user_abort( true );
 
+		$settled = array();
 		try {
-			$results = $this->analyzer->settle_follow_up( $plugins, get_current_user_id(), $this->activation_changed() );
+			$results = $this->analyzer->settle_follow_up( $plugins, get_current_user_id(), $this->activation_changed(), $settled );
 		} catch ( Throwable $e ) {
 			wp_send_json_error( array( 'code' => 'failed' ), 500 );
 		}
 
 		$response = array();
 		foreach ( $results as $plugin => $result ) {
-			$response[] = array(
+			$entry = array(
 				'plugin' => $plugin,
 				'result' => $result,
 			);
+			if ( isset( $settled[ $plugin ] ) ) {
+				// Exactly the analysis this request settled (never "the latest one"), and
+				// whether its AFTER site checks should start now (SiteCheckAfter decides).
+				$entry['analysis']    = $settled[ $plugin ];
+				$entry['site_checks'] = $this->wants_site_checks( $settled[ $plugin ] );
+			}
+			$response[] = $entry;
 		}
 
 		wp_send_json_success( array( 'results' => $response ) );
+	}
+
+	/**
+	 * Whether the updating browser should start AFTER site checks for an
+	 * analysis this request settled (opt-in on, a BEFORE baseline attached).
+	 *
+	 * @param int $analysis_id Analysis ID.
+	 * @return bool
+	 */
+	private function wants_site_checks( $analysis_id ) {
+		try {
+			if ( ! Settings::is_enabled() ) {
+				return false;
+			}
+			if ( null === $this->after ) {
+				$this->after = SiteCheckAfter::from_wordpress();
+			}
+
+			return $this->after->wanted( $analysis_id );
+		} catch ( Throwable $e ) {
+			return false;
+		}
 	}
 
 	/**

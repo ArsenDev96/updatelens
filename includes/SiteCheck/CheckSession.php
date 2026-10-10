@@ -26,7 +26,8 @@ defined( 'ABSPATH' ) || exit;
  *
  * The record also keeps the updater activity generation at its start
  * (UpdateActivity), so the result can later be tied to the updates around
- * it.
+ * it. An AFTER session belongs to exactly one analysis (`analysis`, its
+ * ID; null for BEFORE sessions): its result is only ever stored there.
  *
  * Neither token is stored: the record is kept under a key derived from the
  * marker (storage_key()) and holds only a SHA-256 of the secret. Both are
@@ -61,7 +62,7 @@ final class CheckSession {
 	/**
 	 * Keys of the array form, in order.
 	 */
-	const KEYS = array( 'check', 'definition', 'purpose', 'user', 'login', 'target', 'secret_hash', 'created_at', 'expires_at', 'generation' );
+	const KEYS = array( 'check', 'definition', 'purpose', 'user', 'login', 'target', 'secret_hash', 'created_at', 'expires_at', 'generation', 'analysis' );
 
 	/**
 	 * Array form (validated).
@@ -101,7 +102,10 @@ final class CheckSession {
 			&& CheckResult::is_timestamp( $data['expires_at'] )
 			&& $data['expires_at'] > $data['created_at']
 			&& $data['expires_at'] - $data['created_at'] <= self::TTL
-			&& ( null === $data['generation'] || UpdateActivity::is_generation( $data['generation'] ) );
+			&& ( null === $data['generation'] || UpdateActivity::is_generation( $data['generation'] ) )
+			&& ( self::PURPOSE_AFTER === $data['purpose']
+				? is_int( $data['analysis'] ) && $data['analysis'] >= 1
+				: null === $data['analysis'] );
 		if ( ! $valid ) {
 			throw new InvalidArgumentException( 'Invalid UpdateLens site check session.' );
 		}
@@ -253,6 +257,15 @@ final class CheckSession {
 	 */
 	public function get_generation() {
 		return $this->data['generation'];
+	}
+
+	/**
+	 * Analysis an AFTER session belongs to (null for BEFORE sessions).
+	 *
+	 * @return int|null
+	 */
+	public function get_analysis() {
+		return $this->data['analysis'];
 	}
 
 	/**

@@ -86,16 +86,32 @@ export interface StartedRun {
 	refreshIn?: RefreshIn;
 }
 
-/** A `before` start that opened no session (`code` `not_needed`). */
+/** Why a `before` start opened no session. */
+export type BeforeNotNeededReason =
+	'fresh' | 'no_updates' | 'update_in_progress';
+
+/** Why an `after` start opened no session. */
+export type AfterNotNeededReason =
+	'no_baseline' | 'overlapping_update' | 'update_order_unknown';
+
+/** A start that opened no session (`code` `not_needed`). */
 export interface NotNeededRun {
 	/**
-	 * `fresh`: every baseline is recent enough; `no_updates`: nothing to
-	 * update; `update_in_progress`: an update is running, so a baseline taken
-	 * now could never be used (ask again after `refreshIn`).
+	 * `before`: `fresh`: every baseline is recent enough; `no_updates`:
+	 * nothing to update; `update_in_progress`: an update is running, so a
+	 * baseline taken now could never be used (ask again after `refreshIn`).
+	 * `after`: `no_baseline`: nothing to compare with;
+	 * `overlapping_update` / `update_order_unknown`: another update ran
+	 * since this one ended (PHP stored it; nothing runs).
 	 */
-	reason: 'fresh' | 'no_updates' | 'update_in_progress';
+	reason: BeforeNotNeededReason | AfterNotNeededReason;
 	refreshIn?: RefreshIn;
 }
+
+const NOT_NEEDED_REASONS: Readonly< Record< Purpose, readonly string[] > > = {
+	before: [ 'fresh', 'no_updates', 'update_in_progress' ],
+	after: [ 'no_baseline', 'overlapping_update', 'update_order_unknown' ],
+};
 
 export type MarkerFact = 'current' | 'absent' | 'other';
 export type EndMarkerFact = MarkerFact | 'unread';
@@ -240,16 +256,19 @@ export function parseStartResponse( data: unknown ): StartedRun | null {
 /**
  * The `data` of a `not_needed` start response, or null if it is not one.
  *
- * @param data `data` of `{"success":true,"data":…}`.
+ * @param data    `data` of `{"success":true,"data":…}`.
+ * @param purpose The purpose of the start (default `before`).
  */
-export function parseNotNeeded( data: unknown ): NotNeededRun | null {
+export function parseNotNeeded(
+	data: unknown,
+	purpose: Purpose = 'before'
+): NotNeededRun | null {
 	if (
 		! isRecord( data ) ||
 		data.code !== 'not_needed' ||
-		data.purpose !== 'before' ||
-		! [ 'fresh', 'no_updates', 'update_in_progress' ].includes(
-			data.reason as string
-		)
+		data.purpose !== purpose ||
+		! NOT_NEEDED_REASONS[ purpose ].includes( data.reason as string ) ||
+		( purpose === 'after' && data.refresh_in !== undefined )
 	) {
 		return null;
 	}

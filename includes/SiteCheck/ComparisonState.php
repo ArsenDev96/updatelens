@@ -30,6 +30,9 @@ defined( 'ABSPATH' ) || exit;
  *                     finished too late, or its report never arrived).
  * - `not_comparable`: both exist, but a comparability requirement is not
  *                     met or a run is inconclusive. The reason says which.
+ *                     `update_order_unknown` is set by the report
+ *                     (Report\SiteCheckReport) when the updater activity
+ *                     ledger could not prove that no other update ran.
  */
 final class ComparisonState {
 
@@ -53,6 +56,7 @@ final class ComparisonState {
 	 */
 	const QUEUED_UPDATE               = 'queued_update';
 	const OVERLAPPING_UPDATE          = 'overlapping_update';
+	const UPDATE_ORDER_UNKNOWN        = 'update_order_unknown';
 	const DEFINITION_CHANGED          = 'definition_changed';
 	const TARGET_CHANGED              = 'target_changed';
 	const DIFFERENT_USER              = 'different_user';

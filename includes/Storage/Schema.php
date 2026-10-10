@@ -34,8 +34,15 @@ final class Schema {
 	 *    `site_check_<check>_before` (attached result) and
 	 *    `site_check_<check>_before_reason`. Existing rows are not rewritten:
 	 *    both NULL means the analysis was created before schema 6.
+	 * 7: site check AFTER results per check (Update\SiteCheckAfter):
+	 *    `site_check_<check>_after` and `site_check_<check>_after_reason`,
+	 *    `site_check_update_started_at` (when the update began, with
+	 *    microseconds; written when the analysis is created) and
+	 *    `site_check_after_started_at` (the one AFTER run, claimed once).
+	 *    Existing rows are not rewritten: a NULL update start means the
+	 *    analysis was created before schema 7.
 	 */
-	const VERSION = 6;
+	const VERSION = 7;
 
 	/**
 	 * Column renames: current name => [ definition, earlier names, newest first ].
@@ -202,8 +209,11 @@ final class Schema {
 	 * signals with their own columns. The `*_before_snapshot` and
 	 * `*_immediate_snapshot` columns are temporary and cleared on every final
 	 * state; `cron_*_reason` holds the CronPhaseReason of an unavailable Cron phase.
-	 * `site_check_*_before` / `_reason` are written once, when the analysis is
-	 * created, and kept on every final state.
+	 * `site_check_*_before` / `_reason` and `site_check_update_started_at` are
+	 * written once, when the analysis is created, and kept on every final
+	 * state. `site_check_after_started_at` and `site_check_*_after` /
+	 * `_after_reason` are written after the analysis completed, each at most
+	 * once (guarded updates, Update\SiteCheckAfter).
 	 *
 	 * @param string $table           Full table name.
 	 * @param string $charset_collate Charset/collation clause.
@@ -250,6 +260,12 @@ final class Schema {
   site_check_home_before_reason varchar(40) DEFAULT NULL,
   site_check_rest_before text DEFAULT NULL,
   site_check_rest_before_reason varchar(40) DEFAULT NULL,
+  site_check_update_started_at decimal(16,6) DEFAULT NULL,
+  site_check_after_started_at decimal(16,6) DEFAULT NULL,
+  site_check_home_after text DEFAULT NULL,
+  site_check_home_after_reason varchar(40) DEFAULT NULL,
+  site_check_rest_after text DEFAULT NULL,
+  site_check_rest_after_reason varchar(40) DEFAULT NULL,
   error_code varchar(64) DEFAULT NULL,
   error_message text DEFAULT NULL,
   PRIMARY KEY  (id),

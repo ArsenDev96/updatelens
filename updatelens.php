@@ -38,6 +38,9 @@ if ( ! is_readable( UPDATELENS_DIR . 'vendor/autoload.php' ) ) {
 
 require_once UPDATELENS_DIR . 'vendor/autoload.php';
 
+// Read while this file loads, before later code can change it: settling orders requests by their start.
+\UpdateLens\Update\RequestStart::capture();
+
 register_activation_hook( __FILE__, array( \UpdateLens\Core\Activator::class, 'activate' ) );
 register_deactivation_hook( __FILE__, array( \UpdateLens\Core\Deactivator::class, 'deactivate' ) );
 

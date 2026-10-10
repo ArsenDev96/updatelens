@@ -9,6 +9,11 @@ import {
 	type FollowUpWindow,
 	type UpdatesState,
 } from '../../src/admin/update-follow-up/followUp';
+import {
+	createAfterChecks,
+	parseSettled,
+} from '../../src/admin/update-follow-up/afterChecks';
+import type { RunResult } from '../../src/admin/site-check/runner';
 
 const SETTINGS: FollowUpSettings = {
 	ajaxUrl: 'https://example.test/wp-admin/admin-ajax.php',
@@ -289,5 +294,244 @@ describe( 'sending', () => {
 
 		expect( fetch ).toHaveBeenCalledTimes( 2 );
 		expect( fetch.mock.calls[ 1 ][ 1 ].keepalive ).toBeUndefined();
+	} );
+} );
+
+describe( 'follow-up response', () => {
+	it( 'resolves with the data of a successful response, else null', async () => {
+		const respond = ( response: Response | Error ) =>
+			sendFollowUp(
+				vi.fn( () =>
+					response instanceof Error
+						? Promise.reject( response )
+						: Promise.resolve( response )
+				) as unknown as typeof globalThis.fetch,
+				SETTINGS,
+				[ 'a/a.php' ]
+			);
+
+		await expect(
+			respond(
+				new Response(
+					JSON.stringify( { success: true, data: { results: [] } } )
+				)
+			)
+		).resolves.toEqual( { results: [] } );
+		await expect(
+			respond(
+				new Response(
+					JSON.stringify( {
+						success: false,
+						data: { code: 'invalid_nonce' },
+					} ),
+					{ status: 403 }
+				)
+			)
+		).resolves.toBeNull();
+		await expect( respond( new Response( '0' ) ) ).resolves.toBeNull();
+		await expect( respond( new Response( '<html>' ) ) ).resolves.toBeNull();
+		await expect( respond( new Error( 'offline' ) ) ).resolves.toBeNull();
+	} );
+
+	it( 'lists only analyses the follow-up settled with site checks wanted', () => {
+		expect(
+			parseSettled( {
+				results: [
+					{
+						plugin: 'a/a.php',
+						result: 'settled',
+						analysis: 5,
+						site_checks: true,
+					},
+					{
+						plugin: 'b/b.php',
+						result: 'settled',
+						analysis: 6,
+						site_checks: false,
+					},
+					{ plugin: 'c/c.php', result: 'not_pending' },
+					{
+						plugin: 'd/d.php',
+						result: 'conflict',
+						analysis: 7,
+						site_checks: true,
+					},
+					{
+						plugin: 'e/e.php',
+						result: 'settled',
+						analysis: '8',
+						site_checks: true,
+					},
+					{
+						plugin: 'f/f.php',
+						result: 'settled',
+						analysis: 0,
+						site_checks: true,
+					},
+					{
+						plugin: 'g/g.php',
+						result: 'settled',
+						analysis: 5,
+						site_checks: true,
+					},
+					null,
+				],
+			} )
+		).toEqual( [ 5 ] );
+		for ( const data of [ null, undefined, 'x', {}, { results: {} } ] ) {
+			expect( parseSettled( data ) ).toEqual( [] );
+		}
+	} );
+} );
+
+describe( 'AFTER checks', () => {
+	const result = { status: 'started' } as unknown as RunResult;
+	const settled = {
+		success: true,
+		data: {
+			results: [
+				{
+					plugin: 'a/a.php',
+					result: 'settled',
+					analysis: 9,
+					site_checks: true,
+				},
+			],
+		},
+	};
+	const sameOrigin = () => ( {
+		...SETTINGS,
+		ajaxUrl: `${ window.location.origin }/wp-admin/admin-ajax.php`,
+		siteChecks: { nonce: 'sc-nonce' },
+	} );
+
+	it( 'runs each settled analysis once, one after another, while idle', async () => {
+		const runs: number[] = [];
+		const after = createAfterChecks( {
+			isIdle: () => true,
+			run: async ( analysis ) => {
+				runs.push( analysis );
+				return result;
+			},
+		} );
+		const token = after.followUpSent();
+
+		await expect( after.settled( [ 5, 6 ], token ) ).resolves.toEqual( [
+			5, 6,
+		] );
+		expect( runs ).toEqual( [ 5, 6 ] );
+		expect( after.isRunning() ).toBe( false );
+	} );
+
+	it( 'starts nothing while updates are queued or after an update started', async () => {
+		const run = vi.fn( async () => result );
+		let idle = false;
+		const after = createAfterChecks( { isIdle: () => idle, run } );
+
+		await after.settled( [ 5 ], after.followUpSent() );
+		expect( run ).not.toHaveBeenCalled();
+
+		idle = true;
+		const token = after.followUpSent();
+		after.updateStarted();
+		await after.settled( [ 5 ], token );
+		expect( run ).not.toHaveBeenCalled();
+	} );
+
+	it( 'aborts the running analysis when an update starts and drops the rest', async () => {
+		const signals: AbortSignal[] = [];
+		const after = createAfterChecks( {
+			isIdle: () => true,
+			run: ( _analysis, signal ) => {
+				signals.push( signal );
+				return new Promise( ( resolve ) =>
+					signal.addEventListener( 'abort', () => resolve( result ) )
+				);
+			},
+		} );
+		const done = after.settled( [ 5, 6 ], after.followUpSent() );
+		expect( after.isRunning() ).toBe( true );
+		await expect(
+			after.settled( [ 7 ], after.followUpSent() )
+		).resolves.toEqual( [] );
+
+		after.updateStarted();
+		await expect( done ).resolves.toEqual( [ 5 ] );
+		expect( signals ).toHaveLength( 1 );
+		expect( signals[ 0 ].aborted ).toBe( true );
+	} );
+
+	it( 'starts the AFTER run from the follow-up response, with the site check nonce', async () => {
+		const p = page( sameOrigin() );
+		p.fetch.mockImplementation( ( _url, init ) => {
+			const fields = new URLSearchParams( String( init?.body ) );
+			const data =
+				fields.get( 'action' ) === 'updatelens_settle'
+					? settled.data
+					: {
+							code: 'not_needed',
+							purpose: 'after',
+							reason: 'no_baseline',
+						};
+			return Promise.resolve(
+				new Response( JSON.stringify( { success: true, data } ) )
+			);
+		} );
+		expect( bindUpdateFollowUp( p.win ) ).toBe( true );
+
+		p.startJob( 'a' );
+		p.finishJob( success( 'a/a.php' ) );
+		await vi.waitFor( () => expect( p.fetch ).toHaveBeenCalledTimes( 2 ) );
+
+		const start = Object.fromEntries(
+			new URLSearchParams( String( p.fetch.mock.calls[ 1 ][ 1 ]?.body ) )
+		);
+		expect( start ).toEqual( {
+			action: 'updatelens_site_check_start',
+			_ajax_nonce: 'sc-nonce',
+			purpose: 'after',
+			analysis: '9',
+		} );
+	} );
+
+	it( 'starts nothing without site check settings', async () => {
+		const plain = page();
+		plain.fetch.mockImplementation( () =>
+			Promise.resolve( new Response( JSON.stringify( settled ) ) )
+		);
+		bindUpdateFollowUp( plain.win );
+		plain.startJob( 'a' );
+		plain.finishJob( success( 'a/a.php' ) );
+		await new Promise( ( resolve ) => setTimeout( resolve, 0 ) );
+		expect( plain.fetch ).toHaveBeenCalledTimes( 1 );
+	} );
+
+	it( 'starts nothing when an update started before the follow-up response', async () => {
+		const busy = page( sameOrigin() );
+		let answer: ( response: Response ) => void = () => undefined;
+		busy.fetch.mockImplementation(
+			() =>
+				new Promise( ( resolve ) => {
+					answer = resolve;
+				} )
+		);
+		bindUpdateFollowUp( busy.win );
+		busy.startJob( 'a' );
+		busy.finishJob( success( 'a/a.php' ) );
+		busy.trigger( 'wp-plugin-updating' );
+		answer( new Response( JSON.stringify( settled ) ) );
+		await new Promise( ( resolve ) => setTimeout( resolve, 0 ) );
+		expect( busy.fetch ).toHaveBeenCalledTimes( 1 );
+	} );
+
+	it( 'rejects malformed site check settings', () => {
+		expect(
+			bindUpdateFollowUp( page( { ...SETTINGS, siteChecks: {} } ).win )
+		).toBe( false );
+		expect(
+			bindUpdateFollowUp(
+				page( { ...SETTINGS, siteChecks: 'sc-nonce' } ).win
+			)
+		).toBe( false );
 	} );
 } );

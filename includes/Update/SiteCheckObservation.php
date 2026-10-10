@@ -36,7 +36,9 @@ defined( 'ABSPATH' ) || exit;
  * generation; never URLs, bodies, cookies, nonces, markers or secrets) or
  * a BeforeReason code. Exactly one of them is set for analyses created
  * since schema 6; both are NULL for older analyses (read as
- * `not_captured`). Nothing here is part of a report yet.
+ * `not_captured`). When baselines were selected with a ledger record, the
+ * update's start time is stored too (`site_check_update_started_at`,
+ * schema 7): the AFTER side (SiteCheckAfter) and the comparison use it.
  */
 final class SiteCheckObservation {
 
@@ -53,6 +55,12 @@ final class SiteCheckObservation {
 			'reason' => 'site_check_rest_before_reason',
 		),
 	);
+
+	/**
+	 * When the update began (Unix time with microseconds, from its ledger
+	 * record), written with the BEFORE columns when baselines were selected.
+	 */
+	const UPDATE_STARTED_AT = 'site_check_update_started_at';
 
 	/**
 	 * Context of the update request: function (): array{enabled: bool,
@@ -157,6 +165,10 @@ final class SiteCheckObservation {
 			}
 			$columns[ $names['result'] ] = $json;
 			$columns[ $names['reason'] ] = null === $json ? ( in_array( $reason, BeforeReason::STORED, true ) ? $reason : BeforeReason::SELECTION_FAILED ) : null;
+		}
+		if ( is_array( $activity ) && isset( $activity['at'] ) && CheckResult::is_timestamp( $activity['at'] ) ) {
+			// When this update began (its ledger record): the comparison's update start.
+			$columns[ self::UPDATE_STARTED_AT ] = sprintf( '%.6F', (float) $activity['at'] );
 		}
 
 		return $columns;

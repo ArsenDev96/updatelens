@@ -678,7 +678,7 @@ final class SiteCheckBeforeLifecycleTest extends TestCase {
 		$this->site->admin_page();
 
 		$strip = static function ( array $row ) {
-			return array_diff_key( $row, array_flip( array( 'id', 'plugin_file', 'plugin_name', 'active_plugin', 'started_at', 'updated_at', 'settle_deadline', 'immediate_captured_at', 'completed_at', 'site_check_home_before', 'site_check_home_before_reason', 'site_check_rest_before', 'site_check_rest_before_reason' ) ) );
+			return array_diff_key( $row, array_flip( array( 'id', 'plugin_file', 'plugin_name', 'active_plugin', 'started_at', 'updated_at', 'settle_deadline', 'immediate_captured_at', 'completed_at', 'site_check_home_before', 'site_check_home_before_reason', 'site_check_rest_before', 'site_check_rest_before_reason', 'site_check_update_started_at' ) ) );
 		};
 		$this->assertSame( $strip( $this->site->repository->rows[ $without ] ), $strip( $this->site->repository->rows[ $with ] ) );
 		$this->assertSame( AnalysisStatus::COMPLETED, $this->site->repository->rows[ $with ]['status'] );

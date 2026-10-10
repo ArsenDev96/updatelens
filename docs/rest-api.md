@@ -273,6 +273,7 @@ Before WP-Cron reporting, each phase _was_ the options object. It is now `phases
 - `error`: `null` or `{"code": "…"}`, a sanitized identifier (e.g. `update_not_completed`, `fingerprint_context_changed`, or a WordPress updater code such as `incompatible_archive`). No messages, paths or URLs.
 - `observation_window_seconds`: length of the post-update observation window. Presentation derives its wording ("within 5 minutes") from it.
 - `potential_impact`: review rules evaluated on the Net result, with per-signal evaluation status (see [`potential_impact`](#potential_impact)). Added later; every other field is unchanged.
+- `site_checks`: the homepage and REST API checks before and after the update, compared per check (see [`site_checks`](#site_checks)). Added later; every other field is unchanged. Not part of `potential_impact`.
 - No user information, snapshots, fingerprints, fingerprint contexts, option values, WP-Cron arguments or Action Scheduler arguments are returned.
 
 ### Phases
@@ -443,6 +444,69 @@ Never included: option values, arguments, argument fingerprints, md5 event keys,
   ]
 }
 ```
+
+### `site_checks`
+
+Opt-in site checks (`updatelens_site_checks` = `enabled`) observed by the updating administrator's browser: the anonymous homepage (`home`) and `wp/v2/users/me` as that administrator (`rest`), each with WordPress verified as the origin by a per-run marker. A BEFORE baseline taken on the Plugins or Updates screen is attached when the update starts; the AFTER run starts in the same browser right after the follow-up request settled the analysis. Computed on every read from the stored results (`Report\SiteCheckReport`); observations, never proof of a cause.
+
+- `status`: `pending` (an AFTER result can still arrive), `complete` (both checks compared), `partial` (one compared), `unavailable` (none).
+- `checks.home`, `checks.rest`, each:
+  - `state`: compared — `passed_both`, `newly_failing` (passed before, failure confirmed by both attempts after), `failing_both`, `recovered`, `changed` (a homepage redirect appeared or disappeared); otherwise `not_run` (a side is missing), `not_comparable` (both exist but may not be compared), or `pending`.
+  - `reason`: `null` when compared or pending; for `not_run`: `baseline_missing`, `after_missing`; for `not_comparable`: `overlapping_update` (other updater activity after this update ended, before the AFTER result was accepted), `update_order_unknown` (the updater activity ledger could not rule that out), `definition_changed`, `target_changed`, `different_user`, `different_login_session`, `baseline_after_update_start`, `baseline_expired`, `after_during_update`, `before_inconclusive`, `after_inconclusive` (e.g. a failure followed by a passing retry, maintenance mode, a cached page, a firewall), `redirected_both`.
+  - `before` and `after`: `available`, `reason`, `started_at` / `completed_at` (the run's session start and the server's acceptance of its report, UTC, whole seconds), `result` (`verdict`: `pass`, `fail`, `redirect`, `inconclusive`; its `reason`; and per attempt the browser-observed facts: `outcome`, `status`, `duration_ms`, the marker codes `header` and `end_marker` (homepage) or `body` and `error_code` (REST), `origin`, the attempt's own `verdict` and `reason`), plus `before.age_seconds` (baseline age when the update started) and `after.delay_seconds` (from the settled observation to the AFTER run).
+  - `before.reason` without a result: `disabled`, `no_login_session`, `update_order_unknown`, `overlapping_update`, `missing`, `corrupt`, `definition_changed`, `target_changed`, `not_completed_before_update`, `expired`, `taken_during_update`, `intervening_update` (another update since the baseline, e.g. queued updates), `selection_failed`, `not_captured` (recorded before site checks), `data_corrupt`, `unknown`.
+  - `after.reason` without a result: `no_baseline` (nothing to compare with, so not run), `analysis_ended` (failed, abandoned or incompatible), `settle_expired`, `not_followed_up` (settled by a later page or the next update, not the browser's follow-up), `not_started` (the AFTER run never started in time: tab closed, request failed, site checks turned off), `not_reported` (started, no result accepted before its session ended: tab closed, site or admin-ajax unreachable), `overlapping_update` / `update_order_unknown` (seen at the AFTER start; nothing ran), `rate_limited`, `session_failed`, `not_captured`, `data_corrupt`, `unknown`. With a result, `after.reason` is `null`, or `overlapping_update` / `update_order_unknown`: the facts are shown, the check is not compared.
+
+A homepage that answers HTTP 500 twice after the update (REST unchanged; the REST check is shortened here as `{…}`, its sides have the same shape):
+
+```json
+"site_checks": {
+  "status": "complete",
+  "checks": {
+    "home": {
+      "state": "newly_failing",
+      "reason": null,
+      "before": {
+        "available": true, "reason": null,
+        "started_at": "2026-10-10T19:02:54Z", "completed_at": "2026-10-10T19:02:55Z",
+        "result": { "verdict": "pass", "reason": null, "attempts": [
+          { "outcome": "success", "status": 200, "header": "current", "end_marker": "current", "duration_ms": 284, "origin": "verified", "verdict": "pass", "reason": null }
+        ] },
+        "age_seconds": 0
+      },
+      "after": {
+        "available": true, "reason": null,
+        "started_at": "2026-10-10T19:02:56Z", "completed_at": "2026-10-10T19:03:02Z",
+        "result": { "verdict": "fail", "reason": "server_error", "attempts": [
+          { "outcome": "server_error", "status": 500, "header": "current", "end_marker": "absent", "duration_ms": 224, "origin": "verified", "verdict": "fail", "reason": "server_error" },
+          { "outcome": "server_error", "status": 500, "header": "current", "end_marker": "absent", "duration_ms": 219, "origin": "verified", "verdict": "fail", "reason": "server_error" }
+        ] },
+        "delay_seconds": 0
+      }
+    },
+    "rest": { "state": "passed_both", "reason": null, "before": {…}, "after": {…} }
+  }
+}
+```
+
+Incomplete: no REST baseline was attached, so only the homepage ran after the update:
+
+```json
+"site_checks": {
+  "status": "partial",
+  "checks": {
+    "home": { "state": "passed_both", "reason": null, "before": {…}, "after": {…} },
+    "rest": {
+      "state": "not_run",
+      "reason": "baseline_missing",
+      "before": { "available": false, "reason": "missing", "started_at": null, "completed_at": null, "result": null, "age_seconds": null },
+      "after": { "available": false, "reason": "no_baseline", "started_at": null, "completed_at": null, "result": null, "delay_seconds": null }
+    }
+  }
+}
+```
+
+A missing or late result is never a pass. UpdateLens cannot detect a complete site outage that also takes down `admin-ajax.php`: the browser then cannot report, and the check reads `not_reported`. Never included: URLs, markers, nonces, secrets, cookies, response bodies, headers, user IDs, login-session or target fingerprints, updater generations.
 
 ## `GET /updatelens/v1/baseline`
 

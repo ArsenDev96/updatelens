@@ -17,7 +17,13 @@
  * best-effort: `keepalive` lets it outlive the page in browsers that support
  * it, and if it is lost, the next eligible admin page (within the observation
  * window) still takes the observation.
+ *
+ * With site checks enabled (`siteChecks` in the settings), the response
+ * names the analyses this request settled; their AFTER site checks then run
+ * (afterChecks.ts), unless an update started meanwhile.
  */
+import { runSiteChecks } from '../site-check/runner';
+import { createAfterChecks, parseSettled } from './afterChecks';
 
 /** Settings printed by PHP (AdminAssets::enqueue_update_follow_up()). */
 export interface FollowUpSettings {
@@ -26,6 +32,8 @@ export interface FollowUpSettings {
 	nonce: string;
 	/** UpdateLens's own basename: its updates are never analysed. */
 	selfPlugin: string;
+	/** Only when site checks are enabled: the site check nonce for AFTER checks. */
+	siteChecks?: { nonce: string };
 }
 
 /** The parts of `wp.updates` the follow-up reads. */
@@ -104,12 +112,13 @@ export function isQueueIdle( updates: UpdatesState ): boolean {
  * @param fetchFn  `window.fetch`.
  * @param settings Settings from PHP.
  * @param plugins  Plugin basenames.
+ * @return The response's `data`, or null (failed, unreadable, page gone).
  */
 export function sendFollowUp(
 	fetchFn: typeof fetch,
 	settings: FollowUpSettings,
 	plugins: string[]
-): void {
+): Promise< unknown > {
 	const body = new URLSearchParams();
 	body.append( 'action', settings.action );
 	body.append( '_ajax_nonce', settings.nonce );
@@ -121,18 +130,29 @@ export function sendFollowUp(
 		body,
 	};
 
+	let request: Promise< Response >;
 	try {
-		fetchFn( settings.ajaxUrl, { ...init, keepalive: true } ).catch(
-			() => undefined
-		);
+		request = fetchFn( settings.ajaxUrl, { ...init, keepalive: true } );
 	} catch {
 		// A browser that rejects `keepalive` synchronously: send without it.
 		try {
-			fetchFn( settings.ajaxUrl, init ).catch( () => undefined );
+			request = fetchFn( settings.ajaxUrl, init );
 		} catch {
 			// Nothing else to do; a later admin page can still settle.
+			return Promise.resolve( null );
 		}
 	}
+
+	return Promise.resolve( request )
+		.then( ( response ) => ( response.ok ? response.json() : null ) )
+		.then( ( json: unknown ) =>
+			typeof json === 'object' &&
+			json !== null &&
+			( json as { success?: unknown } ).success === true
+				? ( ( json as { data?: unknown } ).data ?? null )
+				: null
+		)
+		.catch( () => null );
 }
 
 /** Minimal jQuery surface used for binding. */
@@ -163,8 +183,17 @@ function isSettings( value: unknown ): value is FollowUpSettings {
 	}
 	const settings = value as Record< string, unknown >;
 
-	return [ 'ajaxUrl', 'action', 'nonce', 'selfPlugin' ].every(
-		( key ) => typeof settings[ key ] === 'string'
+	const siteChecks = settings.siteChecks;
+
+	return (
+		[ 'ajaxUrl', 'action', 'nonce', 'selfPlugin' ].every(
+			( key ) => typeof settings[ key ] === 'string'
+		) &&
+		( siteChecks === undefined ||
+			( typeof siteChecks === 'object' &&
+				siteChecks !== null &&
+				typeof ( siteChecks as { nonce?: unknown } ).nonce ===
+					'string' ) )
 	);
 }
 
@@ -188,14 +217,36 @@ export function bindUpdateFollowUp( win: FollowUpWindow ): boolean {
 		return false;
 	}
 
+	const siteChecks = settings.siteChecks;
+	const afterChecks = siteChecks
+		? createAfterChecks( {
+				isIdle: () => isQueueIdle( updates ),
+				run: ( analysis, signal ) =>
+					runSiteChecks(
+						{ ajaxUrl: settings.ajaxUrl, nonce: siteChecks.nonce },
+						{
+							purpose: 'after',
+							analysis,
+							signal,
+							fetch: fetchFn.bind( win ),
+						}
+					),
+			} )
+		: null;
 	const followUp = createFollowUp( {
 		isIdle: () => isQueueIdle( updates ),
-		send: ( plugins ) =>
-			sendFollowUp( fetchFn.bind( win ), settings, plugins ),
+		send: ( plugins ) => {
+			const token = afterChecks?.followUpSent() ?? 0;
+			sendFollowUp( fetchFn.bind( win ), settings, plugins ).then(
+				( data ) => afterChecks?.settled( parseSettled( data ), token )
+			);
+		},
 		selfPlugin: settings.selfPlugin,
 	} );
 
 	const document = jQuery( win.document );
+	// An update that starts stops AFTER checks (they would overlap it anyway).
+	document.on( 'wp-plugin-updating', () => afterChecks?.updateStarted() );
 	document.on( 'wp-plugin-update-success', ( _event, response ) => {
 		followUp.pluginUpdated(
 			typeof response === 'object' && response !== null

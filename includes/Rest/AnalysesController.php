@@ -12,7 +12,11 @@ use UpdateLens\Core\Plugin;
 use UpdateLens\Report\AnalysisReadModel;
 use UpdateLens\Report\AnalysisReports;
 use UpdateLens\Report\PotentialImpact;
+use UpdateLens\Report\SiteCheckReport;
 use UpdateLens\Report\UnavailableReason;
+use UpdateLens\SiteCheck\AfterReason;
+use UpdateLens\SiteCheck\BeforeReason;
+use UpdateLens\SiteCheck\ComparisonState;
 use UpdateLens\Update\ObservationPhase;
 use WP_Error;
 use WP_REST_Controller;
@@ -145,6 +149,93 @@ final class AnalysesController extends WP_REST_Controller {
 							'before'   => array( 'type' => array( 'object', 'null' ) ),
 							'after'    => array( 'type' => 'object' ),
 						),
+					),
+				),
+			),
+		);
+	}
+
+	/**
+	 * Schema of the site check comparison (SiteCheckReport).
+	 *
+	 * @return array
+	 */
+	private static function site_checks_schema() {
+		$side    = static function ( array $reasons, $delay ) {
+			return array(
+				'type'       => 'object',
+				'properties' => array(
+					'available'    => array( 'type' => 'boolean' ),
+					'reason'       => array(
+						'type' => array( 'string', 'null' ),
+						'enum' => array_merge( $reasons, array( null ) ),
+					),
+					'started_at'   => array(
+						'type'   => array( 'string', 'null' ),
+						'format' => 'date-time',
+					),
+					'completed_at' => array(
+						'type'   => array( 'string', 'null' ),
+						'format' => 'date-time',
+					),
+					'result'       => array(
+						'description' => __( 'Verdict, its reason and the browser-observed facts of each attempt.', 'updatelens' ),
+						'type'        => array( 'object', 'null' ),
+					),
+					$delay         => array( 'type' => array( 'integer', 'null' ) ),
+				),
+			);
+		};
+		$reasons = array(
+			ComparisonState::BASELINE_MISSING,
+			ComparisonState::AFTER_MISSING,
+			ComparisonState::BOTH_MISSING,
+			ComparisonState::QUEUED_UPDATE,
+			ComparisonState::OVERLAPPING_UPDATE,
+			ComparisonState::UPDATE_ORDER_UNKNOWN,
+			ComparisonState::DEFINITION_CHANGED,
+			ComparisonState::TARGET_CHANGED,
+			ComparisonState::DIFFERENT_USER,
+			ComparisonState::DIFFERENT_LOGIN_SESSION,
+			ComparisonState::BASELINE_AFTER_UPDATE_START,
+			ComparisonState::BASELINE_EXPIRED,
+			ComparisonState::AFTER_DURING_UPDATE,
+			ComparisonState::BEFORE_INCONCLUSIVE,
+			ComparisonState::AFTER_INCONCLUSIVE,
+			ComparisonState::REDIRECTED_BOTH,
+		);
+		$check   = array(
+			'type'       => 'object',
+			'properties' => array(
+				'state'  => array(
+					'type' => 'string',
+					'enum' => SiteCheckReport::STATES,
+				),
+				'reason' => array(
+					'description' => __( 'Why the check was not compared (not_run, not_comparable); null otherwise.', 'updatelens' ),
+					'type'        => array( 'string', 'null' ),
+					'enum'        => array_merge( $reasons, array( null ) ),
+				),
+				'before' => $side( array_merge( BeforeReason::STORED, array( BeforeReason::NOT_CAPTURED, BeforeReason::DATA_CORRUPT, BeforeReason::UNKNOWN ) ), 'age_seconds' ),
+				'after'  => $side( AfterReason::ALL, 'delay_seconds' ),
+			),
+		);
+
+		return array(
+			'description' => __( 'Homepage and REST API checks before and after the update, compared per check: browser observations, not proven causes. Computed on every read.', 'updatelens' ),
+			'type'        => 'object',
+			'context'     => array( 'view' ),
+			'readonly'    => true,
+			'properties'  => array(
+				'status' => array(
+					'type' => 'string',
+					'enum' => array( SiteCheckReport::PENDING, SiteCheckReport::COMPLETE, SiteCheckReport::PARTIAL, SiteCheckReport::UNAVAILABLE ),
+				),
+				'checks' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'home' => $check,
+						'rest' => $check,
 					),
 				),
 			),
@@ -382,6 +473,7 @@ final class AnalysesController extends WP_REST_Controller {
 					),
 				),
 				'potential_impact'           => self::potential_impact_schema( $cron['properties']['reason']['enum'], $action_scheduler['properties']['reason']['enum'] ),
+				'site_checks'                => self::site_checks_schema(),
 			),
 		);
 

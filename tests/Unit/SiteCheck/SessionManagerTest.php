@@ -115,7 +115,7 @@ final class SessionManagerTest extends TestCase {
 	 * @return array Sessions by check.
 	 */
 	private function start( $purpose = 'before' ) {
-		$outcome = $this->manager->start( self::USER, self::LOGIN, $purpose, self::targets(), self::GENERATION );
+		$outcome = $this->manager->start( self::USER, self::LOGIN, $purpose, self::targets(), self::GENERATION, 'after' === $purpose ? 42 : null );
 		$this->assertSame( 'started', $outcome['code'] );
 
 		return $outcome['sessions'];
@@ -202,9 +202,24 @@ final class SessionManagerTest extends TestCase {
 				'created_at'  => self::T,
 				'expires_at'  => self::T + 120,
 				'generation'  => self::GENERATION,
+				'analysis'    => 42,
 			),
 			$session->to_array()
 		);
+
+		$this->time = self::T + 1.0;
+		$outcome    = $this->submit( $sessions['rest'], 'rest' );
+		$this->assertSame( array( 'accepted', 'after', 42 ), array( $outcome['code'], $outcome['purpose'], $outcome['analysis'] ), 'The result names its analysis.' );
+	}
+
+	/**
+	 * An AFTER session needs its analysis; a BEFORE session has none.
+	 */
+	public function test_after_sessions_need_an_analysis() {
+		foreach ( array( array( 'after', null ), array( 'after', 0 ), array( 'after', '42' ), array( 'before', 42 ) ) as $case ) {
+			$this->assertSame( array( 'code' => 'invalid_request' ), $this->manager->start( self::USER, self::LOGIN, $case[0], self::targets(), self::GENERATION, $case[1] ) );
+		}
+		$this->assertSame( array(), $this->store->values, 'Nothing stored.' );
 	}
 
 	/**
@@ -291,8 +306,8 @@ final class SessionManagerTest extends TestCase {
 		$this->time = self::T + 1.5;
 		$outcome    = $this->submit( $sessions['rest'], 'rest' );
 
-		$this->assertSame( array( 'code', 'check', 'purpose', 'result' ), array_keys( $outcome ) );
-		$this->assertSame( array( 'accepted', 'rest', 'before' ), array( $outcome['code'], $outcome['check'], $outcome['purpose'] ) );
+		$this->assertSame( array( 'code', 'check', 'purpose', 'analysis', 'result' ), array_keys( $outcome ) );
+		$this->assertSame( array( 'accepted', 'rest', 'before', null ), array( $outcome['code'], $outcome['check'], $outcome['purpose'], $outcome['analysis'] ) );
 		$result = $outcome['result'];
 		$this->assertSame( array( 'pass', null ), array( $result->get_verdict(), $result->get_reason() ) );
 		$this->assertSame( array( self::T, self::T + 1.5 ), array( $result->get_started_at(), $result->get_completed_at() ) );

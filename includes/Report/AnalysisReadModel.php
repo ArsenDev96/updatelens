@@ -157,13 +157,25 @@ final class AnalysisReadModel {
 	private $potential_impact;
 
 	/**
-	 * Constructor.
+	 * Clock for site check states that depend on time (pending): function (): float.
+	 *
+	 * @var callable
 	 */
-	public function __construct() {
+	private $now;
+
+	/**
+	 * Constructor.
+	 *
+	 * @param callable|null $now Clock (Unix seconds). Default microtime( true ).
+	 */
+	public function __construct( ?callable $now = null ) {
 		$this->diff_codec                  = new OptionsDiffCodec();
 		$this->cron_diff_codec             = new CronDiffCodec();
 		$this->action_scheduler_diff_codec = new ActionSchedulerDiffCodec();
 		$this->potential_impact            = new PotentialImpact();
+		$this->now                         = null === $now ? static function () {
+			return microtime( true );
+		} : $now;
 	}
 
 	/**
@@ -227,6 +239,8 @@ final class AnalysisReadModel {
 	 *
 	 * `potential_impact` is evaluated on the Net result phase built here (the
 	 * diffs decoded once for the report), on every read; it is never stored.
+	 * `site_checks` (SiteCheckReport) compares the stored BEFORE and AFTER
+	 * site check results on every read; it is not part of Potential Impact.
 	 * Action Scheduler is not applicable only when every phase stored
 	 * `not_installed_throughout` (absent at all three captures); older rows'
 	 * `not_installed` cannot show that.
@@ -277,6 +291,7 @@ final class AnalysisReadModel {
 			'observation_window_seconds' => PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS,
 			'phases'                     => $phases,
 			'potential_impact'           => $this->potential_impact->evaluate( $phases, $absent ),
+			'site_checks'                => SiteCheckReport::build( $row, (float) call_user_func( $this->now ) ),
 			'error'                      => $metadata['error'],
 		);
 	}

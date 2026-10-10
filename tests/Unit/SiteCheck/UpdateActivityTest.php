@@ -113,15 +113,40 @@ final class UpdateActivityTest extends TestCase {
 		$this->assertNull( $this->activity->quiet_generation(), 'No baseline generation while an update runs.' );
 		$this->assertSame( array( $token => $this->now ), $this->state()['running'] );
 
-		// Another download in the same request (bulk update, translations).
-		$again = $this->activity->begin( $token );
+		// Another download in the same request (bulk update, translations): no write.
+		$this->now += 2.0;
+		$writes     = $this->store->writes;
+		$again      = $this->activity->begin( $token );
 		$this->assertSame( array( '0123456789abcdef:1', false ), array( $again['generation'], $again['others_running'] ) );
-		$this->assertSame( array( $token => $this->now ), $this->state()['running'], 'The first start is kept.' );
+		$this->assertSame( $writes, $this->store->writes );
+		$this->assertSame( array( $token => $this->now - 2.0 ), $this->state()['running'], 'The first start is kept.' );
+		$this->assertSame(
+			array(
+				'generation' => '0123456789abcdef:1',
+				'running'    => true,
+			),
+			$this->activity->current()
+		);
 
 		$this->assertTrue( $this->activity->end( $token ) );
 		$this->assertFalse( $this->activity->end( $token ), 'Ended once.' );
-		$this->assertSame( '0123456789abcdef:3', $this->activity->quiet_generation() );
+		$this->assertSame( '0123456789abcdef:2', $this->activity->quiet_generation() );
+		$this->assertSame( UpdateActivity::advance( $generation, 2 ), $this->activity->quiet_generation(), 'One request moves the sequence exactly twice.' );
 		$this->assertNotSame( $generation, $this->activity->quiet_generation(), 'Any update makes older generations unusable.' );
+	}
+
+	/**
+	 * Generations two changes later (advance()) and epochs (same_epoch()).
+	 */
+	public function test_advance_and_epochs() {
+		$this->assertSame( '0123456789abcdef:7', UpdateActivity::advance( '0123456789abcdef:5', 2 ) );
+		$this->assertSame( '0123456789abcdef:2', UpdateActivity::advance( '0123456789abcdef:0', 2 ) );
+		$this->assertNull( UpdateActivity::advance( '0123456789abcdef:' . UpdateActivityCodec::MAX_SEQUENCE, 2 ), 'Overflow.' );
+		$this->assertNull( UpdateActivity::advance( 'nope', 2 ) );
+		$this->assertNull( UpdateActivity::advance( null, 2 ) );
+		$this->assertTrue( UpdateActivity::same_epoch( '0123456789abcdef:1', '0123456789abcdef:9' ) );
+		$this->assertFalse( UpdateActivity::same_epoch( '0123456789abcdef:1', 'fedcba9876543210:1' ) );
+		$this->assertFalse( UpdateActivity::same_epoch( '0123456789abcdef:1', null ) );
 	}
 
 	/**

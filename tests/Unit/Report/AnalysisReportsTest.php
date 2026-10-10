@@ -372,7 +372,7 @@ final class AnalysisReportsTest extends TestCase {
 		$codec  = new OptionsDiffCodec();
 		$report = $this->reports()->report( 1 );
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'error' ), array_keys( $report ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'site_checks', 'error' ), array_keys( $report ) );
 		$this->assertSame( 1, $report['id'] );
 		$this->assertSame( 'completed', $report['status'] );
 		$this->assertSame( 'admin_shutdown', $report['settle_outcome'] );
@@ -808,7 +808,7 @@ final class AnalysisReportsTest extends TestCase {
 		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
 		$report = $this->reports()->report( 1 );
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'error' ), array_keys( $report ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'observation_window_seconds', 'phases', 'potential_impact', 'site_checks', 'error' ), array_keys( $report ) );
 		$this->assertSame( PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS, $report['observation_window_seconds'] );
 		$this->assertSame(
 			array_fill_keys(

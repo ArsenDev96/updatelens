@@ -11,11 +11,18 @@ import type {
 	Provider,
 	RecurringCronEventRemovedFinding,
 } from '@/admin/types/api';
-import { formatBytes, formatCount } from '@/admin/utils/format';
 import {
+	formatBytes,
+	formatBytesDelta,
+	formatCount,
+	keepTogether,
+} from '@/admin/utils/format';
+import {
+	autoloadedBytes,
 	groupFacts,
 	groupFindings,
 	groupSummary,
+	thresholdText,
 	whatToCheck,
 	whyItMatters,
 } from '@/admin/utils/impact';
@@ -182,11 +189,12 @@ describe( 'Potential Impact', () => {
 				name: 'Large autoloaded options, 2 findings',
 			} )
 		).toHaveAccessibleDescription(
-			// The combined current size and how much larger it is than before
-			// (the option that became autoloaded kept its size).
-			`Now ${ formatBytes( 182340 + 163000 ) } combined, ${ formatBytes(
-				163000
-			) } more than before the update. Check whether they need to load on every page.`
+			// Stored data now autoloaded across the options: one became
+			// autoloaded without growing, one was added; neither was
+			// autoloaded before.
+			`Now autoloaded across these options: ${ keepTogether(
+				formatBytes( 182340 + 163000 )
+			) }, all newly autoloaded. Check whether they need to load on every page.`
 		);
 
 		const [ options, removed, cron, actionScheduler ] = groups();
@@ -970,9 +978,9 @@ describe( 'Potential Impact', () => {
 			expect( rows( options ) ).toHaveLength( 0 );
 			expect( rows( cron ) ).toHaveLength( 0 );
 			expect( options ).toHaveTextContent(
-				`Now ${ formatBytes(
+				`Now autoloaded across these options: ${ formatBytes(
 					1200 * 163000
-				) } combined; none were present before the update. Check whether they need to load on every page.`
+				) }, all newly autoloaded. Check whether they need to load on every page.`
 			);
 			expect( cron ).toHaveTextContent(
 				'300 recurring instances are no longer observed. Check whether these hooks are still scheduled.'
@@ -990,14 +998,42 @@ describe( 'Potential Impact', () => {
 					name: 'Why it might matter',
 				} )
 			).toHaveLength( 1 );
+			expect(
+				within(
+					within( options )
+						.getAllByRole( 'term' )[ 0 ]
+						.closest( 'dl' )!
+				)
+					.getAllByRole( 'definition' )
+					.map( ( value ) => value.textContent )
+			).toEqual( [
+				keepTogether( formatBytes( 1200 * 163000 ) ),
+				keepTogether( formatBytes( 0 ) ),
+				keepTogether( formatBytesDelta( 1200 * 163000 ) ),
+			] );
+			expect(
+				within( options )
+					.getAllByRole( 'term' )
+					.map( ( label ) => label.textContent )
+			).toEqual( [
+				'Now autoloaded across these options',
+				'Autoloaded before the update',
+				'Change in autoloaded stored data',
+				// Then the first finding row's own details.
+				'Size',
+				'Autoload',
+				'Review size',
+				'Size',
+				'Autoload',
+				'Review size',
+				'Size',
+				'Autoload',
+				'Review size',
+			] );
 			expect( options ).toHaveTextContent(
-				`Combined size now: ${ formatBytes(
-					1200 * 163000
-				) }. Combined size before the update: ${ formatBytes(
-					0
-				) }. ${ formatCount(
+				`${ formatCount(
 					1200
-				) } of these options were not present before the update and count as zero there.`
+				) } of these options were not present before the update and count as zero there. These figures cover only these options, not the site’s total autoloaded data or memory use.`
 			);
 			expect( options ).toHaveTextContent(
 				'Large autoloaded options add to that work'
@@ -1232,33 +1268,239 @@ describe( 'Potential Impact group wording', () => {
 		);
 	} );
 
-	it( 'keeps collapsed lines short: current size apart from the increase', () => {
-		expect( groupSummary( group( GREW ) ) ).toBe(
-			`Now ${ formatBytes( 180000 ) }, ${ formatBytes(
-				40000
-			) } more than before the update. Check whether it needs to load on every page.`
-		);
-		expect( groupSummary( group( LARGE_ADDED ) ) ).toBe(
-			`Now ${ formatBytes(
-				163000
-			) }; not present before the update. Check whether it needs to load on every page.`
-		);
-		expect( groupSummary( group( LARGE_BECAME ) ) ).toBe(
-			`Now ${ formatBytes(
-				182340
-			) } and autoloaded. Check whether it needs to load on every page.`
-		);
-		// Several: the combined size now and its increase, both named.
-		expect( groupSummary( group( GREW, LARGE_ADDED ) ) ).toBe(
-			`Now ${ formatBytes( 180000 + 163000 ) } combined, ${ formatBytes(
-				40000 + 163000
-			) } more than before the update. Check whether they need to load on every page.`
-		);
-		expect( groupSummary( group( LARGE_BECAME, LARGE_BECAME ) ) ).toBe(
-			`Now ${ formatBytes(
-				2 * 182340
-			) } combined. Check whether they need to load on every page.`
-		);
+	/**
+	 * A size as the summaries write it: number and unit kept together.
+	 *
+	 * @param bytes  Bytes.
+	 * @param digits Maximum decimals.
+	 */
+	const size = ( bytes: number, digits?: number ) =>
+		keepTogether( formatBytes( bytes, undefined, digits ) );
+
+	/**
+	 * A large-option finding with the given sizes and autoload flags.
+	 *
+	 * @param option Option name.
+	 * @param before Size and effective autoload before, or null (added).
+	 * @param after  Size now (autoloaded).
+	 */
+	const option = (
+		option: string,
+		before: [ number, boolean ] | null,
+		after: number
+	): LargeAutoloadedOptionFinding => ( {
+		code: 'large_autoloaded_option',
+		signal: 'options',
+		option,
+		evidence: {
+			transition:
+				before === null
+					? 'added'
+					: before[ 1 ]
+						? 'grew_past_threshold'
+						: 'became_autoloaded',
+			threshold_bytes: 150000,
+			size_delta: before === null ? null : after - before[ 0 ],
+			value_changed: before === null ? null : after !== before[ 0 ],
+		},
+		before:
+			before === null
+				? null
+				: {
+						size: before[ 0 ],
+						autoload: before[ 1 ] ? 'on' : 'off',
+						is_autoloaded: before[ 1 ],
+					},
+		after: { size: after, autoload: 'on', is_autoloaded: true },
+	} );
+
+	describe( 'autoloaded stored data of large options', () => {
+		it( 'counts an option that switched from off to on without growing as newly autoloaded', () => {
+			// LARGE_BECAME: 182,340 bytes before and after, autoload off → on.
+			expect( autoloadedBytes( group( LARGE_BECAME ) ) ).toEqual( {
+				before: 0,
+				after: 182340,
+				storedBefore: 182340,
+				storedAfter: 182340,
+				added: 0,
+				becameAutoloaded: 1,
+			} );
+			expect( groupSummary( group( LARGE_BECAME ) ) ).toBe(
+				`Now autoloaded: ${ size(
+					182340
+				) }; not autoloaded before the update. Check whether it needs to load on every page.`
+			);
+			// Two of them: the stored size did not change, the autoloaded
+			// data grew by their whole size.
+			const switched = group(
+				LARGE_BECAME,
+				option( 'acme_other', [ 170000, false ], 170000 )
+			);
+			expect( groupSummary( switched ) ).toBe(
+				`Now autoloaded across these options: ${ size(
+					352340
+				) }, all newly autoloaded. Check whether they need to load on every page.`
+			);
+			expect( groupFacts( switched ).rows ).toEqual( [
+				[ 'Now autoloaded across these options', size( 352340 ) ],
+				[ 'Autoloaded before the update', size( 0 ) ],
+				[
+					'Change in autoloaded stored data',
+					keepTogether( formatBytesDelta( 352340 ) ),
+				],
+				[
+					'Stored size before the update, autoloaded or not',
+					size( 352340 ),
+				],
+			] );
+		} );
+
+		it( 'counts the growth of an option that was already autoloaded', () => {
+			expect( autoloadedBytes( group( GREW ) ) ).toMatchObject( {
+				before: 140000,
+				after: 180000,
+				storedBefore: 140000,
+			} );
+			expect( groupSummary( group( GREW ) ) ).toBe(
+				`Now autoloaded: ${ size( 180000 ) }, up ${ size(
+					40000
+				) }. Check whether it needs to load on every page.`
+			);
+			const grown = group(
+				GREW,
+				option( 'acme_more', [ 100000, true ], 160000 )
+			);
+			expect( groupSummary( grown ) ).toBe(
+				`Now autoloaded across these options: ${ size(
+					340000
+				) }, up ${ size(
+					100000
+				) }. Check whether they need to load on every page.`
+			);
+			// Stored and autoloaded sizes agree: no extra stored-size row.
+			expect( groupFacts( grown ).rows ).toHaveLength( 3 );
+		} );
+
+		it( 'counts a newly added option as zero before the update', () => {
+			expect( autoloadedBytes( group( LARGE_ADDED ) ) ).toMatchObject( {
+				before: 0,
+				after: 163000,
+				storedBefore: 0,
+				added: 1,
+			} );
+			expect( groupSummary( group( LARGE_ADDED ) ) ).toBe(
+				`Now autoloaded: ${ size(
+					163000
+				) }; not present before the update. Check whether it needs to load on every page.`
+			);
+		} );
+
+		it( 'combines all three transitions in one group', () => {
+			const mixed = group( GREW, LARGE_ADDED, LARGE_BECAME );
+			// Autoloaded before: only GREW (140,000). Now: 180,000 + 163,000
+			// + 182,340. Stored before: 140,000 + 182,340 (added counts 0).
+			expect( autoloadedBytes( mixed ) ).toEqual( {
+				before: 140000,
+				after: 525340,
+				storedBefore: 322340,
+				storedAfter: 525340,
+				added: 1,
+				becameAutoloaded: 1,
+			} );
+			expect( groupSummary( mixed ) ).toBe(
+				`Now autoloaded across these options: ${ size(
+					525340
+				) }, up ${ size(
+					385340
+				) }. Check whether they need to load on every page.`
+			);
+			expect( groupFacts( mixed ) ).toEqual( {
+				rows: [
+					[ 'Now autoloaded across these options', size( 525340 ) ],
+					[ 'Autoloaded before the update', size( 140000 ) ],
+					[
+						'Change in autoloaded stored data',
+						keepTogether( formatBytesDelta( 385340 ) ),
+					],
+					[
+						'Stored size before the update, autoloaded or not',
+						size( 322340 ),
+					],
+				],
+				notes: [
+					'1 of these options was not present before the update and counts as zero there.',
+					'1 of these options existed before without autoload; its stored size counts as autoloaded only after the update.',
+					'These figures cover only these options, not the site’s total autoloaded data or memory use.',
+				],
+			} );
+		} );
+
+		it( 'avoids comparisons that round to the same value', () => {
+			// Almost nothing autoloaded before: "up 8.7 MB" would repeat the
+			// current size, so the line says what it was before.
+			const tiny = option( 'acme_tiny', [ 244, true ], 9123456 );
+			expect( groupSummary( group( tiny ) ) ).toBe(
+				`Now autoloaded: ${ size( 9123456 ) }, up from ${ size(
+					244
+				) }. Check whether it needs to load on every page.`
+			);
+			expect(
+				groupSummary(
+					group(
+						tiny,
+						option( 'acme_tiny_2', [ 100, true ], 160000 )
+					)
+				)
+			).toBe(
+				`Now autoloaded across these options: ${ size(
+					9123456 + 160000
+				) }, up from ${ size(
+					344
+				) }. Check whether they need to load on every page.`
+			);
+
+			// Close values: the small change is exact, not "146.5 KB → 146.5 KB".
+			const close = option( 'acme_close', [ 149990, true ], 150010 );
+			expect( groupSummary( group( close ) ) ).toBe(
+				`Now autoloaded: ${ size( 150010 ) }, up ${ size(
+					20
+				) }. Check whether it needs to load on every page.`
+			);
+			const pair = group(
+				option( 'acme_a', [ 150000, true ], 150010 ),
+				option( 'acme_b', [ 150000, true ], 150010 )
+			);
+			// Before and after would both show "293 KB": two decimals.
+			expect( formatBytes( 300000 ) ).toBe( formatBytes( 300020 ) );
+			expect( groupFacts( pair ).rows ).toEqual( [
+				[ 'Now autoloaded across these options', size( 300020, 2 ) ],
+				[ 'Autoloaded before the update', size( 300000, 2 ) ],
+				[
+					'Change in autoloaded stored data',
+					keepTogether( formatBytesDelta( 20 ) ),
+				],
+			] );
+		} );
+
+		it( 'keeps numbers and units together for narrow rows', () => {
+			const texts = [
+				groupSummary( group( GREW ) ),
+				groupSummary( group( GREW, LARGE_ADDED, LARGE_BECAME ) ),
+				...groupFacts(
+					group( GREW, LARGE_ADDED, LARGE_BECAME )
+				).rows.map( ( [ , value ] ) => value ),
+				thresholdText( 150000 ),
+			];
+			for ( const text of texts ) {
+				// No breakable space between a number and its unit.
+				expect( text ).not.toMatch( /\d \S*B\b/ );
+				expect( text ).toMatch( /\d\u00a0(B|KB|MB)\b/ );
+			}
+			expect( keepTogether( '+196.8 KB' ) ).toBe( '+196.8\u00a0KB' );
+		} );
+	} );
+
+	it( 'keeps collapsed lines short', () => {
 		expect( groupSummary( group( CRON_REMOVED, TWO_REMOVED ) ) ).toBe(
 			'3 recurring instances are no longer observed. Check whether these hooks are still scheduled.'
 		);
@@ -1272,37 +1514,33 @@ describe( 'Potential Impact group wording', () => {
 			[ LARGE_ADDED ],
 			[ LARGE_BECAME ],
 			[ GREW, LARGE_ADDED, LARGE_BECAME ],
+			[ LARGE_ADDED, LARGE_ADDED ],
 			[ CRON_REMOVED ],
 			[ CRON_REMOVED, TWO_REMOVED ],
 			[ CRON_INTERVAL ],
 			[ AS_TYPE_CHANGED ],
 		] ) {
 			const summary = groupSummary( group( ...findings ) );
-			expect( summary.length ).toBeLessThanOrEqual( 110 );
+			expect( summary.length ).toBeLessThanOrEqual( 115 );
 			expect( summary ).not.toContain( 'review size' );
 		}
 	} );
 
 	it( 'moves the longer facts of several findings into the details', () => {
-		expect( groupFacts( group( LARGE_ADDED ) ) ).toEqual( [] );
-		expect(
-			groupFacts( group( GREW, LARGE_ADDED, LARGE_BECAME ) )
-		).toEqual( [
-			`Combined size now: ${ formatBytes(
-				180000 + 163000 + 182340
-			) }. Combined size before the update: ${ formatBytes(
-				140000 + 182340
-			) }.`,
-			'1 of these options was not present before the update and counts as zero there.',
-			'1 of these options existed before but was not autoloaded; its whole size is now loaded on every page.',
-		] );
-		expect( groupFacts( group( CRON_REMOVED, TWO_REMOVED ) ) ).toEqual( [
-			'3 recurring instances scheduled before the update were not observed after it, across 2 hooks.',
-		] );
+		expect( groupFacts( group( LARGE_ADDED ) ) ).toEqual( {
+			rows: [],
+			notes: [],
+		} );
+		expect( groupFacts( group( CRON_REMOVED, TWO_REMOVED ) ) ).toEqual( {
+			rows: [],
+			notes: [
+				'3 recurring instances scheduled before the update were not observed after it, across 2 hooks.',
+			],
+		} );
 		expect(
 			groupFacts(
 				group( CRON_INTERVAL, { ...CRON_INTERVAL, hook: 'other_job' } )
 			)
-		).toEqual( [] );
+		).toEqual( { rows: [], notes: [] } );
 	} );
 } );

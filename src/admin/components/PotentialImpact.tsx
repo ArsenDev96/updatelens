@@ -26,6 +26,7 @@ import {
 	formatBytesPair,
 	formatCount,
 	formatDuration,
+	keepTogether,
 } from '../utils/format';
 import {
 	checkedPatterns,
@@ -625,9 +626,12 @@ function GroupDetails( {
 				<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
 					{ __( 'What changed', 'updatelens' ) }
 				</h5>
-				{ facts.length > 0 && (
-					<p className="mt-1 text-[13px] leading-5 text-slate-600">
-						{ facts.join( ' ' ) }
+				{ facts.rows.length > 0 && (
+					<RowDetails boxed rows={ facts.rows } />
+				) }
+				{ facts.notes.length > 0 && (
+					<p className="mt-1.5 text-[13px] leading-5 text-slate-600">
+						{ facts.notes.join( ' ' ) }
 					</p>
 				) }
 			</div>
@@ -815,14 +819,17 @@ function evidenceRows(
 			if ( before === null ) {
 				rows.push( [
 					__( 'Size', 'updatelens' ),
-					formatBytes( after.size ),
+					keepTogether( formatBytes( after.size ) ),
 				] );
 				rows.push( [
 					__( 'Autoload', 'updatelens' ),
 					autoloadText( after.autoload, after.is_autoloaded ),
 				] );
 			} else {
-				const [ from, to ] = formatBytesPair( before.size, after.size );
+				const [ from, to ] = formatBytesPair(
+					before.size,
+					after.size
+				).map( keepTogether );
 				rows.push( [
 					__( 'Size', 'updatelens' ),
 					before.size === after.size ? (
@@ -839,7 +846,10 @@ function evidenceRows(
 							{ to }
 							{ evidence.size_delta !== null && (
 								<span className="ml-1.5 tabular-nums text-muted-foreground">
-									({ formatBytesDelta( evidence.size_delta ) }
+									(
+									{ keepTogether(
+										formatBytesDelta( evidence.size_delta )
+									) }
 									)
 								</span>
 							) }

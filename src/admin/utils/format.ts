@@ -50,6 +50,17 @@ export function formatBytes(
 }
 
 /**
+ * A formatted value whose parts must stay on one line ("196.8 KB", "+2 KB"):
+ * its spaces become no-break spaces, so a narrow row never wraps between the
+ * number and the unit.
+ *
+ * @param text Formatted value, e.g. from `formatBytes()`.
+ */
+export function keepTogether( text: string ): string {
+	return text.replace( / /g, '\u00a0' );
+}
+
+/**
  * Before and after sizes for "before → after". When different sizes would
  * look the same at one decimal ("6 KB → 6 KB"), both get two decimals
  * ("6.02 KB → 6.08 KB"); the exact delta is shown separately.

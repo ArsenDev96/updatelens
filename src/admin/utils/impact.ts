@@ -7,7 +7,13 @@ import type {
 	Provider,
 	ScheduleChange,
 } from '../types/api';
-import { formatBytes, formatCount } from './format';
+import {
+	formatBytes,
+	formatBytesDelta,
+	formatBytesPair,
+	formatCount,
+	keepTogether,
+} from './format';
 import {
 	actionSchedulerUnavailableReasonText,
 	cronUnavailableReasonText,
@@ -111,7 +117,7 @@ export function thresholdText( bytes: number ): string {
 		/* translators: 1: exact number of bytes, e.g. "150,000". 2: the same size in KB, e.g. "146.5 KB". */
 		__( '%1$s bytes (%2$s)', 'updatelens' ),
 		formatCount( bytes ),
-		formatBytes( bytes )
+		keepTogether( formatBytes( bytes ) )
 	);
 }
 
@@ -817,10 +823,10 @@ export function groupSubjects(
 
 /**
  * One short, actionable line for a collapsed group, from its evidence: the
- * current size and how much it grew (options), the instances no longer
- * observed (WP-Cron removals) or the kind of schedule change. Longer
- * explanations are in the expanded group (`groupFacts()`, the rows, "Why it
- * might matter").
+ * stored data now autoloaded and how it compares with before (options), the
+ * instances no longer observed (WP-Cron removals) or the kind of schedule
+ * change. Longer explanations are in the expanded group (`groupFacts()`, the
+ * rows, "Why it might matter").
  *
  * @param group Findings of one rule and signal.
  */
@@ -835,38 +841,11 @@ export function groupSummary( group: FindingGroup ): string {
 				count,
 				'updatelens'
 			);
-			if ( count === 1 ) {
-				return `${ optionSizeText( first ) } ${ check }`;
-			}
-			const sizes = optionSizes( group );
-			let text: string;
-			if ( sizes.added === count ) {
-				text = sprintf(
-					/* translators: %s: combined current size of the options, e.g. "512.3 KB". */
-					__(
-						'Now %s combined; none were present before the update.',
-						'updatelens'
-					),
-					formatBytes( sizes.after )
-				);
-			} else if ( sizes.after > sizes.before ) {
-				text = sprintf(
-					/* translators: 1: combined current size of the options, e.g. "512.3 KB". 2: how much larger they are than before the update, e.g. "159.2 KB". */
-					__(
-						'Now %1$s combined, %2$s more than before the update.',
-						'updatelens'
-					),
-					formatBytes( sizes.after ),
-					formatBytes( sizes.after - sizes.before )
-				);
-			} else {
-				text = sprintf(
-					/* translators: %s: combined current size of the options, e.g. "512.3 KB". */
-					__( 'Now %s combined.', 'updatelens' ),
-					formatBytes( sizes.after )
-				);
-			}
-			return `${ text } ${ check }`;
+			return `${
+				count === 1
+					? optionAutoloadText( first )
+					: groupAutoloadText( group )
+			} ${ check }`;
 		}
 		case 'recurring_cron_event_removed': {
 			const removed = removedInstances( group );
@@ -911,65 +890,109 @@ export function groupSummary( group: FindingGroup ): string {
 	}
 }
 
+/** Longer facts of an expanded group: labelled values and plain notes. */
+export interface GroupFacts {
+	rows: Array< [ string, string ] >;
+	notes: string[];
+}
+
 /**
  * The longer facts about a group of several findings, shown above its rows
- * once expanded: combined sizes before and after (options) or the instances
- * per hooks (WP-Cron removals). Nothing for one finding, whose row says it.
+ * once expanded: autoloaded and stored bytes before and after (options) or
+ * the instances per hooks (WP-Cron removals). Nothing for one finding, whose
+ * row says it.
  *
  * @param group Findings of one rule and signal.
  */
-export function groupFacts( group: FindingGroup ): string[] {
+export function groupFacts( group: FindingGroup ): GroupFacts {
 	const count = group.findings.length;
+	const facts: GroupFacts = { rows: [], notes: [] };
 	if ( count < 2 ) {
-		return [];
+		return facts;
 	}
 	switch ( group.code ) {
 		case 'large_autoloaded_option': {
-			const sizes = optionSizes( group );
-			const facts: string[] = [
-				sprintf(
-					/* translators: 1: combined current size of the options, e.g. "512.3 KB". 2: their combined size before the update, e.g. "353.1 KB". */
+			const bytes = autoloadedBytes( group );
+			const [ before, after ] = formatBytesPair(
+				bytes.before,
+				bytes.after
+			);
+			facts.rows.push(
+				[
+					__( 'Now autoloaded across these options', 'updatelens' ),
+					keepTogether( after ),
+				],
+				[
+					__( 'Autoloaded before the update', 'updatelens' ),
+					keepTogether( before ),
+				],
+				[
+					__( 'Change in autoloaded stored data', 'updatelens' ),
+					keepTogether(
+						formatBytesDelta( bytes.after - bytes.before )
+					),
+				]
+			);
+			// Stored sizes only when they tell something else (an option
+			// that was not autoloaded before).
+			const [ storedBefore, storedAfter ] = formatBytesPair(
+				bytes.storedBefore,
+				bytes.storedAfter
+			);
+			if ( bytes.storedBefore !== bytes.before ) {
+				facts.rows.push( [
 					__(
-						'Combined size now: %1$s. Combined size before the update: %2$s.',
+						'Stored size before the update, autoloaded or not',
 						'updatelens'
 					),
-					formatBytes( sizes.after ),
-					formatBytes( sizes.before )
-				),
-			];
-			if ( sizes.added > 0 ) {
-				facts.push(
+					keepTogether( storedBefore ),
+				] );
+			}
+			if ( bytes.storedAfter !== bytes.after ) {
+				facts.rows.push( [
+					__( 'Stored size now, autoloaded or not', 'updatelens' ),
+					keepTogether( storedAfter ),
+				] );
+			}
+			if ( bytes.added > 0 ) {
+				facts.notes.push(
 					sprintf(
 						/* translators: %s: number of options. */
 						_n(
 							'%s of these options was not present before the update and counts as zero there.',
 							'%s of these options were not present before the update and count as zero there.',
-							sizes.added,
+							bytes.added,
 							'updatelens'
 						),
-						formatCount( sizes.added )
+						formatCount( bytes.added )
 					)
 				);
 			}
-			if ( sizes.becameAutoloaded > 0 ) {
-				facts.push(
+			if ( bytes.becameAutoloaded > 0 ) {
+				facts.notes.push(
 					sprintf(
 						/* translators: %s: number of options. */
 						_n(
-							'%s of these options existed before but was not autoloaded; its whole size is now loaded on every page.',
-							'%s of these options existed before but were not autoloaded; their whole size is now loaded on every page.',
-							sizes.becameAutoloaded,
+							'%s of these options existed before without autoload; its stored size counts as autoloaded only after the update.',
+							'%s of these options existed before without autoload; their stored size counts as autoloaded only after the update.',
+							bytes.becameAutoloaded,
 							'updatelens'
 						),
-						formatCount( sizes.becameAutoloaded )
+						formatCount( bytes.becameAutoloaded )
 					)
 				);
 			}
+			facts.notes.push(
+				__(
+					'These figures cover only these options, not the site’s total autoloaded data or memory use.',
+					'updatelens'
+				)
+			);
 			return facts;
 		}
 		case 'recurring_cron_event_removed': {
 			const removed = removedInstances( group );
-			return [
+			facts.notes.push(
 				sprintf(
 					/* translators: 1: number of recurring WP-Cron event instances. 2: number of hooks. */
 					_n(
@@ -980,73 +1003,184 @@ export function groupFacts( group: FindingGroup ): string[] {
 					),
 					formatCount( removed ),
 					formatCount( count )
-				),
-			];
+				)
+			);
+			return facts;
 		}
 		case 'recurring_schedule_changed':
-			return [];
+			return facts;
 	}
 }
 
 /**
- * Current size of one large option and how it compares with before.
+ * How autoloaded stored data compares with before: by how much it grew, from
+ * what (when the change would round to the current value, e.g. "8.7 MB, up
+ * 8.7 MB"), all new, or not at all.
+ *
+ * @param after  Autoloaded bytes now.
+ * @param before Autoloaded bytes before the update.
+ */
+function autoloadComparison(
+	after: number,
+	before: number
+): 'new' | 'from' | 'by' | 'none' {
+	if ( after <= before ) {
+		return 'none';
+	}
+	if ( before === 0 ) {
+		return 'new';
+	}
+	return formatBytes( after - before ) === formatBytes( after )
+		? 'from'
+		: 'by';
+}
+
+/**
+ * Collapsed line of one large option: its stored size now autoloaded and how
+ * that compares with before.
  *
  * @param finding Large-option finding.
  */
-function optionSizeText( finding: LargeAutoloadedOptionFinding ): string {
-	const size = formatBytes( finding.after.size );
-	switch ( finding.evidence.transition ) {
-		case 'added':
+function optionAutoloadText( finding: LargeAutoloadedOptionFinding ): string {
+	const after = finding.after.is_autoloaded ? finding.after.size : 0;
+	if ( finding.before === null ) {
+		return sprintf(
+			/* translators: %s: stored size now autoloaded, e.g. "178.1 KB". */
+			__(
+				'Now autoloaded: %s; not present before the update.',
+				'updatelens'
+			),
+			keepTogether( formatBytes( after ) )
+		);
+	}
+	if ( ! finding.before.is_autoloaded ) {
+		return sprintf(
+			/* translators: %s: stored size now autoloaded, e.g. "178.1 KB". */
+			__(
+				'Now autoloaded: %s; not autoloaded before the update.',
+				'updatelens'
+			),
+			keepTogether( formatBytes( after ) )
+		);
+	}
+	const before = finding.before.size;
+	switch ( autoloadComparison( after, before ) ) {
+		case 'from':
 			return sprintf(
-				/* translators: %s: option size, e.g. "178.1 KB". */
-				__( 'Now %s; not present before the update.', 'updatelens' ),
-				size
+				/* translators: 1: stored size now autoloaded, e.g. "178.1 KB". 2: autoloaded before the update, e.g. "244 B". */
+				__( 'Now autoloaded: %1$s, up from %2$s.', 'updatelens' ),
+				keepTogether( formatBytes( after ) ),
+				keepTogether( formatBytes( before ) )
 			);
-		case 'became_autoloaded':
+		case 'by':
 			return sprintf(
-				/* translators: %s: option size, e.g. "178.1 KB". */
-				__( 'Now %s and autoloaded.', 'updatelens' ),
-				size
+				/* translators: 1: stored size now autoloaded, e.g. "178.1 KB". 2: increase since before the update, e.g. "32.4 KB". */
+				__( 'Now autoloaded: %1$s, up %2$s.', 'updatelens' ),
+				keepTogether( formatBytes( after ) ),
+				keepTogether( formatBytes( after - before ) )
 			);
-		case 'grew_past_threshold':
+		default:
 			return sprintf(
-				/* translators: 1: option size, e.g. "178.1 KB". 2: how much larger it is than before the update, e.g. "32.4 KB". */
-				__(
-					'Now %1$s, %2$s more than before the update.',
-					'updatelens'
-				),
-				size,
-				formatBytes( finding.evidence.size_delta ?? 0 )
+				/* translators: %s: stored size now autoloaded, e.g. "178.1 KB". */
+				__( 'Now autoloaded: %s.', 'updatelens' ),
+				keepTogether( formatBytes( after ) )
 			);
 	}
 }
 
 /**
- * Combined sizes of a group's options before and after the update. Options
- * that were not present before count as zero there.
+ * Collapsed line of several large options: the stored data now autoloaded
+ * across them and how that compares with before.
  *
  * @param group Findings of one rule and signal.
  */
-function optionSizes( group: FindingGroup ): {
+function groupAutoloadText( group: FindingGroup ): string {
+	const { after, before } = autoloadedBytes( group );
+	const now = keepTogether( formatBytes( after ) );
+	switch ( autoloadComparison( after, before ) ) {
+		case 'new':
+			return sprintf(
+				/* translators: %s: stored data now autoloaded across the options, e.g. "512.3 KB". */
+				__(
+					'Now autoloaded across these options: %s, all newly autoloaded.',
+					'updatelens'
+				),
+				now
+			);
+		case 'from':
+			return sprintf(
+				/* translators: 1: stored data now autoloaded across the options, e.g. "512.3 KB". 2: autoloaded before the update, e.g. "244 B". */
+				__(
+					'Now autoloaded across these options: %1$s, up from %2$s.',
+					'updatelens'
+				),
+				now,
+				keepTogether( formatBytes( before ) )
+			);
+		case 'by':
+			return sprintf(
+				/* translators: 1: stored data now autoloaded across the options, e.g. "512.3 KB". 2: increase since before the update, e.g. "159.2 KB". */
+				__(
+					'Now autoloaded across these options: %1$s, up %2$s.',
+					'updatelens'
+				),
+				now,
+				keepTogether( formatBytes( after - before ) )
+			);
+		default:
+			return sprintf(
+				/* translators: %s: stored data now autoloaded across the options, e.g. "512.3 KB". */
+				__( 'Now autoloaded across these options: %s.', 'updatelens' ),
+				now
+			);
+	}
+}
+
+/**
+ * Stored bytes of a group's large options before and after the update:
+ * autoloaded (counted only while the option's effective autoload behavior is
+ * on) and in total. Options that were not present before count as zero there.
+ * This covers these options only, not the site's autoloaded data or memory.
+ *
+ * @param group Findings of one rule and signal.
+ */
+export function autoloadedBytes( group: FindingGroup ): {
 	before: number;
 	after: number;
+	storedBefore: number;
+	storedAfter: number;
 	added: number;
 	becameAutoloaded: number;
 } {
-	const sizes = { before: 0, after: 0, added: 0, becameAutoloaded: 0 };
+	const bytes = {
+		before: 0,
+		after: 0,
+		storedBefore: 0,
+		storedAfter: 0,
+		added: 0,
+		becameAutoloaded: 0,
+	};
 	for ( const finding of group.findings ) {
 		if ( finding.code !== 'large_autoloaded_option' ) {
 			continue;
 		}
-		sizes.before += finding.before?.size ?? 0;
-		sizes.after += finding.after.size;
-		if ( finding.evidence.transition === 'added' ) {
-			sizes.added++;
-		} else if ( finding.evidence.transition === 'became_autoloaded' ) {
-			sizes.becameAutoloaded++;
+		const { before, after } = finding;
+		bytes.storedAfter += after.size;
+		if ( after.is_autoloaded ) {
+			bytes.after += after.size;
+		}
+		if ( before === null ) {
+			bytes.added++;
+			continue;
+		}
+		bytes.storedBefore += before.size;
+		if ( before.is_autoloaded ) {
+			bytes.before += before.size;
+		} else if ( after.is_autoloaded ) {
+			bytes.becameAutoloaded++;
 		}
 	}
-	return sizes;
+	return bytes;
 }
 
 /**

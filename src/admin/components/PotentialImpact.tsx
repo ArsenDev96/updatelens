@@ -33,6 +33,7 @@ import {
 	cronRemovalContext,
 	findingGroupTitle,
 	findingSubject,
+	groupFacts,
 	groupFindings,
 	groupSubjects,
 	groupSummary,
@@ -602,6 +603,7 @@ function GroupDetails( {
 	const visible = group.findings.slice( 0, visibleCount );
 	const hidden = total - visible.length;
 	const more = Math.min( hidden, FINDINGS_STEP );
+	const facts = groupFacts( group );
 	// The button that was pressed can disappear (nothing left to show, or
 	// back to the first rows): focus then moves to the other one.
 	const moreButton = useRef< HTMLButtonElement >( null );
@@ -623,6 +625,11 @@ function GroupDetails( {
 				<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
 					{ __( 'What changed', 'updatelens' ) }
 				</h5>
+				{ facts.length > 0 && (
+					<p className="mt-1 text-[13px] leading-5 text-slate-600">
+						{ facts.join( ' ' ) }
+					</p>
+				) }
 			</div>
 			<ul id={ listId } className="mt-2 divide-y border-y bg-slate-50/50">
 				{ visible.map( ( finding ) => {

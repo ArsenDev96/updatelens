@@ -2,6 +2,7 @@ import { _n, __, sprintf } from '@wordpress/i18n';
 
 import type {
 	ImpactFinding,
+	LargeAutoloadedOptionFinding,
 	PotentialImpact,
 	Provider,
 	ScheduleChange,
@@ -115,12 +116,14 @@ export function thresholdText( bytes: number ): string {
 }
 
 /**
- * Why a group of findings might matter: plain, conditional sentences.
+ * Why a group of findings might matter: plain, conditional sentences, worded
+ * for one finding or several (which may belong to different plugins).
  *
  * @param group Findings of one rule and signal.
  */
 export function whyItMatters( group: FindingGroup ): string[] {
 	const changes = scheduleChanges( group );
+	const count = group.findings.length;
 	switch ( group.code ) {
 		case 'large_autoloaded_option': {
 			const first = group.findings[ 0 ];
@@ -129,8 +132,10 @@ export function whyItMatters( group: FindingGroup ): string[] {
 					? first.evidence.threshold_bytes
 					: 0;
 			return [
-				__(
+				_n(
 					'WordPress loads every autoloaded option on each page request, whether or not the page uses it. A large autoloaded option adds to that work and can slow requests down, especially on sites without a persistent object cache.',
+					'WordPress loads every autoloaded option on each page request, whether or not the page uses it. Large autoloaded options add to that work and can slow requests down, especially on sites without a persistent object cache.',
+					count,
 					'updatelens'
 				),
 				sprintf(
@@ -145,12 +150,16 @@ export function whyItMatters( group: FindingGroup ): string[] {
 		}
 		case 'recurring_cron_event_removed':
 			return [
-				__(
+				_n(
 					'A recurring event repeats a task on a schedule, such as syncing data, cleaning up or sending email. If it was removed unintentionally, that task would no longer run by itself. It may also have been removed or replaced on purpose.',
+					'Recurring events repeat tasks on a schedule, such as syncing data, cleaning up or sending email. If one was removed unintentionally, its task would no longer run by itself. Each may also have been removed or replaced on purpose.',
+					count,
 					'updatelens'
 				),
-				__(
+				_n(
 					'Instances that did not change are not part of the report, so this does not show whether the hook still has other scheduled events.',
+					'Instances that did not change are not part of the report, so this does not show whether these hooks still have other scheduled events.',
+					count,
 					'updatelens'
 				),
 			];
@@ -158,21 +167,27 @@ export function whyItMatters( group: FindingGroup ): string[] {
 			const sentences: string[] =
 				group.signal === 'action_scheduler'
 					? [
-							__(
+							_n(
 								'The schedule decides when Action Scheduler runs this action. A different schedule can change when or how often it runs.',
+								'Each schedule decides when Action Scheduler runs its action. A different schedule can change when or how often an action runs.',
+								count,
 								'updatelens'
 							),
 						]
 					: [
-							__(
+							_n(
 								'The schedule decides how often WordPress runs this task.',
+								'Each schedule decides how often WordPress runs its task.',
+								count,
 								'updatelens'
 							),
 						];
 			if ( changes.has( 'interval_changed' ) ) {
 				sentences.push(
-					__(
+					_n(
 						'A different interval changes how often the task runs: more often adds background work, less often delays it.',
+						'A different interval changes how often a task runs: more often adds background work, less often delays it.',
+						count,
 						'updatelens'
 					)
 				);
@@ -190,8 +205,10 @@ export function whyItMatters( group: FindingGroup ): string[] {
 			}
 			if ( changes.has( 'no_longer_recurring' ) ) {
 				sentences.push(
-					__(
+					_n(
 						'A one-time job runs once and does not repeat unless something schedules it again.',
+						'One-time jobs run once and do not repeat unless something schedules them again.',
+						count,
 						'updatelens'
 					)
 				);
@@ -202,62 +219,82 @@ export function whyItMatters( group: FindingGroup ): string[] {
 }
 
 /**
- * What to check next for a group of findings.
+ * What to check next for a group of findings, worded for one finding or
+ * several. Several options or hooks are never assumed to share a plugin.
  *
  * @param group Findings of one rule and signal.
  */
 export function whatToCheck( group: FindingGroup ): string[] {
 	const changes = scheduleChanges( group );
+	const count = group.findings.length;
 	switch ( group.code ) {
 		case 'large_autoloaded_option':
 			return [
-				__(
+				_n(
 					'Check whether this option needs to be loaded on every request. If you recognize the option name, the related plugin’s settings or documentation may explain what it stores.',
+					'Check whether each of these options needs to be loaded on every request. If you recognize an option name, the settings or documentation of the plugin that uses it may explain what it stores.',
+					count,
 					'updatelens'
 				),
-				__(
+				_n(
 					'Compare its size with the site’s total autoloaded data in Options & autoload.',
+					'Compare their sizes with the site’s total autoloaded data in Options & autoload.',
+					count,
 					'updatelens'
 				),
-				__(
+				_n(
 					'If it keeps growing after later updates, ask the developer of the plugin that uses it whether it can be stored without autoload.',
+					'If one keeps growing after later updates, ask the developer of the plugin that uses it whether it can be stored without autoload.',
+					count,
 					'updatelens'
 				),
 			];
 		case 'recurring_cron_event_removed':
 			return [
-				__(
+				_n(
 					'Check whether the hook still has scheduled events, for example with WP-CLI (wp cron event list) or a cron management plugin.',
+					'Check whether each hook still has scheduled events, for example with WP-CLI (wp cron event list) or a cron management plugin.',
+					count,
 					'updatelens'
 				),
-				__(
+				_n(
 					'Look for a replacement: an event added under another hook name appears in WP-Cron’s added events.',
+					'Look for replacements: events added under other hook names appear in WP-Cron’s added events.',
+					count,
 					'updatelens'
 				),
-				__(
+				_n(
 					'If you recognize the hook, check the related plugin’s release notes or settings for changes to scheduled tasks.',
+					'If you recognize a hook, check the release notes or settings of the plugin that uses it for changes to scheduled tasks.',
+					count,
 					'updatelens'
 				),
 			];
 		case 'recurring_schedule_changed': {
 			const steps: string[] = [
-				__(
+				_n(
 					'Check whether the new schedule is intended, for example in the related plugin’s settings or release notes.',
+					'Check whether the new schedules are intended, for example in the settings or release notes of the plugin that uses each hook.',
+					count,
 					'updatelens'
 				),
 			];
 			if ( changes.has( 'cron_expression_changed' ) ) {
 				steps.push(
-					__(
+					_n(
 						'Read the cron expressions to confirm when the action runs; they are shown exactly as stored.',
+						'Read the cron expressions to confirm when each action runs; they are shown exactly as stored.',
+						count,
 						'updatelens'
 					)
 				);
 			}
 			if ( changes.has( 'no_longer_recurring' ) ) {
 				steps.push(
-					__(
+					_n(
 						'If the task should keep repeating, check after its next run whether it was scheduled again.',
+						'If a task should keep repeating, check after its next run whether it was scheduled again.',
+						count,
 						'updatelens'
 					)
 				);
@@ -265,8 +302,10 @@ export function whatToCheck( group: FindingGroup ): string[] {
 			steps.push(
 				sprintf(
 					/* translators: %s: signal name, e.g. "WP-Cron". */
-					__(
+					_n(
 						'Open %s to see the next scheduled run.',
+						'Open %s to see the next scheduled runs.',
+						count,
 						'updatelens'
 					),
 					providerLabel( group.signal )
@@ -777,7 +816,11 @@ export function groupSubjects(
 }
 
 /**
- * One concise, actionable sentence for a collapsed group, from its evidence.
+ * One short, actionable line for a collapsed group, from its evidence: the
+ * current size and how much it grew (options), the instances no longer
+ * observed (WP-Cron removals) or the kind of schedule change. Longer
+ * explanations are in the expanded group (`groupFacts()`, the rows, "Why it
+ * might matter").
  *
  * @param group Findings of one rule and signal.
  */
@@ -786,90 +829,74 @@ export function groupSummary( group: FindingGroup ): string {
 	const count = group.findings.length;
 	switch ( first.code ) {
 		case 'large_autoloaded_option': {
-			const review = formatBytes( first.evidence.threshold_bytes );
+			const check = _n(
+				'Check whether it needs to load on every page.',
+				'Check whether they need to load on every page.',
+				count,
+				'updatelens'
+			);
 			if ( count === 1 ) {
-				return sprintf(
-					/* translators: 1: option size, e.g. "178.1 KB". 2: review size, e.g. "146.5 KB". */
+				return `${ optionSizeText( first ) } ${ check }`;
+			}
+			const sizes = optionSizes( group );
+			let text: string;
+			if ( sizes.added === count ) {
+				text = sprintf(
+					/* translators: %s: combined current size of the options, e.g. "512.3 KB". */
 					__(
-						'Autoloaded at %1$s, above the %2$s review size. Check whether it needs to load on every page request.',
+						'Now %s combined; none were present before the update.',
 						'updatelens'
 					),
-					formatBytes( first.after.size ),
-					review
+					formatBytes( sizes.after )
+				);
+			} else if ( sizes.after > sizes.before ) {
+				text = sprintf(
+					/* translators: 1: combined current size of the options, e.g. "512.3 KB". 2: how much larger they are than before the update, e.g. "159.2 KB". */
+					__(
+						'Now %1$s combined, %2$s more than before the update.',
+						'updatelens'
+					),
+					formatBytes( sizes.after ),
+					formatBytes( sizes.after - sizes.before )
+				);
+			} else {
+				text = sprintf(
+					/* translators: %s: combined current size of the options, e.g. "512.3 KB". */
+					__( 'Now %s combined.', 'updatelens' ),
+					formatBytes( sizes.after )
 				);
 			}
-			let total = 0;
-			for ( const finding of group.findings ) {
-				if ( finding.code === 'large_autoloaded_option' ) {
-					total += finding.after.size;
-				}
-			}
-			return sprintf(
-				/* translators: 1: number of options. 2: their total size, e.g. "512.3 KB". 3: review size, e.g. "146.5 KB". */
-				_n(
-					'%1$s option, %2$s in total, is autoloaded and above the %3$s review size. Check whether it needs to load on every page request.',
-					'%1$s options, %2$s in total, are autoloaded and each above the %3$s review size. Check whether they need to load on every page request.',
-					count,
-					'updatelens'
-				),
-				formatCount( count ),
-				formatBytes( total ),
-				review
-			);
+			return `${ text } ${ check }`;
 		}
 		case 'recurring_cron_event_removed': {
-			let removed = 0;
-			for ( const finding of group.findings ) {
-				if ( finding.code === 'recurring_cron_event_removed' ) {
-					removed += finding.evidence.removed_recurring_count;
-				}
-			}
+			const removed = removedInstances( group );
 			return count === 1
 				? sprintf(
 						/* translators: %s: number of recurring WP-Cron event instances. */
 						_n(
-							'%s recurring instance scheduled before the update was not observed after it. Check whether the hook still has scheduled events.',
-							'%s recurring instances scheduled before the update were not observed after it. Check whether the hook still has scheduled events.',
+							'%s recurring instance is no longer observed. Check whether the hook is still scheduled.',
+							'%s recurring instances are no longer observed. Check whether the hook is still scheduled.',
 							removed,
 							'updatelens'
 						),
 						formatCount( removed )
 					)
-				: [
-						sprintf(
-							/* translators: %s: number of WP-Cron hooks. */
-							_n(
-								'%s hook has recurring instances that were scheduled before the update and not observed after it.',
-								'%s hooks have recurring instances that were scheduled before the update and not observed after it.',
-								count,
-								'updatelens'
-							),
-							formatCount( count )
-						),
-						// The total only when some hook lost more than one instance.
-						removed > count
-							? sprintf(
-									/* translators: %s: number of recurring WP-Cron event instances. */
-									_n(
-										'%s instance in total.',
-										'%s instances in total.',
-										removed,
-										'updatelens'
-									),
-									formatCount( removed )
-								)
-							: '',
-						__(
-							'Check whether these hooks still have scheduled events.',
+				: sprintf(
+						/* translators: %s: number of recurring WP-Cron event instances. */
+						_n(
+							'%s recurring instance is no longer observed. Check whether these hooks are still scheduled.',
+							'%s recurring instances are no longer observed. Check whether these hooks are still scheduled.',
+							removed,
 							'updatelens'
 						),
-					]
-						.filter( Boolean )
-						.join( ' ' );
+						formatCount( removed )
+					);
 		}
 		case 'recurring_schedule_changed': {
 			if ( count === 1 ) {
-				return `${ whatChanged( first ) } ${ __(
+				return `${ shortScheduleChangeText(
+					first.evidence.change
+				) } ${ __(
 					'Check that the new schedule is intended.',
 					'updatelens'
 				) }`;
@@ -881,6 +908,180 @@ export function groupSummary( group: FindingGroup ): string {
 				'updatelens'
 			) }`;
 		}
+	}
+}
+
+/**
+ * The longer facts about a group of several findings, shown above its rows
+ * once expanded: combined sizes before and after (options) or the instances
+ * per hooks (WP-Cron removals). Nothing for one finding, whose row says it.
+ *
+ * @param group Findings of one rule and signal.
+ */
+export function groupFacts( group: FindingGroup ): string[] {
+	const count = group.findings.length;
+	if ( count < 2 ) {
+		return [];
+	}
+	switch ( group.code ) {
+		case 'large_autoloaded_option': {
+			const sizes = optionSizes( group );
+			const facts: string[] = [
+				sprintf(
+					/* translators: 1: combined current size of the options, e.g. "512.3 KB". 2: their combined size before the update, e.g. "353.1 KB". */
+					__(
+						'Combined size now: %1$s. Combined size before the update: %2$s.',
+						'updatelens'
+					),
+					formatBytes( sizes.after ),
+					formatBytes( sizes.before )
+				),
+			];
+			if ( sizes.added > 0 ) {
+				facts.push(
+					sprintf(
+						/* translators: %s: number of options. */
+						_n(
+							'%s of these options was not present before the update and counts as zero there.',
+							'%s of these options were not present before the update and count as zero there.',
+							sizes.added,
+							'updatelens'
+						),
+						formatCount( sizes.added )
+					)
+				);
+			}
+			if ( sizes.becameAutoloaded > 0 ) {
+				facts.push(
+					sprintf(
+						/* translators: %s: number of options. */
+						_n(
+							'%s of these options existed before but was not autoloaded; its whole size is now loaded on every page.',
+							'%s of these options existed before but were not autoloaded; their whole size is now loaded on every page.',
+							sizes.becameAutoloaded,
+							'updatelens'
+						),
+						formatCount( sizes.becameAutoloaded )
+					)
+				);
+			}
+			return facts;
+		}
+		case 'recurring_cron_event_removed': {
+			const removed = removedInstances( group );
+			return [
+				sprintf(
+					/* translators: 1: number of recurring WP-Cron event instances. 2: number of hooks. */
+					_n(
+						'%1$s recurring instance scheduled before the update was not observed after it, across %2$s hooks.',
+						'%1$s recurring instances scheduled before the update were not observed after it, across %2$s hooks.',
+						removed,
+						'updatelens'
+					),
+					formatCount( removed ),
+					formatCount( count )
+				),
+			];
+		}
+		case 'recurring_schedule_changed':
+			return [];
+	}
+}
+
+/**
+ * Current size of one large option and how it compares with before.
+ *
+ * @param finding Large-option finding.
+ */
+function optionSizeText( finding: LargeAutoloadedOptionFinding ): string {
+	const size = formatBytes( finding.after.size );
+	switch ( finding.evidence.transition ) {
+		case 'added':
+			return sprintf(
+				/* translators: %s: option size, e.g. "178.1 KB". */
+				__( 'Now %s; not present before the update.', 'updatelens' ),
+				size
+			);
+		case 'became_autoloaded':
+			return sprintf(
+				/* translators: %s: option size, e.g. "178.1 KB". */
+				__( 'Now %s and autoloaded.', 'updatelens' ),
+				size
+			);
+		case 'grew_past_threshold':
+			return sprintf(
+				/* translators: 1: option size, e.g. "178.1 KB". 2: how much larger it is than before the update, e.g. "32.4 KB". */
+				__(
+					'Now %1$s, %2$s more than before the update.',
+					'updatelens'
+				),
+				size,
+				formatBytes( finding.evidence.size_delta ?? 0 )
+			);
+	}
+}
+
+/**
+ * Combined sizes of a group's options before and after the update. Options
+ * that were not present before count as zero there.
+ *
+ * @param group Findings of one rule and signal.
+ */
+function optionSizes( group: FindingGroup ): {
+	before: number;
+	after: number;
+	added: number;
+	becameAutoloaded: number;
+} {
+	const sizes = { before: 0, after: 0, added: 0, becameAutoloaded: 0 };
+	for ( const finding of group.findings ) {
+		if ( finding.code !== 'large_autoloaded_option' ) {
+			continue;
+		}
+		sizes.before += finding.before?.size ?? 0;
+		sizes.after += finding.after.size;
+		if ( finding.evidence.transition === 'added' ) {
+			sizes.added++;
+		} else if ( finding.evidence.transition === 'became_autoloaded' ) {
+			sizes.becameAutoloaded++;
+		}
+	}
+	return sizes;
+}
+
+/**
+ * Recurring WP-Cron instances not observed after the update, over a group.
+ *
+ * @param group Findings of one rule and signal.
+ */
+function removedInstances( group: FindingGroup ): number {
+	let removed = 0;
+	for ( const finding of group.findings ) {
+		if ( finding.code === 'recurring_cron_event_removed' ) {
+			removed += finding.evidence.removed_recurring_count;
+		}
+	}
+	return removed;
+}
+
+/**
+ * A schedule change in a few words, for a collapsed row.
+ *
+ * @param change Change kind.
+ */
+function shortScheduleChangeText( change: ScheduleChange ): string {
+	switch ( change ) {
+		case 'interval_changed':
+			return __( 'The interval changed.', 'updatelens' );
+		case 'schedule_type_changed':
+			return __(
+				'Switched between an interval and a cron expression.',
+				'updatelens'
+			);
+		case 'cron_expression_changed':
+			return __( 'The cron expression changed.', 'updatelens' );
+		case 'no_longer_recurring':
+			return __( 'Now runs once instead of repeating.', 'updatelens' );
 	}
 }
 

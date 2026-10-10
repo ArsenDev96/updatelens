@@ -5,11 +5,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
 	AnalysisReport,
+	ImpactFinding,
+	LargeAutoloadedOptionFinding,
 	PhaseKey,
 	Provider,
 	RecurringCronEventRemovedFinding,
 } from '@/admin/types/api';
 import { formatBytes, formatCount } from '@/admin/utils/format';
+import {
+	groupFacts,
+	groupFindings,
+	groupSummary,
+	whatToCheck,
+	whyItMatters,
+} from '@/admin/utils/impact';
 
 import { WOOCOMMERCE } from './action-scheduler-fixtures';
 import { cronPhase, oneTime, RANK_MATH, recurring } from './dogfood-fixtures';
@@ -24,12 +33,16 @@ import {
 import {
 	AS_GONE,
 	AS_NEW,
+	AS_TYPE_CHANGED,
 	cronChange,
 	cronChangeFinding,
 	cronFinal,
+	CRON_INTERVAL,
 	CRON_REMOVED,
 	HISTORICAL_NOT_INSTALLED,
 	IMPACT,
+	LARGE_ADDED,
+	LARGE_BECAME,
 	LONG_HOOK,
 	LONG_IDS,
 	LONG_OPTION,
@@ -169,11 +182,11 @@ describe( 'Potential Impact', () => {
 				name: 'Large autoloaded options, 2 findings',
 			} )
 		).toHaveAccessibleDescription(
-			`2 options, ${ formatBytes(
-				182340 + 163000
-			) } in total, are autoloaded and each above the ${ formatBytes(
-				150000
-			) } review size. Check whether they need to load on every page request.`
+			// The combined current size and how much larger it is than before
+			// (the option that became autoloaded kept its size).
+			`Now ${ formatBytes( 182340 + 163000 ) } combined, ${ formatBytes(
+				163000
+			) } more than before the update. Check whether they need to load on every page.`
 		);
 
 		const [ options, removed, cron, actionScheduler ] = groups();
@@ -181,11 +194,15 @@ describe( 'Potential Impact', () => {
 			'Options & autoload · acme_feed_cache, acme_feed_index'
 		);
 		expect( removed ).toHaveTextContent(
-			'1 recurring instance scheduled before the update was not observed after it. Check whether the hook still has scheduled events.'
+			'1 recurring instance is no longer observed. Check whether the hook is still scheduled.'
 		);
 		expect( cron ).toHaveTextContent(
-			'The recurring interval changed. Check that the new schedule is intended.'
+			'The interval changed. Check that the new schedule is intended.'
 		);
+		// The review size and longer explanations wait for the details.
+		for ( const group of groups() ) {
+			expect( group ).not.toHaveTextContent( 'review size' );
+		}
 		expect( actionScheduler ).toHaveTextContent(
 			'Action Scheduler · wpforms_email_summaries_fetch_info_blocks'
 		);
@@ -952,9 +969,13 @@ describe( 'Potential Impact', () => {
 				within( group ).queryAllByRole( 'link', { name: /^View in/ } );
 			expect( rows( options ) ).toHaveLength( 0 );
 			expect( rows( cron ) ).toHaveLength( 0 );
-			// One instance per hook: no separate total.
+			expect( options ).toHaveTextContent(
+				`Now ${ formatBytes(
+					1200 * 163000
+				) } combined; none were present before the update. Check whether they need to load on every page.`
+			);
 			expect( cron ).toHaveTextContent(
-				'300 hooks have recurring instances that were scheduled before the update and not observed after it. Check whether these hooks still have scheduled events.'
+				'300 recurring instances are no longer observed. Check whether these hooks are still scheduled.'
 			);
 
 			await user.click( groupButton( options ) );
@@ -963,12 +984,27 @@ describe( 'Potential Impact', () => {
 			expect( options ).toHaveTextContent(
 				`Showing 3 of ${ formatCount( 1200 ) }`
 			);
-			// One explanation per group, not per finding.
+			// One explanation per group, not per finding, worded for several.
 			expect(
 				within( options ).getAllByRole( 'heading', {
 					name: 'Why it might matter',
 				} )
 			).toHaveLength( 1 );
+			expect( options ).toHaveTextContent(
+				`Combined size now: ${ formatBytes(
+					1200 * 163000
+				) }. Combined size before the update: ${ formatBytes(
+					0
+				) }. ${ formatCount(
+					1200
+				) } of these options were not present before the update and count as zero there.`
+			);
+			expect( options ).toHaveTextContent(
+				'Large autoloaded options add to that work'
+			);
+			expect( options ).toHaveTextContent(
+				'Check whether each of these options needs to be loaded on every request.'
+			);
 
 			const more = within( options ).getByRole( 'button', {
 				name: `Show 50 more (${ formatCount( 1197 ) } hidden)`,
@@ -1097,5 +1133,176 @@ describe( 'Potential Impact', () => {
 			expect( text ).not.toContain( code );
 		}
 		expect( text ).not.toMatch( FORBIDDEN );
+	} );
+} );
+
+describe( 'Potential Impact group wording', () => {
+	const GREW: LargeAutoloadedOptionFinding = {
+		...LARGE_BECAME,
+		option: 'acme_grown',
+		evidence: {
+			transition: 'grew_past_threshold',
+			threshold_bytes: 150000,
+			size_delta: 40000,
+			value_changed: true,
+		},
+		before: { size: 140000, autoload: 'on', is_autoloaded: true },
+		after: { size: 180000, autoload: 'on', is_autoloaded: true },
+	};
+	const TWO_REMOVED: RecurringCronEventRemovedFinding = {
+		...CRON_REMOVED,
+		hook: 'other_vendor_sync',
+		evidence: { ...CRON_REMOVED.evidence, removed_recurring_count: 2 },
+	};
+
+	/**
+	 * The one group of some findings.
+	 *
+	 * @param findings Findings of one rule and signal.
+	 */
+	const group = ( ...findings: ImpactFinding[] ) => {
+		const [ only ] = groupFindings( findings );
+		return only;
+	};
+
+	/**
+	 * Guidance of a group as one text.
+	 *
+	 * @param findings Findings of one rule and signal.
+	 */
+	const guidance = ( ...findings: ImpactFinding[] ) =>
+		[
+			...whyItMatters( group( ...findings ) ),
+			...whatToCheck( group( ...findings ) ),
+		].join( ' ' );
+
+	it( 'words guidance for one finding in the singular', () => {
+		expect( guidance( LARGE_ADDED ) ).toContain(
+			'Check whether this option needs to be loaded on every request.'
+		);
+		expect( guidance( CRON_REMOVED ) ).toContain(
+			'Check whether the hook still has scheduled events'
+		);
+		expect( guidance( CRON_INTERVAL ) ).toContain(
+			'Open WP-Cron to see the next scheduled run.'
+		);
+	} );
+
+	it( 'words guidance for several findings in the plural, never as one plugin', () => {
+		const texts = [
+			guidance( LARGE_ADDED, LARGE_BECAME ),
+			guidance( CRON_REMOVED, TWO_REMOVED ),
+			guidance( CRON_INTERVAL, { ...CRON_INTERVAL, hook: 'other_job' } ),
+			guidance( AS_TYPE_CHANGED, {
+				...AS_TYPE_CHANGED,
+				hook: 'other_action',
+				evidence: { change: 'cron_expression_changed' },
+			} ),
+		];
+		for ( const text of texts ) {
+			// No singular subject, and no single plugin for every item.
+			expect( text ).not.toMatch(
+				/\bthis (option|action|task)\b|\bthe hook\b|\bits size\b|related plugin’s|the same plugin/
+			);
+		}
+		const [ options, removed, cron, actionScheduler ] = texts;
+		expect( options ).toContain(
+			'Large autoloaded options add to that work'
+		);
+		expect( options ).toContain(
+			'Check whether each of these options needs to be loaded on every request.'
+		);
+		expect( options ).toContain(
+			'ask the developer of the plugin that uses it'
+		);
+		expect( removed ).toContain(
+			'whether these hooks still have other scheduled events'
+		);
+		expect( removed ).toContain(
+			'Check whether each hook still has scheduled events'
+		);
+		expect( cron ).toContain(
+			'A different interval changes how often a task runs'
+		);
+		expect( cron ).toContain(
+			'Open WP-Cron to see the next scheduled runs.'
+		);
+		expect( actionScheduler ).toContain(
+			'Read the cron expressions to confirm when each action runs'
+		);
+	} );
+
+	it( 'keeps collapsed lines short: current size apart from the increase', () => {
+		expect( groupSummary( group( GREW ) ) ).toBe(
+			`Now ${ formatBytes( 180000 ) }, ${ formatBytes(
+				40000
+			) } more than before the update. Check whether it needs to load on every page.`
+		);
+		expect( groupSummary( group( LARGE_ADDED ) ) ).toBe(
+			`Now ${ formatBytes(
+				163000
+			) }; not present before the update. Check whether it needs to load on every page.`
+		);
+		expect( groupSummary( group( LARGE_BECAME ) ) ).toBe(
+			`Now ${ formatBytes(
+				182340
+			) } and autoloaded. Check whether it needs to load on every page.`
+		);
+		// Several: the combined size now and its increase, both named.
+		expect( groupSummary( group( GREW, LARGE_ADDED ) ) ).toBe(
+			`Now ${ formatBytes( 180000 + 163000 ) } combined, ${ formatBytes(
+				40000 + 163000
+			) } more than before the update. Check whether they need to load on every page.`
+		);
+		expect( groupSummary( group( LARGE_BECAME, LARGE_BECAME ) ) ).toBe(
+			`Now ${ formatBytes(
+				2 * 182340
+			) } combined. Check whether they need to load on every page.`
+		);
+		expect( groupSummary( group( CRON_REMOVED, TWO_REMOVED ) ) ).toBe(
+			'3 recurring instances are no longer observed. Check whether these hooks are still scheduled.'
+		);
+		expect( groupSummary( group( AS_TYPE_CHANGED ) ) ).toBe(
+			'Switched between an interval and a cron expression. Check that the new schedule is intended.'
+		);
+
+		// Short enough for a 320px row; the review size is in the details.
+		for ( const findings of [
+			[ GREW ],
+			[ LARGE_ADDED ],
+			[ LARGE_BECAME ],
+			[ GREW, LARGE_ADDED, LARGE_BECAME ],
+			[ CRON_REMOVED ],
+			[ CRON_REMOVED, TWO_REMOVED ],
+			[ CRON_INTERVAL ],
+			[ AS_TYPE_CHANGED ],
+		] ) {
+			const summary = groupSummary( group( ...findings ) );
+			expect( summary.length ).toBeLessThanOrEqual( 110 );
+			expect( summary ).not.toContain( 'review size' );
+		}
+	} );
+
+	it( 'moves the longer facts of several findings into the details', () => {
+		expect( groupFacts( group( LARGE_ADDED ) ) ).toEqual( [] );
+		expect(
+			groupFacts( group( GREW, LARGE_ADDED, LARGE_BECAME ) )
+		).toEqual( [
+			`Combined size now: ${ formatBytes(
+				180000 + 163000 + 182340
+			) }. Combined size before the update: ${ formatBytes(
+				140000 + 182340
+			) }.`,
+			'1 of these options was not present before the update and counts as zero there.',
+			'1 of these options existed before but was not autoloaded; its whole size is now loaded on every page.',
+		] );
+		expect( groupFacts( group( CRON_REMOVED, TWO_REMOVED ) ) ).toEqual( [
+			'3 recurring instances scheduled before the update were not observed after it, across 2 hooks.',
+		] );
+		expect(
+			groupFacts(
+				group( CRON_INTERVAL, { ...CRON_INTERVAL, hook: 'other_job' } )
+			)
+		).toEqual( [] );
 	} );
 } );

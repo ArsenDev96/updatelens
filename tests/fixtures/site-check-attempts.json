@@ -1,0 +1,503 @@
+{
+  "expected_user": 7,
+  "cases": [
+    {
+      "name": "home: verified complete page",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "current",
+        "end_marker": "current",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "pass",
+      "reason": null
+    },
+    {
+      "name": "home: end marker only (header stripped)",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "absent",
+        "end_marker": "current",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "pass",
+      "reason": null
+    },
+    {
+      "name": "home: no end marker",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "current",
+        "end_marker": "absent",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "fail",
+      "reason": "incomplete"
+    },
+    {
+      "name": "home: old end marker",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "current",
+        "end_marker": "other",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "inconclusive",
+      "reason": "stale_marker"
+    },
+    {
+      "name": "home: cached page with old markers",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "other",
+        "end_marker": "other",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "inconclusive",
+      "reason": "stale_marker"
+    },
+    {
+      "name": "home: cached page without markers",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "absent",
+        "end_marker": "absent",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "inconclusive",
+      "reason": "not_verified"
+    },
+    {
+      "name": "home: too large to inspect",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "current",
+        "end_marker": "unread",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "inconclusive",
+      "reason": "not_inspected"
+    },
+    {
+      "name": "home: too large, unverified",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "absent",
+        "end_marker": "unread",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "inconclusive",
+      "reason": "not_verified"
+    },
+    {
+      "name": "home: WordPress 500",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 500,
+        "duration_ms": 500,
+        "header": "current",
+        "end_marker": "absent",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "fail",
+      "reason": "server_error"
+    },
+    {
+      "name": "home: 500 before WordPress",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 500,
+        "duration_ms": 500,
+        "header": "absent",
+        "end_marker": "absent",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "fail",
+      "reason": "server_error"
+    },
+    {
+      "name": "home: 500 too large to inspect",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 500,
+        "duration_ms": 500,
+        "header": "current",
+        "end_marker": "unread",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "fail",
+      "reason": "server_error"
+    },
+    {
+      "name": "home: Cloudflare challenge",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 403,
+        "duration_ms": 500,
+        "header": "absent",
+        "end_marker": "absent",
+        "retry_after": false,
+        "challenge": true
+      },
+      "verdict": "inconclusive",
+      "reason": "challenge"
+    },
+    {
+      "name": "home: challenge flag on a complete page",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 500,
+        "header": "current",
+        "end_marker": "current",
+        "retry_after": false,
+        "challenge": true
+      },
+      "verdict": "inconclusive",
+      "reason": "challenge"
+    },
+    {
+      "name": "home: maintenance",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 503,
+        "duration_ms": 500,
+        "header": "absent",
+        "end_marker": "absent",
+        "retry_after": true,
+        "challenge": false
+      },
+      "verdict": "inconclusive",
+      "reason": "unavailable_retry_after"
+    },
+    {
+      "name": "home: redirect",
+      "check": "home",
+      "facts": {
+        "kind": "redirect",
+        "duration_ms": 40
+      },
+      "verdict": "redirect",
+      "reason": "redirected"
+    },
+    {
+      "name": "home: timeout",
+      "check": "home",
+      "facts": {
+        "kind": "timeout",
+        "duration_ms": 10000
+      },
+      "verdict": "fail",
+      "reason": "timeout"
+    },
+    {
+      "name": "home: network error",
+      "check": "home",
+      "facts": {
+        "kind": "network_error",
+        "duration_ms": 40
+      },
+      "verdict": "inconclusive",
+      "reason": "network_error"
+    },
+    {
+      "name": "rest: own user",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_object",
+        "user_id": 7,
+        "error_code": null
+      },
+      "verdict": "pass",
+      "reason": null
+    },
+    {
+      "name": "rest: another user",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_object",
+        "user_id": 8,
+        "error_code": null
+      },
+      "verdict": "fail",
+      "reason": "wrong_user"
+    },
+    {
+      "name": "rest: JSON with id but unverified",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "absent",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_object",
+        "user_id": 7,
+        "error_code": null
+      },
+      "verdict": "inconclusive",
+      "reason": "not_verified"
+    },
+    {
+      "name": "rest: JSON with id and an old marker",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "other",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_object",
+        "user_id": 7,
+        "error_code": null
+      },
+      "verdict": "inconclusive",
+      "reason": "stale_marker"
+    },
+    {
+      "name": "rest: object without id",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_object",
+        "user_id": null,
+        "error_code": null
+      },
+      "verdict": "fail",
+      "reason": "unexpected_json"
+    },
+    {
+      "name": "rest: JSON that is not an object",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_other",
+        "user_id": null,
+        "error_code": null
+      },
+      "verdict": "fail",
+      "reason": "unexpected_json"
+    },
+    {
+      "name": "rest: output before JSON",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_after_output",
+        "user_id": null,
+        "error_code": null
+      },
+      "verdict": "fail",
+      "reason": "extra_output"
+    },
+    {
+      "name": "rest: invalid JSON",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "invalid_json",
+        "user_id": null,
+        "error_code": null
+      },
+      "verdict": "fail",
+      "reason": "invalid_json"
+    },
+    {
+      "name": "rest: empty body",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "empty",
+        "user_id": null,
+        "error_code": null
+      },
+      "verdict": "fail",
+      "reason": "invalid_json"
+    },
+    {
+      "name": "rest: too large to inspect",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "unread",
+        "user_id": null,
+        "error_code": null
+      },
+      "verdict": "inconclusive",
+      "reason": "not_inspected"
+    },
+    {
+      "name": "rest: not logged in",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 401,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_object",
+        "user_id": null,
+        "error_code": "rest_not_logged_in"
+      },
+      "verdict": "fail",
+      "reason": "refused"
+    },
+    {
+      "name": "rest: invalid nonce",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 403,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_object",
+        "user_id": null,
+        "error_code": "rest_cookie_invalid_nonce"
+      },
+      "verdict": "fail",
+      "reason": "refused"
+    },
+    {
+      "name": "rest: error object with 200",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 300,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "json_object",
+        "user_id": null,
+        "error_code": "rest_forbidden"
+      },
+      "verdict": "fail",
+      "reason": "unexpected_json"
+    },
+    {
+      "name": "rest: login redirect",
+      "check": "rest",
+      "facts": {
+        "kind": "redirect",
+        "duration_ms": 40
+      },
+      "verdict": "fail",
+      "reason": "redirected"
+    },
+    {
+      "name": "rest: timeout",
+      "check": "rest",
+      "facts": {
+        "kind": "timeout",
+        "duration_ms": 10000
+      },
+      "verdict": "fail",
+      "reason": "timeout"
+    },
+    {
+      "name": "rest: firewall page",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 403,
+        "duration_ms": 300,
+        "header": "absent",
+        "retry_after": false,
+        "challenge": false,
+        "body": "invalid_json",
+        "user_id": null,
+        "error_code": null
+      },
+      "verdict": "inconclusive",
+      "reason": "blocked"
+    }
+  ]
+}

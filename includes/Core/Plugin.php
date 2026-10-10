@@ -12,6 +12,9 @@ use UpdateLens\Admin\AdminPage;
 use UpdateLens\Rest\AnalysesController;
 use UpdateLens\Rest\BaselineController;
 use UpdateLens\Rest\StatusController;
+use UpdateLens\SiteCheck\AjaxEndpoints;
+use UpdateLens\SiteCheck\FrontendMarker;
+use UpdateLens\SiteCheck\SessionManager;
 use UpdateLens\Storage\Schema;
 use UpdateLens\Update\PluginUpdateAnalyzer;
 use UpdateLens\Update\PluginUpdateTracker;
@@ -80,6 +83,16 @@ final class Plugin {
 		}
 
 		add_action( 'rest_api_init', array( $this, 'register_rest_routes' ) );
+
+		// Site check sessions (opt-in; single site only). Nothing starts a check
+		// automatically: the endpoints wait for a browser runner.
+		if ( ! is_multisite() ) {
+			$site_checks = SessionManager::from_wordpress();
+			( new FrontendMarker( $site_checks ) )->register();
+			if ( is_admin() ) {
+				( new AjaxEndpoints( $site_checks ) )->register();
+			}
+		}
 
 		// Update analysis is single-site only in v0.1. Sites activated before the
 		// schema existed get it here, since activation does not run again.

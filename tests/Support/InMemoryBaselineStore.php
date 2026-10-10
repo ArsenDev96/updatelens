@@ -8,6 +8,7 @@
 namespace UpdateLens\Tests\Support;
 
 use UnexpectedValueException;
+use UpdateLens\SiteCheck\Baselines;
 use UpdateLens\SiteCheck\BaselineStore;
 
 /**
@@ -132,7 +133,16 @@ final class InMemoryBaselineStore implements BaselineStore {
 			throw new UnexpectedValueException( 'Read failed.' );
 		}
 
-		return array_slice( $this->values, 0, $limit, true );
+		// Like OptionBaselineStore: baseline rows only.
+		$baselines = array_filter(
+			$this->values,
+			static function ( $key ) {
+				return 0 === strpos( $key, Baselines::STORAGE_PREFIX );
+			},
+			ARRAY_FILTER_USE_KEY
+		);
+
+		return array_slice( $baselines, 0, $limit, true );
 	}
 
 	/**

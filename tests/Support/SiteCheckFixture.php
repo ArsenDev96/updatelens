@@ -173,9 +173,12 @@ final class SiteCheckFixture {
 		foreach ( $facts as $attempt ) {
 			$attempts[] = self::attempt( $check, $attempt );
 		}
-		$options += array( 'version' => CheckDefinition::get( $check )->get_version() );
+		$options += array(
+			'version'    => CheckDefinition::get( $check )->get_version(),
+			'generation' => null,
+		);
 
-		return new CheckResult( $check, $options['version'], self::context( $check, $options ), $options['started_at'], $options['completed_at'], $attempts );
+		return new CheckResult( $check, $options['version'], self::context( $check, $options ), $options['started_at'], $options['completed_at'], $attempts, $options['generation'] );
 	}
 
 	/**

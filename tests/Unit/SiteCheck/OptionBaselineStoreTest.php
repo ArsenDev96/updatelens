@@ -75,7 +75,7 @@ final class OptionBaselineStoreTest extends TestCase {
 				array( 'UPDATE %i SET option_value = %s WHERE option_name = %s AND CAST(option_value AS BINARY) = CAST(%s AS BINARY)', array( 'wp_options', 'new', self::KEY, 'old' ) ),
 				array( 'DELETE FROM %i WHERE option_name = %s AND CAST(option_value AS BINARY) = CAST(%s AS BINARY)', array( 'wp_options', self::KEY, 'old' ) ),
 				array( 'SELECT option_name, option_value FROM %i WHERE option_name LIKE %s ORDER BY option_id ASC LIMIT %d', array( 'wp_options', 'updatelens\_site\_check\_baseline\_%', 100 ) ),
-				array( 'DELETE FROM %i WHERE option_name LIKE %s', array( 'wp_options', 'updatelens\_site\_check\_baseline\_%' ) ),
+				array( 'DELETE FROM %i WHERE option_name LIKE %s OR option_name = %s', array( 'wp_options', 'updatelens\_site\_check\_baseline\_%', 'updatelens_update_activity' ) ),
 			),
 			$this->wpdb->prepared
 		);

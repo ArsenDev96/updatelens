@@ -56,6 +56,10 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 		'action_scheduler_during_update_reason' => null,
 		'action_scheduler_post_update_reason'   => null,
 		'action_scheduler_final_reason'         => null,
+		'site_check_home_before'                => null,
+		'site_check_home_before_reason'         => null,
+		'site_check_rest_before'                => null,
+		'site_check_rest_before_reason'         => null,
 		'error_code'                            => null,
 		'error_message'                         => null,
 	);

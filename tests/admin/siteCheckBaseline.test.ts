@@ -331,6 +331,25 @@ describe( 'runSiteChecks for BEFORE baselines', () => {
 		expect( srv.spy ).toHaveBeenCalledTimes( 1 );
 	} );
 
+	it( 'runs nothing while an update is running', async () => {
+		const srv = server( {
+			start: () =>
+				ajax( {
+					code: 'not_needed',
+					purpose: 'before',
+					reason: 'update_in_progress',
+					refresh_in: { home: 120, rest: 120 },
+				} ),
+		} );
+
+		expect( await runBefore( srv ) ).toMatchObject( {
+			status: 'not_needed',
+			reason: 'update_in_progress',
+			refreshIn: { home: 120, rest: 120 },
+		} );
+		expect( srv.spy ).toHaveBeenCalledTimes( 1 );
+	} );
+
 	it( 'runs only the checks the server issued', async () => {
 		const srv = server( {
 			start: () =>
@@ -558,6 +577,19 @@ describe( 'createBaselineScheduler', () => {
 				},
 			},
 			{ home: 1760090100000, rest: 1760090200000 },
+		],
+		[
+			'an update is running: ask again later',
+			{
+				status: 'not_needed',
+				reason: 'update_in_progress',
+				refreshIn: { home: 120, rest: 120 },
+				checks: {
+					home: outcome( 'home', 'not_run', { error: 'not_issued' } ),
+					rest: outcome( 'rest', 'not_run', { error: 'not_issued' } ),
+				},
+			},
+			{ home: 1760090120000, rest: 1760090120000 },
 		],
 		[
 			'rate limited',

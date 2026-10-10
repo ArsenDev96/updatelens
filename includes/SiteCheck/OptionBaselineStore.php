@@ -117,7 +117,7 @@ final class OptionBaselineStore implements BaselineStore {
 	}
 
 	/**
-	 * Remove every stored baseline. Used on uninstall.
+	 * Remove every stored baseline and the updater activity ledger. Used on uninstall.
 	 *
 	 * @return void
 	 */
@@ -125,7 +125,7 @@ final class OptionBaselineStore implements BaselineStore {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- UpdateLens's own rows, never cached.
-		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE option_name LIKE %s', $wpdb->options, $wpdb->esc_like( Baselines::STORAGE_PREFIX ) . '%' ) );
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE option_name LIKE %s OR option_name = %s', $wpdb->options, $wpdb->esc_like( Baselines::STORAGE_PREFIX ) . '%', UpdateActivity::STORAGE_KEY ) );
 	}
 
 	/**

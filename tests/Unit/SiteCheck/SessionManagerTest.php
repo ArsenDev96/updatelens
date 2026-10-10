@@ -28,6 +28,11 @@ final class SessionManagerTest extends TestCase {
 	const SECRET = 'sk_live_fake_secret_4f2a9c';
 
 	/**
+	 * Updater activity generation recorded at session start.
+	 */
+	const GENERATION = 'feedfacecafebeef:7';
+
+	/**
 	 * Store.
 	 *
 	 * @var InMemorySessionStore
@@ -110,7 +115,7 @@ final class SessionManagerTest extends TestCase {
 	 * @return array Sessions by check.
 	 */
 	private function start( $purpose = 'before' ) {
-		$outcome = $this->manager->start( self::USER, self::LOGIN, $purpose, self::targets() );
+		$outcome = $this->manager->start( self::USER, self::LOGIN, $purpose, self::targets(), self::GENERATION );
 		$this->assertSame( 'started', $outcome['code'] );
 
 		return $outcome['sessions'];
@@ -196,6 +201,7 @@ final class SessionManagerTest extends TestCase {
 				'secret_hash' => hash( 'sha256', $sessions['rest']['secret'] ),
 				'created_at'  => self::T,
 				'expires_at'  => self::T + 120,
+				'generation'  => self::GENERATION,
 			),
 			$session->to_array()
 		);
@@ -291,6 +297,7 @@ final class SessionManagerTest extends TestCase {
 		$this->assertSame( array( 'pass', null ), array( $result->get_verdict(), $result->get_reason() ) );
 		$this->assertSame( array( self::T, self::T + 1.5 ), array( $result->get_started_at(), $result->get_completed_at() ) );
 		$this->assertSame( array( str_repeat( 'c', 64 ), 'user', self::USER, self::LOGIN ), array( $result->get_context()->get_target(), $result->get_context()->get_auth(), $result->get_context()->get_user(), $result->get_context()->get_session() ) );
+		$this->assertSame( self::GENERATION, $result->get_generation(), 'The generation recorded when the session started.' );
 
 		$this->assertSame( array( 'code' => 'session_unavailable' ), $this->submit( $sessions['rest'], 'rest' ), 'Replay.' );
 		$this->assertNull( $this->manager->find_live( 'rest', $sessions['rest']['session'] ), 'Reported sessions end.' );

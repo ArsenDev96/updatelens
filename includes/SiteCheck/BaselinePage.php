@@ -77,12 +77,13 @@ final class BaselinePage {
 	 * Settings of the baseline script for this page, or null if it must not
 	 * load here.
 	 *
-	 * @param mixed              $hook_suffix Admin page (`admin_enqueue_scripts` argument).
-	 * @param Baselines|null     $baselines   Baselines (default: options table).
-	 * @param ContextHasher|null $hasher      Context fingerprints (default: the site's salts).
+	 * @param mixed               $hook_suffix Admin page (`admin_enqueue_scripts` argument).
+	 * @param Baselines|null      $baselines   Baselines (default: options table).
+	 * @param ContextHasher|null  $hasher      Context fingerprints (default: the site's salts).
+	 * @param UpdateActivity|null $activity    Updater activity ledger (default: options table).
 	 * @return array{ajaxUrl: string, nonce: string, schedule: array}|null
 	 */
-	public static function settings( $hook_suffix, ?Baselines $baselines = null, ?ContextHasher $hasher = null ) {
+	public static function settings( $hook_suffix, ?Baselines $baselines = null, ?ContextHasher $hasher = null, ?UpdateActivity $activity = null ) {
 		if ( ! in_array( $hook_suffix, self::SCREENS, true ) || is_multisite() || ! current_user_can( AjaxEndpoints::CAPABILITY ) || ! Settings::is_enabled() ) {
 			return null;
 		}
@@ -102,6 +103,7 @@ final class BaselinePage {
 			return null;
 		}
 		$baselines = null === $baselines ? Baselines::from_wordpress() : $baselines;
+		$activity  = null === $activity ? UpdateActivity::from_wordpress() : $activity;
 
 		return array(
 			'ajaxUrl'  => admin_url( 'admin-ajax.php' ),
@@ -110,7 +112,7 @@ final class BaselinePage {
 			'schedule' => array(
 				'refresh_after'       => Baselines::REFRESH_AFTER_SECONDS,
 				'retry_after_failure' => Baselines::RETRY_AFTER_FAILURE_SECONDS,
-				'refresh_in'          => Baselines::refresh_in( $baselines->readiness( get_current_user_id(), $login, $targets ) ),
+				'refresh_in'          => Baselines::refresh_in( $baselines->readiness( get_current_user_id(), $login, $targets, $activity->quiet_generation() ) ),
 			),
 		);
 	}

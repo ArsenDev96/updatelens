@@ -36,6 +36,11 @@ defined( 'ABSPATH' ) || exit;
  * and a storage failure of one of them never drops the other's data (see
  * transition()).
  *
+ * When an analysis is created, the BEFORE site check baselines of the
+ * updating administrator are attached to it (SiteCheckObservation), decided
+ * once from what is stored and the update's activity record; they never
+ * affect the status or the snapshots, and are kept on every final state.
+ *
  * Knows nothing about WordPress hooks (see PluginUpdateTracker). One instance
  * lives for one PHP request and remembers which analyses that request
  * created, so the update request's own shutdown never settles them.
@@ -118,6 +123,13 @@ final class PluginUpdateAnalyzer {
 	private $action_scheduler;
 
 	/**
+	 * BEFORE site check baselines, or null (none attached, e.g. in tests of other signals).
+	 *
+	 * @var SiteCheckObservation|null
+	 */
+	private $site_checks;
+
+	/**
 	 * Returns the current Unix time (seconds, with or without fractions).
 	 *
 	 * @var callable
@@ -169,17 +181,20 @@ final class PluginUpdateAnalyzer {
 	/**
 	 * Constructor.
 	 *
-	 * @param AnalysisRepository $repository   Analysis storage.
-	 * @param callable           $capture      Returns a fresh OptionsSnapshot.
-	 * @param callable           $capture_cron Returns a fresh CronSnapshot.
-	 * @param callable|null      $now          Returns the current Unix time. Default time().
-	 * @param callable|null      $capture_action_scheduler Returns a fresh ActionSchedulerSnapshot.
-	 *                                         Null: no Action Scheduler (`not_installed`).
-	 * @param float|null         $request_started_at Unix time (with microseconds) at which this
-	 *                                         request started. Null: unknown, so this request
-	 *                                         never settles analyses of earlier requests.
+	 * @param AnalysisRepository        $repository   Analysis storage.
+	 * @param callable                  $capture      Returns a fresh OptionsSnapshot.
+	 * @param callable                  $capture_cron Returns a fresh CronSnapshot.
+	 * @param callable|null             $now          Returns the current Unix time. Default time().
+	 * @param callable|null             $capture_action_scheduler Returns a fresh ActionSchedulerSnapshot.
+	 *                                                Null: no Action Scheduler (`not_installed`).
+	 * @param float|null                $request_started_at Unix time (with microseconds) at which this
+	 *                                                request started. Null: unknown, so this request
+	 *                                                never settles analyses of earlier requests.
+	 * @param SiteCheckObservation|null $site_checks BEFORE site check baselines attached when an
+	 *                                         analysis is created. Null: the columns are not written.
 	 */
-	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null, ?float $request_started_at = null ) {
+	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null, ?float $request_started_at = null, ?SiteCheckObservation $site_checks = null ) {
+		$this->site_checks        = $site_checks;
 		$this->repository         = $repository;
 		$this->capture            = $capture;
 		$this->cron               = new CronObservation( $capture_cron );
@@ -236,7 +251,8 @@ final class PluginUpdateAnalyzer {
 				return microtime( true );
 			},
 			$capture_action_scheduler,
-			$request_started_at
+			$request_started_at,
+			SiteCheckObservation::from_wordpress()
 		);
 	}
 
@@ -251,9 +267,11 @@ final class PluginUpdateAnalyzer {
 	 * @param string|null                            $plugin_file Plugin to analyse, or null.
 	 * @param array{name?: string, version?: string} $plugin      Plugin header data before the update.
 	 * @param int                                    $user_id     Current user ID (0 if none).
+	 * @param array|null                             $activity    This update's SiteCheck\UpdateActivity::begin()
+	 *                                                            record (the order against other updates), or null.
 	 * @return void
 	 */
-	public function update_starting( $plugin_file, array $plugin = array(), $user_id = 0 ) {
+	public function update_starting( $plugin_file, array $plugin = array(), $user_id = 0, $activity = null ) {
 		if ( null !== $plugin_file && isset( $this->request_analyses[ $plugin_file ] ) ) {
 			return; // The same update reported twice.
 		}
@@ -296,7 +314,7 @@ final class PluginUpdateAnalyzer {
 		}
 
 		if ( null !== $plugin_file ) {
-			$this->begin( $plugin_file, $plugin, $user_id, $snapshot, $cron_snapshot, $action_scheduler_snapshot );
+			$this->begin( $plugin_file, $plugin, $user_id, $snapshot, $cron_snapshot, $action_scheduler_snapshot, $activity );
 		}
 	}
 
@@ -615,9 +633,10 @@ final class PluginUpdateAnalyzer {
 	 * @param OptionsSnapshot                $snapshot      BEFORE options snapshot.
 	 * @param CronSnapshot|string            $cron_snapshot BEFORE Cron snapshot or the reason it is unavailable.
 	 * @param ActionSchedulerSnapshot|string $action_scheduler_snapshot BEFORE Action Scheduler snapshot or the reason it is unavailable.
+	 * @param array|null                     $activity      This update's UpdateActivity::begin() record, or null.
 	 * @return void
 	 */
-	private function begin( $plugin_file, array $plugin, $user_id, OptionsSnapshot $snapshot, $cron_snapshot, $action_scheduler_snapshot ) {
+	private function begin( $plugin_file, array $plugin, $user_id, OptionsSnapshot $snapshot, $cron_snapshot, $action_scheduler_snapshot, $activity = null ) {
 		try {
 			$open = $this->repository->find_open_for_plugin( $plugin_file );
 			if ( null !== $open ) {
@@ -627,8 +646,8 @@ final class PluginUpdateAnalyzer {
 				$this->finish( $open, AnalysisStatus::ABANDONED, AnalysisStatus::CAPTURED === $open['status'] ? self::ERROR_STALE : self::ERROR_ANOTHER_UPDATE_STARTED, SettleOutcome::NOT_APPLICABLE );
 			}
 
-			$now              = self::datetime( $this->now() );
-			$row              = array(
+			$now = self::datetime( $this->now() );
+			$row = array(
 				'plugin_file'             => $plugin_file,
 				'plugin_name'             => isset( $plugin['name'] ) ? (string) $plugin['name'] : '',
 				'version_before'          => isset( $plugin['version'] ) ? (string) $plugin['version'] : '',
@@ -639,6 +658,10 @@ final class PluginUpdateAnalyzer {
 				'updated_at'              => $now,
 				'options_before_snapshot' => $this->snapshot_codec->encode( $snapshot ),
 			);
+			if ( null !== $this->site_checks ) {
+				// Chosen now, from what is stored when the update starts; never changed later.
+				$row += $this->site_checks->before( (int) $user_id, $activity );
+			}
 			$cron             = $this->cron->before( $cron_snapshot );
 			$action_scheduler = $this->action_scheduler->before( $action_scheduler_snapshot );
 

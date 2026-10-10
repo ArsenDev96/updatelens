@@ -35,10 +35,13 @@ defined( 'ABSPATH' ) || exit;
  *   stored times are never re-stamped): `ready` up to MAX_AGE_SECONDS
  *   (CheckComparator's limit) and only for the current definition version
  *   and target; `expired` after it; `missing` otherwise. A ready baseline
- *   older than REFRESH_AFTER_SECONDS is due for a refresh. Runs still in
- *   progress have no entry and never count.
- *
- * Nothing here compares baselines with an update yet.
+ *   older than REFRESH_AFTER_SECONDS is due for a refresh; a baseline whose
+ *   run started during or before the latest updater activity is
+ *   `outdated` (UpdateActivity generations). Runs still in progress have
+ *   no entry and never count.
+ * - Attaching (for_update()): when a plugin update starts, each check's
+ *   baseline is attached to its analysis only if no other update started
+ *   or ended since the baseline run began (see BeforeReason).
  */
 final class Baselines {
 
@@ -66,9 +69,10 @@ final class Baselines {
 	/**
 	 * Readiness states.
 	 */
-	const READY   = 'ready';
-	const EXPIRED = 'expired';
-	const MISSING = 'missing';
+	const READY    = 'ready';
+	const EXPIRED  = 'expired';
+	const MISSING  = 'missing';
+	const OUTDATED = 'outdated';
 
 	/**
 	 * Save outcomes.
@@ -168,20 +172,35 @@ final class Baselines {
 	/**
 	 * Readiness of every check.
 	 *
-	 * @param int                   $user    User ID.
-	 * @param string                $login   Login-session fingerprint.
-	 * @param array<string, string> $targets Current target fingerprint per check.
+	 * A baseline whose run started during an update, or before the latest
+	 * updater activity ($generation differs), is `outdated`: it can never be
+	 * attached to the next update (for_update()).
+	 *
+	 * @param int                   $user       User ID.
+	 * @param string                $login      Login-session fingerprint.
+	 * @param array<string, string> $targets    Current target fingerprint per check.
+	 * @param string|null           $generation Current updater activity generation
+	 *                                          (UpdateActivity::quiet_generation()); null: unknown
+	 *                                          or an update is running, so not compared.
 	 * @return array<string, array{state: string, age: int|null, refresh_in: int}>
 	 *         By check, in CheckDefinition order: `age` in whole seconds
 	 *         (null when missing), `refresh_in` seconds until the baseline
 	 *         is due (0 = due now).
 	 */
-	public function readiness( $user, $login, array $targets ) {
+	public function readiness( $user, $login, array $targets, $generation = null ) {
 		$now       = (float) call_user_func( $this->now );
 		$readiness = array();
 		foreach ( CheckDefinition::all() as $definition ) {
 			$check  = $definition->get_id();
 			$result = $this->find( $user, $login, $check );
+			if ( null !== $result && ( null === $result->get_generation() || ( null !== $generation && $result->get_generation() !== $generation ) ) ) {
+				$readiness[ $check ] = array(
+					'state'      => self::OUTDATED,
+					'age'        => (int) floor( max( 0.0, $now - $result->get_completed_at() ) ),
+					'refresh_in' => 0,
+				);
+				continue;
+			}
 			if (
 				null === $result
 				|| $result->get_definition_version() !== $definition->get_version()
@@ -207,6 +226,125 @@ final class Baselines {
 		}
 
 		return $readiness;
+	}
+
+	/**
+	 * The baseline of each check to attach to an update that is starting.
+	 *
+	 * Decided once, in the update request, from what is stored at that
+	 * moment (no request, no waiting). The order of the rules and their
+	 * reasons are in BeforeReason. A baseline is attached only if it is of
+	 * the current definition version and site address, was accepted before
+	 * the update began (`$activity['at']`), is at most MAX_AGE_SECONDS old,
+	 * and its run started at the generation the ledger had right before this
+	 * update with nothing else running: then no other update started or
+	 * ended in between. Inconclusive or failing baselines are attached as
+	 * they are; their verdict never becomes a pass.
+	 *
+	 * @param int                   $user     User ID of the updating administrator.
+	 * @param string                $login    Their login-session fingerprint.
+	 * @param array<string, string> $targets  Current target fingerprint per check.
+	 * @param array|null            $activity UpdateActivity::begin() result of this update, or null.
+	 * @return array<string, array{result: CheckResult|null, reason: string|null}> By check, in CheckDefinition order.
+	 */
+	public function for_update( $user, $login, array $targets, $activity ) {
+		$selection = array();
+		foreach ( CheckDefinition::all() as $definition ) {
+			$check  = $definition->get_id();
+			$reason = $this->update_reason( $activity );
+			$result = null;
+			if ( null === $reason ) {
+				$result = $this->lookup( $user, $login, $check, $reason );
+			}
+			if ( null !== $result ) {
+				$reason = self::baseline_reason( $result, $definition, isset( $targets[ $check ] ) ? (string) $targets[ $check ] : '', $activity );
+			}
+			$selection[ $check ] = array(
+				'result' => null === $reason ? $result : null,
+				'reason' => $reason,
+			);
+		}
+
+		return $selection;
+	}
+
+	/**
+	 * Why no baseline can be attached whatever is stored, or null.
+	 *
+	 * @param mixed $activity UpdateActivity::begin() result.
+	 * @return string|null
+	 */
+	private function update_reason( $activity ) {
+		if ( ! is_array( $activity ) || ! isset( $activity['at'] ) || ! CheckResult::is_timestamp( $activity['at'] ) || ! array_key_exists( 'generation', $activity ) ) {
+			return BeforeReason::UPDATE_ORDER_UNKNOWN;
+		}
+
+		return empty( $activity['others_running'] ) ? null : BeforeReason::OVERLAPPING_UPDATE;
+	}
+
+	/**
+	 * The stored baseline of a check, or null with $reason set.
+	 *
+	 * @param int         $user   User ID.
+	 * @param string      $login  Login-session fingerprint.
+	 * @param string      $check  Check identifier.
+	 * @param string|null $reason Set to MISSING, CORRUPT or SELECTION_FAILED.
+	 * @return CheckResult|null
+	 */
+	private function lookup( $user, $login, $check, &$reason ) {
+		try {
+			$stored = $this->store->get( self::storage_key( $user, $login, $check ) );
+		} catch ( Throwable $e ) {
+			$reason = BeforeReason::SELECTION_FAILED;
+			return null;
+		}
+		if ( null === $stored ) {
+			$reason = BeforeReason::MISSING;
+			return null;
+		}
+		$result = $this->decode_for( $stored, $user, $login, $check );
+		if ( null === $result ) {
+			$reason = BeforeReason::CORRUPT;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Why a stored baseline cannot be attached, or null if it can.
+	 *
+	 * @param CheckResult     $result     Stored baseline.
+	 * @param CheckDefinition $definition Current definition.
+	 * @param string          $target     Current target fingerprint.
+	 * @param array           $activity   UpdateActivity::begin() result (generation known).
+	 * @return string|null
+	 */
+	private static function baseline_reason( CheckResult $result, CheckDefinition $definition, $target, array $activity ) {
+		$started = (float) $activity['at'];
+		if ( $result->get_definition_version() !== $definition->get_version() ) {
+			return BeforeReason::DEFINITION_CHANGED;
+		}
+		if ( '' === $target || ! hash_equals( $result->get_context()->get_target(), $target ) ) {
+			return BeforeReason::TARGET_CHANGED;
+		}
+		if ( $result->get_completed_at() >= $started ) {
+			return BeforeReason::NOT_COMPLETED_BEFORE_UPDATE;
+		}
+		if ( $started - $result->get_completed_at() > self::MAX_AGE_SECONDS ) {
+			return BeforeReason::EXPIRED;
+		}
+		if ( null === $result->get_generation() ) {
+			return BeforeReason::TAKEN_DURING_UPDATE;
+		}
+		if ( null === $activity['generation'] ) {
+			// The ledger was missing or unreadable before this update.
+			return BeforeReason::UPDATE_ORDER_UNKNOWN;
+		}
+		if ( $result->get_generation() !== $activity['generation'] ) {
+			return BeforeReason::INTERVENING_UPDATE;
+		}
+
+		return null;
 	}
 
 	/**
@@ -308,7 +446,8 @@ final class Baselines {
 		try {
 			$now = (float) call_user_func( $this->now );
 			foreach ( $this->store->all( self::CLEANUP_LIMIT ) as $key => $value ) {
-				if ( $key === $keep ) {
+				// Only baselines: the same store holds the updater activity ledger.
+				if ( $key === $keep || 0 !== strpos( (string) $key, self::STORAGE_PREFIX ) ) {
 					continue;
 				}
 				try {

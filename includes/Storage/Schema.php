@@ -30,8 +30,12 @@ final class Schema {
 	 * 4: Action Scheduler snapshot, diff and reason columns.
 	 * 5: immediate_captured_at (Unix time of the IMMEDIATE observation with
 	 *    microseconds), so a later request can prove it started afterwards.
+	 * 6: site check BEFORE baselines per check (Update\SiteCheckObservation):
+	 *    `site_check_<check>_before` (attached result) and
+	 *    `site_check_<check>_before_reason`. Existing rows are not rewritten:
+	 *    both NULL means the analysis was created before schema 6.
 	 */
-	const VERSION = 5;
+	const VERSION = 6;
 
 	/**
 	 * Column renames: current name => [ definition, earlier names, newest first ].
@@ -198,6 +202,8 @@ final class Schema {
 	 * signals with their own columns. The `*_before_snapshot` and
 	 * `*_immediate_snapshot` columns are temporary and cleared on every final
 	 * state; `cron_*_reason` holds the CronPhaseReason of an unavailable Cron phase.
+	 * `site_check_*_before` / `_reason` are written once, when the analysis is
+	 * created, and kept on every final state.
 	 *
 	 * @param string $table           Full table name.
 	 * @param string $charset_collate Charset/collation clause.
@@ -240,6 +246,10 @@ final class Schema {
   action_scheduler_during_update_reason varchar(40) DEFAULT NULL,
   action_scheduler_post_update_reason varchar(40) DEFAULT NULL,
   action_scheduler_final_reason varchar(40) DEFAULT NULL,
+  site_check_home_before text DEFAULT NULL,
+  site_check_home_before_reason varchar(40) DEFAULT NULL,
+  site_check_rest_before text DEFAULT NULL,
+  site_check_rest_before_reason varchar(40) DEFAULT NULL,
   error_code varchar(64) DEFAULT NULL,
   error_message text DEFAULT NULL,
   PRIMARY KEY  (id),

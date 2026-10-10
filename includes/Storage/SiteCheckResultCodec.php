@@ -18,21 +18,24 @@ defined( 'ABSPATH' ) || exit;
 
 /**
  * Encodes one check run (CheckResult) as compact versioned JSON and decodes
- * it with full validation. Meant for the temporary BEFORE/AFTER results of
- * an open analysis, like the temporary snapshots.
+ * it with full validation. Used for BEFORE baselines (Baselines) and for the
+ * BEFORE results attached to an analysis (Update\SiteCheckObservation).
  *
  * Contains only fixed codes, HTTP statuses, durations, server timestamps,
- * the definition version, the user ID and two keyed fingerprints (target,
- * login session): never response bodies, headers, cookies, nonces,
- * tokens, markers, URLs, user IDs seen in responses, or error messages.
- * Origin and verdicts are derived on decode, never stored.
+ * the definition version, the user ID, two keyed fingerprints (target,
+ * login session) and the updater activity generation at the session start
+ * (`epoch:sequence`, or null): never response bodies, headers, cookies,
+ * nonces, tokens, markers, URLs, user IDs seen in responses, or error
+ * messages. Origin and verdicts are derived on decode, never stored.
+ * Schema 2 added the generation; schema 1 values are not decoded (they
+ * cannot prove which updates came after them).
  */
 final class SiteCheckResultCodec {
 
 	/**
 	 * Format version.
 	 */
-	const SCHEMA = 1;
+	const SCHEMA = 2;
 
 	/**
 	 * Largest accepted stored value, in bytes.
@@ -47,7 +50,7 @@ final class SiteCheckResultCodec {
 	/**
 	 * Keys, in order.
 	 */
-	const KEYS = array( 'schema', 'check', 'definition', 'target', 'auth', 'user', 'session', 'started_at', 'completed_at', 'attempts' );
+	const KEYS = array( 'schema', 'check', 'definition', 'target', 'auth', 'user', 'session', 'started_at', 'completed_at', 'attempts', 'generation' );
 
 	/**
 	 * Encode a result.
@@ -77,6 +80,7 @@ final class SiteCheckResultCodec {
 					'started_at'   => $result->get_started_at(),
 					'completed_at' => $result->get_completed_at(),
 					'attempts'     => $attempts,
+					'generation'   => $result->get_generation(),
 				),
 				JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION
 			);
@@ -125,7 +129,8 @@ final class SiteCheckResultCodec {
 				new CheckContext( $data['target'], $data['auth'], $data['user'], $data['session'] ),
 				$data['started_at'],
 				$data['completed_at'],
-				$attempts
+				$attempts,
+				$data['generation']
 			);
 		} catch ( InvalidArgumentException $e ) {
 			throw new UnexpectedValueException( 'Stored site check result is invalid.' );

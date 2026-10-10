@@ -8,6 +8,7 @@
 namespace UpdateLens\Update;
 
 use Throwable;
+use UpdateLens\SiteCheck\UpdateActivity;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -26,9 +27,14 @@ defined( 'ABSPATH' ) || exit;
  * - `upgrader_process_complete` (last, after core's own handlers): the update
  *   finished; capture the immediate state.
  * - `shutdown` (last): fail unfinished analyses; settle on later admin pages
- *   that SettleEligibility allows.
+ *   that SettleEligibility allows; end this request's updater activity.
  * - `wp_ajax_updatelens_settle`: the follow-up request the updating
  *   administrator's browser sends after the update (FollowUpRequest).
+ *
+ * Every updater download also records the request in the site-wide updater
+ * activity ledger (SiteCheck\UpdateActivity), before anything else, and the
+ * analysis gets that record: it decides which site check baselines may be
+ * attached (an update in between makes an older baseline unusable).
  */
 final class PluginUpdateTracker {
 
@@ -54,12 +60,28 @@ final class PluginUpdateTracker {
 	private $active_at_boot;
 
 	/**
+	 * Site-wide updater activity ledger (orders site check baselines against updates).
+	 *
+	 * @var UpdateActivity|null
+	 */
+	private $activity;
+
+	/**
+	 * This request's ledger token, once it started updater activity.
+	 *
+	 * @var string|null
+	 */
+	private $activity_token = null;
+
+	/**
 	 * Constructor. Create on `plugins_loaded`, after active plugins are loaded.
 	 *
 	 * @param PluginUpdateAnalyzer $analyzer Lifecycle orchestration.
+	 * @param UpdateActivity|null  $activity Updater activity ledger (default: options table).
 	 */
-	public function __construct( PluginUpdateAnalyzer $analyzer ) {
+	public function __construct( PluginUpdateAnalyzer $analyzer, ?UpdateActivity $activity = null ) {
 		$this->analyzer       = $analyzer;
+		$this->activity       = $activity;
 		$this->active_at_boot = (array) get_option( 'active_plugins', array() );
 	}
 
@@ -87,8 +109,17 @@ final class PluginUpdateTracker {
 	 */
 	public function on_pre_download( $reply, $package, $upgrader = null, $hook_extra = array() ) {
 		try {
+			if ( is_wp_error( $reply ) || ! $upgrader instanceof \WP_Upgrader ) {
+				return $reply;
+			}
+
+			// Every updater download (any type, any user, also cron and WP-CLI)
+			// is recorded first, so no older site check baseline can be used for
+			// a later update.
+			$activity = $this->record_activity();
+
 			// Translations are not attributed and run inside plugin updates (Language_Pack_Upgrader::async_upgrade()).
-			if ( is_wp_error( $reply ) || ! $upgrader instanceof \WP_Upgrader || $upgrader instanceof \Language_Pack_Upgrader ) {
+			if ( $upgrader instanceof \Language_Pack_Upgrader ) {
 				return $reply;
 			}
 
@@ -108,7 +139,8 @@ final class PluginUpdateTracker {
 			$this->analyzer->update_starting(
 				$plugin_file,
 				null === $plugin_file ? array() : self::plugin_data( $plugin_file ),
-				get_current_user_id()
+				get_current_user_id(),
+				$activity
 			);
 		} catch ( Throwable $e ) {
 			return $reply; // Never block the update.
@@ -169,8 +201,51 @@ final class PluginUpdateTracker {
 		try {
 			$this->analyzer->request_ending( self::may_settle_at_shutdown(), $this->activation_changed() );
 		} catch ( Throwable $e ) {
+			$this->end_activity();
 			return;
 		}
+		$this->end_activity();
+	}
+
+	/**
+	 * End this request's updater activity, if it had any.
+	 *
+	 * @return void
+	 */
+	private function end_activity() {
+		if ( null !== $this->activity_token ) {
+			$this->activity()->end( $this->activity_token );
+		}
+	}
+
+	/**
+	 * Record this request's updater activity in the site-wide ledger.
+	 *
+	 * @return array|null UpdateActivity::begin() result, or null if it could not be recorded.
+	 */
+	private function record_activity() {
+		try {
+			if ( null === $this->activity_token ) {
+				$this->activity_token = $this->activity()->new_token();
+			}
+
+			return $this->activity()->begin( $this->activity_token );
+		} catch ( Throwable $e ) {
+			return null;
+		}
+	}
+
+	/**
+	 * Updater activity ledger.
+	 *
+	 * @return UpdateActivity
+	 */
+	private function activity() {
+		if ( null === $this->activity ) {
+			$this->activity = UpdateActivity::from_wordpress();
+		}
+
+		return $this->activity;
 	}
 
 	/**

@@ -88,8 +88,12 @@ export interface StartedRun {
 
 /** A `before` start that opened no session (`code` `not_needed`). */
 export interface NotNeededRun {
-	/** `fresh`: every baseline is recent enough; `no_updates`: nothing to update. */
-	reason: 'fresh' | 'no_updates';
+	/**
+	 * `fresh`: every baseline is recent enough; `no_updates`: nothing to
+	 * update; `update_in_progress`: an update is running, so a baseline taken
+	 * now could never be used (ask again after `refreshIn`).
+	 */
+	reason: 'fresh' | 'no_updates' | 'update_in_progress';
 	refreshIn?: RefreshIn;
 }
 
@@ -243,7 +247,9 @@ export function parseNotNeeded( data: unknown ): NotNeededRun | null {
 		! isRecord( data ) ||
 		data.code !== 'not_needed' ||
 		data.purpose !== 'before' ||
-		( data.reason !== 'fresh' && data.reason !== 'no_updates' )
+		! [ 'fresh', 'no_updates', 'update_in_progress' ].includes(
+			data.reason as string
+		)
 	) {
 		return null;
 	}
@@ -252,7 +258,10 @@ export function parseNotNeeded( data: unknown ): NotNeededRun | null {
 		return null;
 	}
 
-	return { reason: data.reason, ...( refreshIn ? { refreshIn } : {} ) };
+	return {
+		reason: data.reason as NotNeededRun[ 'reason' ],
+		...( refreshIn ? { refreshIn } : {} ),
+	};
 }
 
 /**

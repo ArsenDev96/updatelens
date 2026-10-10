@@ -25,9 +25,10 @@ defined( 'ABSPATH' ) || exit;
  *   one run's attempts (ReportValidator format) once.
  *
  * BEFORE runs keep baselines (Baselines). A `before` start opens sessions
- * only for the checks whose baseline is due, and only while a plugin other
- * than UpdateLens has an update available; otherwise it succeeds with
- * `code` `not_needed` (`reason` `fresh` or `no_updates`), opens nothing and
+ * only for the checks whose baseline is due, only while a plugin other than
+ * UpdateLens has an update available and only while no update is running;
+ * otherwise it succeeds with `code` `not_needed` (`reason` `fresh`,
+ * `no_updates` or `update_in_progress`), opens nothing and
  * does not count against the rate limit. `before` responses carry
  * `refresh_in` (seconds per check until its baseline is due). An accepted
  * `before` report is stored as its check's baseline (`baseline`: `saved`,
@@ -106,18 +107,27 @@ final class AjaxEndpoints {
 	private $has_updates;
 
 	/**
+	 * Updater activity ledger (created on first use).
+	 *
+	 * @var UpdateActivity|null
+	 */
+	private $activity;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param SessionManager     $manager     Sessions.
-	 * @param ContextHasher|null $hasher      Context fingerprints (default: keyed with the site's salts).
-	 * @param Baselines|null     $baselines   Baselines (default: options table).
-	 * @param callable|null      $has_updates Update availability (default: BaselinePage::has_relevant_updates()).
+	 * @param SessionManager      $manager     Sessions.
+	 * @param ContextHasher|null  $hasher      Context fingerprints (default: keyed with the site's salts).
+	 * @param Baselines|null      $baselines   Baselines (default: options table).
+	 * @param callable|null       $has_updates Update availability (default: BaselinePage::has_relevant_updates()).
+	 * @param UpdateActivity|null $activity    Updater activity ledger (default: options table).
 	 */
-	public function __construct( SessionManager $manager, ?ContextHasher $hasher = null, ?Baselines $baselines = null, ?callable $has_updates = null ) {
+	public function __construct( SessionManager $manager, ?ContextHasher $hasher = null, ?Baselines $baselines = null, ?callable $has_updates = null, ?UpdateActivity $activity = null ) {
 		$this->manager     = $manager;
 		$this->hasher      = $hasher;
 		$this->baselines   = $baselines;
 		$this->has_updates = null === $has_updates ? array( BaselinePage::class, 'has_relevant_updates' ) : $has_updates;
+		$this->activity    = $activity;
 	}
 
 	/**
@@ -161,12 +171,20 @@ final class AjaxEndpoints {
 		$user       = get_current_user_id();
 		$purpose    = self::input( 'purpose' );
 		$refresh_in = null;
+		// Recorded in each session: ties the result to the updates around it.
+		$generation = CheckSession::PURPOSE_BEFORE === $purpose || CheckSession::PURPOSE_AFTER === $purpose ? $this->activity()->quiet_generation() : null;
 		if ( CheckSession::PURPOSE_BEFORE === $purpose ) {
 			if ( ! call_user_func( $this->has_updates ) ) {
 				self::not_needed( 'no_updates' );
 				return;
 			}
-			$readiness  = $this->baselines()->readiness( $user, $login, $targets );
+			if ( null === $generation ) {
+				// An update is running (or the order is unknown): a baseline taken
+				// now could never be attached, so none is started.
+				self::not_needed( 'update_in_progress', array_fill_keys( array_keys( CheckDefinition::VERSIONS ), Baselines::RETRY_AFTER_FAILURE_SECONDS ) );
+				return;
+			}
+			$readiness  = $this->baselines()->readiness( $user, $login, $targets, $generation );
 			$refresh_in = Baselines::refresh_in( $readiness );
 			$due        = Baselines::due( $readiness );
 			if ( array() === $due ) {
@@ -176,7 +194,7 @@ final class AjaxEndpoints {
 			$targets = array_intersect_key( $targets, array_flip( $due ) );
 		}
 
-		$outcome = $this->manager->start( $user, $login, $purpose, $targets );
+		$outcome = $this->manager->start( $user, $login, $purpose, $targets, $generation );
 		if ( SessionManager::STARTED !== $outcome['code'] ) {
 			self::error( $outcome['code'], isset( $outcome['retry_after'] ) ? array( 'retry_after' => $outcome['retry_after'] ) : array() );
 			return;
@@ -256,8 +274,8 @@ final class AjaxEndpoints {
 	/**
 	 * Answer a `before` start that needs no run.
 	 *
-	 * @param string                  $reason     `fresh` or `no_updates`.
-	 * @param array<string, int>|null $refresh_in Seconds until each check is due (`fresh` only).
+	 * @param string                  $reason     `fresh`, `no_updates` or `update_in_progress`.
+	 * @param array<string, int>|null $refresh_in Seconds until each check is due (not with `no_updates`).
 	 * @return void
 	 */
 	private static function not_needed( $reason, ?array $refresh_in = null ) {
@@ -329,6 +347,19 @@ final class AjaxEndpoints {
 	 */
 	private static function error( $code, array $extra = array() ) {
 		wp_send_json_error( array( 'code' => $code ) + $extra, isset( self::STATUS[ $code ] ) ? self::STATUS[ $code ] : 500 );
+	}
+
+	/**
+	 * Updater activity ledger.
+	 *
+	 * @return UpdateActivity
+	 */
+	private function activity() {
+		if ( null === $this->activity ) {
+			$this->activity = UpdateActivity::from_wordpress();
+		}
+
+		return $this->activity;
 	}
 
 	/**

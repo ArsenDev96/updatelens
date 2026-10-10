@@ -105,6 +105,13 @@ final class FakeSite {
 	public $captures = 0;
 
 	/**
+	 * BEFORE site check baselines given to every request's analyzer (null: none).
+	 *
+	 * @var \UpdateLens\Update\SiteCheckObservation|null
+	 */
+	public $site_checks = null;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param array<string, array{string, string}> $options Initial options.
@@ -171,7 +178,8 @@ final class FakeSite {
 				return $this->time;
 			},
 			$capture_action_scheduler,
-			null === $started_at ? $this->time + 0.5 : (float) $started_at
+			null === $started_at ? $this->time + 0.5 : (float) $started_at,
+			$this->site_checks
 		);
 	}
 

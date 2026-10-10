@@ -33,6 +33,7 @@ final class SiteCheckSessionCodecTest extends TestCase {
 			'secret_hash' => hash( 'sha256', 'secret' ),
 			'created_at'  => 1760090000.25,
 			'expires_at'  => 1760090120.25,
+			'generation'  => '0123456789abcdef:42',
 		);
 	}
 
@@ -44,7 +45,7 @@ final class SiteCheckSessionCodecTest extends TestCase {
 		$json  = $codec->encode( CheckSession::from_array( self::record() ) );
 
 		$this->assertSame(
-			'{"schema":1,"check":"home","definition":1,"purpose":"before","user":7,"login":"' . str_repeat( 'b', 64 ) . '","target":"' . str_repeat( 'a', 64 ) . '","secret_hash":"' . hash( 'sha256', 'secret' ) . '","created_at":1760090000.25,"expires_at":1760090120.25}',
+			'{"schema":2,"check":"home","definition":1,"purpose":"before","user":7,"login":"' . str_repeat( 'b', 64 ) . '","target":"' . str_repeat( 'a', 64 ) . '","secret_hash":"' . hash( 'sha256', 'secret' ) . '","created_at":1760090000.25,"expires_at":1760090120.25,"generation":"0123456789abcdef:42"}',
 			$json
 		);
 		$this->assertSame( self::record(), $codec->decode( $json )->to_array() );
@@ -69,6 +70,8 @@ final class SiteCheckSessionCodecTest extends TestCase {
 			'extra key'         => array( $record + array( 'marker' => str_repeat( 'f', 32 ) ) ),
 			'missing key'       => array( array_diff_key( $record, array( 'login' => 1 ) ) ),
 			'other order'       => array( array_reverse( $record ) ),
+			'bad generation'    => array( array_merge( $record, array( 'generation' => 'abc:1' ) ) ),
+			'generation number' => array( array_merge( $record, array( 'generation' => 42 ) ) ),
 		);
 	}
 
@@ -89,7 +92,7 @@ final class SiteCheckSessionCodecTest extends TestCase {
 		$this->expectException( UnexpectedValueException::class );
 		$this->expectExceptionMessage( 'Stored site check session is invalid.' );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Test input.
-		( new SiteCheckSessionCodec() )->decode( json_encode( array( 'schema' => 1 ) + $record ) );
+		( new SiteCheckSessionCodec() )->decode( json_encode( array( 'schema' => 2 ) + $record ) );
 	}
 
 	/**
@@ -97,7 +100,7 @@ final class SiteCheckSessionCodecTest extends TestCase {
 	 */
 	public function test_rejects_malformed_values() {
 		$valid = ( new SiteCheckSessionCodec() )->encode( CheckSession::from_array( self::record() ) );
-		foreach ( array( null, '', 'x', '[]', '{"schema":2}', str_replace( '"schema":1', '"schema":"1"', $valid ), str_pad( $valid, 1025 ), '{"schema":1,"check":{"a":1}}' ) as $value ) {
+		foreach ( array( null, '', 'x', '[]', '{"schema":3}', str_replace( '"schema":2', '"schema":"2"', $valid ), str_replace( '"schema":2', '"schema":1', $valid ), str_pad( $valid, 1025 ), '{"schema":2,"check":{"a":1}}' ) as $value ) {
 			try {
 				( new SiteCheckSessionCodec() )->decode( $value );
 				$this->fail( 'Malformed value accepted.' );

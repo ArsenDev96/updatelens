@@ -46,7 +46,7 @@ final class SiteCheckResultCodecTest extends TestCase {
 		$json   = $codec->encode( $result );
 
 		$this->assertSame(
-			'{"schema":1,"check":"home","definition":1,"target":"' . str_repeat( 'a', 64 ) . '","auth":"anonymous","user":7,"session":"' . str_repeat( 'b', 64 ) . '","started_at":1760090002.75,"completed_at":1760090004.0,"attempts":[{"outcome":"timeout","status":null,"header":"not_read","end_marker":"not_read","duration_ms":10000},{"outcome":"server_error","status":500,"header":"absent","end_marker":"absent","duration_ms":912}]}',
+			'{"schema":2,"check":"home","definition":1,"target":"' . str_repeat( 'a', 64 ) . '","auth":"anonymous","user":7,"session":"' . str_repeat( 'b', 64 ) . '","started_at":1760090002.75,"completed_at":1760090004.0,"attempts":[{"outcome":"timeout","status":null,"header":"not_read","end_marker":"not_read","duration_ms":10000},{"outcome":"server_error","status":500,"header":"absent","end_marker":"absent","duration_ms":912}],"generation":null}',
 			$json
 		);
 		$decoded = $codec->decode( $json );
@@ -133,6 +133,8 @@ final class SiteCheckResultCodecTest extends TestCase {
 			'stored body text'       => array( $with( array( 'attempts' => array( $attempt + array( 'body_text' => self::SECRET ) ) ) ) ),
 			'inconsistent attempt'   => array( $with( array( 'attempts' => array( array_merge( $attempt, array( 'status' => 500 ) ) ) ) ) ),
 			'retry after a pass'     => array( $with( array( 'attempts' => array( $attempt, $attempt ) ) ) ),
+			'malformed generation'   => array( $with( array( 'generation' => 'abc:1' ) ) ),
+			'generation as number'   => array( $with( array( 'generation' => 7 ) ) ),
 		);
 	}
 
@@ -152,12 +154,37 @@ final class SiteCheckResultCodecTest extends TestCase {
 	}
 
 	/**
+	 * Schema 1 values (no generation) are never decoded: they cannot prove
+	 * which updates came after them.
+	 */
+	public function test_rejects_schema_1() {
+		$codec = new SiteCheckResultCodec();
+		$json  = str_replace( array( '"schema":2', ',"generation":null' ), array( '"schema":1', '' ), $codec->encode( F::before( 'home', array( F::home() ) ) ) );
+
+		$this->expectException( UnexpectedValueException::class );
+		$this->expectExceptionMessage( 'Stored site check result has an unsupported schema.' );
+		$codec->decode( $json );
+	}
+
+	/**
+	 * The generation round-trips.
+	 */
+	public function test_generation_round_trip() {
+		$codec  = new SiteCheckResultCodec();
+		$result = F::before( 'rest', array( F::rest() ), array( 'generation' => '0123456789abcdef:42' ) );
+		$json   = $codec->encode( $result );
+
+		$this->assertStringEndsWith( ',"generation":"0123456789abcdef:42"}', $json );
+		$this->assertSame( '0123456789abcdef:42', $codec->decode( $json )->get_generation() );
+	}
+
+	/**
 	 * Other schemas are reported as unsupported.
 	 */
 	public function test_rejects_other_schemas() {
 		$this->expectException( UnexpectedValueException::class );
 		$this->expectExceptionMessage( 'Stored site check result has an unsupported schema.' );
-		( new SiteCheckResultCodec() )->decode( '{"schema":2}' );
+		( new SiteCheckResultCodec() )->decode( '{"schema":3}' );
 	}
 
 	/**

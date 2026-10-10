@@ -17,14 +17,16 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Encodes a CheckSession as versioned JSON (the transient value) and decodes
  * it with full validation. Contains no marker and no secret: only a SHA-256
- * of the secret, two keyed fingerprints, the user ID, codes and times.
+ * of the secret, two keyed fingerprints, the user ID, codes, times and the
+ * updater activity generation. Schema 2 added the generation; sessions of
+ * schema 1 (live for two minutes at most) are no longer readable.
  */
 final class SiteCheckSessionCodec {
 
 	/**
 	 * Format version.
 	 */
-	const SCHEMA = 1;
+	const SCHEMA = 2;
 
 	/**
 	 * Largest accepted stored value, in bytes.

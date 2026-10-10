@@ -82,6 +82,14 @@ final class CheckResult {
 	private $verdict;
 
 	/**
+	 * Updater activity generation when the session started (UpdateActivity),
+	 * or null if an update was running or the order was unknown.
+	 *
+	 * @var string|null
+	 */
+	private $generation;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param string       $check              Check identifier.
@@ -90,9 +98,13 @@ final class CheckResult {
 	 * @param float|int    $started_at         Session start (Unix seconds).
 	 * @param float|int    $completed_at       Report accepted (Unix seconds), not before the start.
 	 * @param Attempt[]    $attempts           One or two attempts of this check, a valid run.
+	 * @param string|null  $generation         Updater activity generation at the session start, or null.
 	 * @throws InvalidArgumentException If anything is invalid or inconsistent.
 	 */
-	public function __construct( $check, $definition_version, CheckContext $context, $started_at, $completed_at, array $attempts ) {
+	public function __construct( $check, $definition_version, CheckContext $context, $started_at, $completed_at, array $attempts, $generation = null ) {
+		if ( null !== $generation && ! UpdateActivity::is_generation( $generation ) ) {
+			throw new InvalidArgumentException( 'Invalid UpdateLens site check result.' );
+		}
 		if ( ! CheckDefinition::is_id( $check ) || ! is_int( $definition_version ) || $definition_version < 1 || $definition_version > self::MAX_DEFINITION_VERSION ) {
 			throw new InvalidArgumentException( 'Invalid UpdateLens site check result.' );
 		}
@@ -117,6 +129,7 @@ final class CheckResult {
 		$this->started_at         = (float) $started_at;
 		$this->completed_at       = (float) $completed_at;
 		$this->attempts           = $attempts;
+		$this->generation         = $generation;
 	}
 
 	/**
@@ -181,6 +194,15 @@ final class CheckResult {
 	 */
 	public function get_attempts() {
 		return $this->attempts;
+	}
+
+	/**
+	 * Updater activity generation when the session started, or null.
+	 *
+	 * @return string|null
+	 */
+	public function get_generation() {
+		return $this->generation;
 	}
 
 	/**

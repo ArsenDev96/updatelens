@@ -23,6 +23,11 @@ final class BaselinesTest extends TestCase {
 	const LOGIN = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 	/**
+	 * Updater activity generation of the baselines' runs (and the current one).
+	 */
+	const GENERATION = '0123456789abcdef:5';
+
+	/**
 	 * Storage.
 	 *
 	 * @var InMemoryBaselineStore
@@ -89,6 +94,7 @@ final class BaselinesTest extends TestCase {
 			$options + array(
 				'started_at'   => $started,
 				'completed_at' => $completed,
+				'generation'   => self::GENERATION,
 			)
 		);
 	}
@@ -99,7 +105,7 @@ final class BaselinesTest extends TestCase {
 	 * @return array
 	 */
 	private function readiness() {
-		return $this->baselines->readiness( F::USER, self::LOGIN, self::targets() );
+		return $this->baselines->readiness( F::USER, self::LOGIN, self::targets(), self::GENERATION );
 	}
 
 	/**
@@ -360,7 +366,7 @@ final class BaselinesTest extends TestCase {
 
 		$this->baselines->save( self::before_run( 'home', $this->now - 2, $this->now - 1 ) );
 		$this->assertSame(
-			array( 'schema', 'check', 'definition', 'target', 'auth', 'user', 'session', 'started_at', 'completed_at', 'attempts' ),
+			array( 'schema', 'check', 'definition', 'target', 'auth', 'user', 'session', 'started_at', 'completed_at', 'attempts', 'generation' ),
 			array_keys( json_decode( $this->store->values[ $key ], true ) )
 		);
 		$this->assertSame( 600, Baselines::MAX_AGE_SECONDS );

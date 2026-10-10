@@ -127,12 +127,13 @@ final class SessionManager {
 	 * @param mixed                 $purpose CheckSession purpose (request input).
 	 * @param array<string, string> $targets Target fingerprint per check to open (one or both
 	 *                                       checks; a BEFORE start opens only the due ones).
+	 * @param string|null           $generation Updater activity generation now (UpdateActivity::quiet_generation()), or null.
 	 * @return array `code` STARTED with `purpose`, `expires_in` and `sessions`
 	 *               (per check, in CheckDefinition order: `definition`,
 	 *               `session` = marker, `secret`); RATE_LIMITED with
 	 *               `retry_after`; INVALID_REQUEST or UNAVAILABLE.
 	 */
-	public function start( $user, $login, $purpose, array $targets ) {
+	public function start( $user, $login, $purpose, array $targets, $generation = null ) {
 		if ( ! in_array( $purpose, CheckSession::PURPOSES, true ) ) {
 			return array( 'code' => self::INVALID_REQUEST );
 		}
@@ -172,6 +173,7 @@ final class SessionManager {
 						'secret_hash' => CheckSession::hash_secret( $secret ),
 						'created_at'  => $now,
 						'expires_at'  => $now + CheckSession::TTL,
+						'generation'  => $generation,
 					)
 				);
 				$key     = CheckSession::storage_key( $marker );
@@ -286,7 +288,8 @@ final class SessionManager {
 				new CheckContext( $session->get_target(), $definition->get_auth(), $session->get_user(), $session->get_login() ),
 				$session->get_created_at(),
 				max( $now, $session->get_created_at() ),
-				$attempts
+				$attempts,
+				$session->get_generation()
 			),
 		);
 	}

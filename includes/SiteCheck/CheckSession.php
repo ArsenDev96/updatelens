@@ -24,6 +24,10 @@ defined( 'ABSPATH' ) || exit;
  * - the **secret** (SECRET_BYTES, hex): private to the owner's browser. It
  *   is needed, together with the owner's login, to submit the one result.
  *
+ * The record also keeps the updater activity generation at its start
+ * (UpdateActivity), so the result can later be tied to the updates around
+ * it.
+ *
  * Neither token is stored: the record is kept under a key derived from the
  * marker (storage_key()) and holds only a SHA-256 of the secret. Both are
  * 128/256-bit random values, so an unkeyed hash is sufficient (as for
@@ -57,7 +61,7 @@ final class CheckSession {
 	/**
 	 * Keys of the array form, in order.
 	 */
-	const KEYS = array( 'check', 'definition', 'purpose', 'user', 'login', 'target', 'secret_hash', 'created_at', 'expires_at' );
+	const KEYS = array( 'check', 'definition', 'purpose', 'user', 'login', 'target', 'secret_hash', 'created_at', 'expires_at', 'generation' );
 
 	/**
 	 * Array form (validated).
@@ -96,7 +100,8 @@ final class CheckSession {
 			&& CheckResult::is_timestamp( $data['created_at'] )
 			&& CheckResult::is_timestamp( $data['expires_at'] )
 			&& $data['expires_at'] > $data['created_at']
-			&& $data['expires_at'] - $data['created_at'] <= self::TTL;
+			&& $data['expires_at'] - $data['created_at'] <= self::TTL
+			&& ( null === $data['generation'] || UpdateActivity::is_generation( $data['generation'] ) );
 		if ( ! $valid ) {
 			throw new InvalidArgumentException( 'Invalid UpdateLens site check session.' );
 		}
@@ -238,6 +243,16 @@ final class CheckSession {
 	 */
 	public function get_expires_at() {
 		return $this->data['expires_at'];
+	}
+
+	/**
+	 * Updater activity generation when the session started (UpdateActivity),
+	 * or null if an update was running or the order could not be read.
+	 *
+	 * @return string|null
+	 */
+	public function get_generation() {
+		return $this->data['generation'];
 	}
 
 	/**

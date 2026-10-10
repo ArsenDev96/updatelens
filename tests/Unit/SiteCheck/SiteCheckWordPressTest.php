@@ -17,6 +17,7 @@ use UpdateLens\SiteCheck\ContextHasher;
 use UpdateLens\SiteCheck\FrontendMarker;
 use UpdateLens\SiteCheck\RateLimiter;
 use UpdateLens\SiteCheck\SessionManager;
+use UpdateLens\SiteCheck\UpdateActivity;
 use UpdateLens\Storage\Schema;
 use UpdateLens\Tests\Support\InMemoryBaselineStore;
 use UpdateLens\Tests\Support\InMemorySessionStore;
@@ -83,6 +84,13 @@ final class SiteCheckWordPressTest extends TestCase {
 	private $meta = array();
 
 	/**
+	 * Updater activity ledger.
+	 *
+	 * @var UpdateActivity
+	 */
+	private $activity;
+
+	/**
 	 * Load the stand-ins and build the manager.
 	 *
 	 * @before
@@ -98,6 +106,13 @@ final class SiteCheckWordPressTest extends TestCase {
 			function () {
 				return $this->time;
 			}
+		);
+		$this->activity       = new UpdateActivity(
+			new InMemoryBaselineStore(),
+			function () {
+				return $this->time;
+			},
+			'random_bytes'
 		);
 		$meta                 = &$this->meta;
 		$this->manager        = new SessionManager(
@@ -132,7 +147,8 @@ final class SiteCheckWordPressTest extends TestCase {
 			$this->baselines,
 			function () {
 				return $this->has_updates;
-			}
+			},
+			$this->activity
 		);
 		try {
 			'start' === $action ? $endpoints->on_start() : $endpoints->on_report();
@@ -780,7 +796,7 @@ final class SiteCheckWordPressTest extends TestCase {
 	 * and only when every requirement holds.
 	 */
 	public function test_baseline_page_settings() {
-		$settings = BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ) );
+		$settings = BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity );
 		$this->assertSame(
 			array(
 				'ajaxUrl'  => 'https://example.com/wp-admin/admin-ajax.php',
@@ -796,7 +812,7 @@ final class SiteCheckWordPressTest extends TestCase {
 			),
 			$settings
 		);
-		$this->assertNotNull( BaselinePage::settings( 'update-core.php', $this->baselines, new ContextHasher( 'test-site-salt' ) ) );
+		$this->assertNotNull( BaselinePage::settings( 'update-core.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity ) );
 
 		$checks = $this->start();
 		$this->report_check( $checks['rest'], array( F::rest() ) );
@@ -806,11 +822,11 @@ final class SiteCheckWordPressTest extends TestCase {
 				'home' => 0,
 				'rest' => 240,
 			),
-			BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ) )['schedule']['refresh_in']
+			BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['schedule']['refresh_in']
 		);
 
 		foreach ( array( 'index.php', 'plugin-install.php', 'themes.php', 'toplevel_page_updatelens', null, array( 'plugins.php' ) ) as $screen ) {
-			$this->assertNull( BaselinePage::settings( $screen, $this->baselines, new ContextHasher( 'test-site-salt' ) ), 'Screen ' . ( is_string( $screen ) ? $screen : gettype( $screen ) ) );
+			$this->assertNull( BaselinePage::settings( $screen, $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity ), 'Screen ' . ( is_string( $screen ) ? $screen : gettype( $screen ) ) );
 		}
 		$cases = array(
 			'disabled'      => array( 'options', array() ),
@@ -824,7 +840,7 @@ final class SiteCheckWordPressTest extends TestCase {
 		foreach ( $cases as $name => $case ) {
 			$saved                                  = $GLOBALS['updatelens_test'][ $case[0] ];
 			$GLOBALS['updatelens_test'][ $case[0] ] = $case[1];
-			$this->assertNull( BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ) ), $name );
+			$this->assertNull( BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity ), $name );
 			$GLOBALS['updatelens_test'][ $case[0] ] = $saved;
 		}
 	}

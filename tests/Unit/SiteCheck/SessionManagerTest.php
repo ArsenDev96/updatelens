@@ -208,10 +208,27 @@ final class SessionManagerTest extends TestCase {
 		foreach ( array( 'probe', '', null, array( 'before' ), 'BEFORE' ) as $purpose ) {
 			$this->assertSame( array( 'code' => 'invalid_request' ), $this->manager->start( self::USER, self::LOGIN, $purpose, self::targets() ) );
 		}
-		$this->assertSame( array( 'code' => 'invalid_request' ), $this->manager->start( self::USER, self::LOGIN, 'before', array( 'home' => str_repeat( 'a', 64 ) ) ) );
+		$this->assertSame( array( 'code' => 'invalid_request' ), $this->manager->start( self::USER, self::LOGIN, 'before', array() ) );
+		$this->assertSame( array( 'code' => 'invalid_request' ), $this->manager->start( self::USER, self::LOGIN, 'before', self::targets() + array( 'probe' => str_repeat( 'a', 64 ) ) ) );
 		$this->assertSame( array( 'code' => 'invalid_request' ), $this->manager->start( self::USER, 'not-a-fingerprint', 'before', self::targets() ) );
 		$this->assertSame( array(), $this->store->values );
 		$this->assertCount( 1, RateLimiter::recent( $this->meta[ self::USER ], (int) self::T ), 'Only the start with a valid purpose and targets was counted.' );
+	}
+
+	/**
+	 * A start may open one check only (a BEFORE start for the due checks),
+	 * and counts once against the rate limit.
+	 */
+	public function test_start_subset() {
+		$targets = self::targets();
+		$outcome = $this->manager->start( self::USER, self::LOGIN, 'before', array( 'rest' => $targets['rest'] ) );
+
+		$this->assertSame( 'started', $outcome['code'] );
+		$this->assertSame( array( 'rest' ), array_keys( $outcome['sessions'] ) );
+		$this->assertCount( 1, $this->store->values );
+		$this->assertNull( $this->manager->find_live( 'home', $outcome['sessions']['rest']['session'] ) );
+		$this->assertSame( 'rest', $this->manager->find_live( 'rest', $outcome['sessions']['rest']['session'] )->get_check() );
+		$this->assertCount( 1, RateLimiter::recent( $this->meta[ self::USER ], (int) self::T ) );
 	}
 
 	/**

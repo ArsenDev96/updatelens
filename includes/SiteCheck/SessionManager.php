@@ -20,7 +20,7 @@ defined( 'ABSPATH' ) || exit;
  *
  * Lifecycle of one check run:
  *
- * 1. start(): for the signed-in owner, one session per check (home, rest),
+ * 1. start(): for the signed-in owner, one session per requested check,
  *    each with its own marker and secret, live for CheckSession::TTL
  *    seconds. Counts against the owner's RateLimiter.
  * 2. find_live(): front-end and REST requests carrying a well-formed marker
@@ -120,24 +120,30 @@ final class SessionManager {
 	}
 
 	/**
-	 * Open one session per check for the owner.
+	 * Open one session per requested check for the owner.
 	 *
 	 * @param int                   $user    Owner's user ID.
 	 * @param string                $login   Owner's login-session fingerprint.
 	 * @param mixed                 $purpose CheckSession purpose (request input).
-	 * @param array<string, string> $targets Target fingerprint per check identifier (both checks).
+	 * @param array<string, string> $targets Target fingerprint per check to open (one or both
+	 *                                       checks; a BEFORE start opens only the due ones).
 	 * @return array `code` STARTED with `purpose`, `expires_in` and `sessions`
-	 *               (per check: `definition`, `session` = marker, `secret`);
-	 *               RATE_LIMITED with `retry_after`; INVALID_REQUEST or UNAVAILABLE.
+	 *               (per check, in CheckDefinition order: `definition`,
+	 *               `session` = marker, `secret`); RATE_LIMITED with
+	 *               `retry_after`; INVALID_REQUEST or UNAVAILABLE.
 	 */
 	public function start( $user, $login, $purpose, array $targets ) {
 		if ( ! in_array( $purpose, CheckSession::PURPOSES, true ) ) {
 			return array( 'code' => self::INVALID_REQUEST );
 		}
+		$definitions = array();
 		foreach ( CheckDefinition::all() as $definition ) {
-			if ( ! isset( $targets[ $definition->get_id() ] ) ) {
-				return array( 'code' => self::INVALID_REQUEST );
+			if ( isset( $targets[ $definition->get_id() ] ) ) {
+				$definitions[] = $definition;
 			}
+		}
+		if ( array() === $definitions || count( $definitions ) !== count( $targets ) ) {
+			return array( 'code' => self::INVALID_REQUEST );
 		}
 
 		$now   = (float) call_user_func( $this->now );
@@ -152,7 +158,7 @@ final class SessionManager {
 		$sessions = array();
 		$stored   = array();
 		try {
-			foreach ( CheckDefinition::all() as $definition ) {
+			foreach ( $definitions as $definition ) {
 				$marker  = bin2hex( call_user_func( $this->random, CheckSession::MARKER_BYTES ) );
 				$secret  = bin2hex( call_user_func( $this->random, CheckSession::SECRET_BYTES ) );
 				$session = CheckSession::from_array(

@@ -15,6 +15,7 @@ if ( ! defined( 'ARRAY_A' ) ) {
 
 class wpdb {
 	public $prefix     = 'wp_';
+	public $options    = 'wp_options';
 	public $last_error = '';
 
 	/**

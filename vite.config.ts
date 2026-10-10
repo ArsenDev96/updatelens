@@ -38,8 +38,13 @@ export default defineConfig( {
 	plugins: [
 		v4wp( {
 			// The admin app, and the update follow-up script loaded on the
-			// WordPress update screens (AdminAssets::FOLLOW_UP_ENTRY).
-			input: [ 'src/admin/main.tsx', 'src/admin/update-follow-up.ts' ],
+			// WordPress update screens (AdminAssets::FOLLOW_UP_ENTRY), and the
+			// site check baseline script (AdminAssets::SITE_CHECK_ENTRY).
+			input: [
+				'src/admin/main.tsx',
+				'src/admin/update-follow-up.ts',
+				'src/admin/site-check-baseline.ts',
+			],
 			outDir: 'assets/admin/dist',
 		} ),
 		wpExternals,

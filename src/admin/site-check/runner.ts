@@ -6,7 +6,9 @@
  * (`updatelens_site_check_report`). PHP classifies every report; the
  * runner returns PHP's verdict, or why there is none.
  *
- * Nothing calls this automatically yet. Targets, tokens and timing come only
+ * The BEFORE baseline scheduler (baseline.ts) calls it with `before`, for
+ * which the server may open only the due checks or none (`not_needed`);
+ * nothing calls it with `after` yet. Targets, tokens and timing come only
  * from the start response; the report secret only ever travels in the
  * report's POST body. No response content is kept or sent.
  */
@@ -15,11 +17,14 @@ import {
 	REPORT_ACTION,
 	START_ACTION,
 	SUPPORTED_DEFINITIONS,
+	parseNotNeeded,
 	parseStartResponse,
 	type AttemptFacts,
 	type CheckId,
 	type IssuedCheck,
+	type NotNeededRun,
 	type Purpose,
+	type RefreshIn,
 	type StartedRun,
 } from './contract';
 import {
@@ -82,11 +87,20 @@ export type CheckOutcome =
 	| { check: CheckId; status: 'cancelled' };
 
 export interface RunResult {
-	/** `started`, or why no check could run. */
-	status: 'started' | 'start_failed' | 'cancelled';
+	/**
+	 * `started`; `not_needed` (a `before` start that the server answered
+	 * without opening a session); or why no check could run.
+	 */
+	status: 'started' | 'not_needed' | 'start_failed' | 'cancelled';
 	/** Start failure: the server's error code, `http_<status>`, `network_error` or `invalid_response`. */
 	error?: string;
-	/** Both checks, always. */
+	/** `not_needed`: why. */
+	reason?: NotNeededRun[ 'reason' ];
+	/** `before` starts: seconds until each check's baseline is due. */
+	refreshIn?: RefreshIn;
+	/** `rate_limited` start failures: seconds until a start is allowed again. */
+	retryAfter?: number;
+	/** Both checks, always (not issued ones are `not_run`). */
 	checks: Record< CheckId, CheckOutcome >;
 }
 
@@ -156,7 +170,7 @@ export async function runSiteChecks(
 	}
 
 	const startedAt = now();
-	let started: { ok: true; data: unknown } | { ok: false; error: string };
+	let started: PostResult;
 	try {
 		started = await post(
 			fetchFn,
@@ -172,7 +186,26 @@ export async function runSiteChecks(
 		return notStarted( 'cancelled' );
 	}
 	if ( ! started.ok ) {
-		return notStarted( 'start_failed', started.error );
+		return {
+			...notStarted( 'start_failed', started.error ),
+			...( started.retryAfter ? { retryAfter: started.retryAfter } : {} ),
+		};
+	}
+	const notNeeded =
+		options.purpose === 'before' ? parseNotNeeded( started.data ) : null;
+	if ( notNeeded ) {
+		return {
+			status: 'not_needed',
+			reason: notNeeded.reason,
+			...( notNeeded.refreshIn
+				? { refreshIn: notNeeded.refreshIn }
+				: {} ),
+			checks: all( ( check ) => ( {
+				check,
+				status: 'not_run',
+				error: 'not_issued',
+			} ) ),
+		};
 	}
 	const run = parseStartResponse( started.data );
 	if ( ! run || run.purpose !== options.purpose ) {
@@ -200,6 +233,7 @@ export async function runSiteChecks(
 
 	return {
 		status: 'started',
+		...( run.refreshIn ? { refreshIn: run.refreshIn } : {} ),
 		checks: Object.fromEntries(
 			outcomes.map( ( outcome ) => [ outcome.check, outcome ] )
 		) as Record< CheckId, CheckOutcome >,
@@ -348,6 +382,13 @@ async function attempt(
 	}
 }
 
+/** Longest `retry_after` accepted from a `rate_limited` error (RateLimiter window). */
+const MAX_RETRY_AFTER_SECONDS = 600;
+
+type PostResult =
+	| { ok: true; data: unknown }
+	| { ok: false; error: string; retryAfter?: number };
+
 /**
  * POST to admin-ajax and read WordPress's `{success, data}` envelope.
  *
@@ -356,7 +397,8 @@ async function attempt(
  * @param fields  Form fields.
  * @param signal  Cancellation.
  * @return The `data` on success, else a fixed error (the server's `code`,
- *         `http_<status>`, `network_error` or `invalid_response`).
+ *         `http_<status>`, `network_error` or `invalid_response`) and, for
+ *         `rate_limited`, the server's `retry_after`.
  * @throws CancelledError When cancelled.
  */
 async function post(
@@ -364,7 +406,7 @@ async function post(
 	url: string,
 	fields: Record< string, string >,
 	signal: AbortSignal
-): Promise< { ok: true; data: unknown } | { ok: false; error: string } > {
+): Promise< PostResult > {
 	let response: Response;
 	let text: string;
 	try {
@@ -395,11 +437,15 @@ async function post(
 				: `http_${ response.status }`,
 		};
 	}
-	const envelope = json as { success?: unknown; data?: { code?: unknown } };
+	const envelope = json as {
+		success?: unknown;
+		data?: { code?: unknown; retry_after?: unknown };
+	};
 	if ( envelope?.success === true && response.ok ) {
 		return { ok: true, data: envelope.data };
 	}
 	const code = envelope?.data?.code;
+	const retryAfter = envelope?.data?.retry_after;
 
 	return {
 		ok: false,
@@ -407,6 +453,12 @@ async function post(
 			typeof code === 'string' && SERVER_CODE.test( code )
 				? code
 				: `http_${ response.status }`,
+		...( code === 'rate_limited' &&
+		Number.isSafeInteger( retryAfter ) &&
+		( retryAfter as number ) > 0 &&
+		( retryAfter as number ) <= MAX_RETRY_AFTER_SECONDS
+			? { retryAfter: retryAfter as number }
+			: {} ),
 	};
 }
 

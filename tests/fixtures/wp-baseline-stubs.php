@@ -167,10 +167,15 @@ class WP_REST_Controller {
 }
 
 class UpdateLens_Test_Wpdb {
-	public $prefix = 'wp_';
+	public $prefix  = 'wp_';
+	public $options = 'wp_options';
 
 	public function prepare( $query, ...$args ) {
 		return vsprintf( str_replace( array( '%i', '%s', '%d' ), '%s', $query ), $args );
+	}
+
+	public function esc_like( $text ) {
+		return addcslashes( $text, '_%\\' );
 	}
 
 	public function query( $sql ) {

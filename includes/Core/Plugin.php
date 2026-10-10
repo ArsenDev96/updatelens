@@ -84,13 +84,14 @@ final class Plugin {
 
 		add_action( 'rest_api_init', array( $this, 'register_rest_routes' ) );
 
-		// Site check sessions (opt-in; single site only). Nothing starts a check
-		// automatically: the endpoints wait for a browser runner.
+		// Site checks (opt-in; single site only). BEFORE baselines are collected
+		// in the background on the Plugins and Updates screens only.
 		if ( ! is_multisite() ) {
 			$site_checks = SessionManager::from_wordpress();
 			( new FrontendMarker( $site_checks ) )->register();
 			if ( is_admin() ) {
 				( new AjaxEndpoints( $site_checks ) )->register();
+				add_action( 'admin_enqueue_scripts', array( AdminAssets::class, 'enqueue_site_check_baseline' ), 20 );
 			}
 		}
 

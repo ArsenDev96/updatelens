@@ -131,7 +131,14 @@ final class BaselineWordPressTest extends TestCase {
 		$this->assertFalse( self::stored() );
 		$this->assertFalse( get_option( Schema::VERSION_OPTION ) );
 		$this->assertSame( 'kept', get_option( 'unrelated_option' ) );
-		$this->assertSame( array( 'DROP TABLE IF EXISTS wp_updatelens_analyses' ), $GLOBALS['updatelens_test']['queries'] );
+		$this->assertSame(
+			array(
+				'DROP TABLE IF EXISTS wp_updatelens_analyses',
+				// Site check baselines: UpdateLens's own option rows only.
+				'DELETE FROM wp_options WHERE option_name LIKE updatelens\_site\_check\_baseline\_%',
+			),
+			$GLOBALS['updatelens_test']['queries']
+		);
 		// Unread tracking: the origin and every user's watermark are gone.
 		$this->assertFalse( get_option( UnreadReports::ORIGIN_OPTION ) );
 		$this->assertSame(

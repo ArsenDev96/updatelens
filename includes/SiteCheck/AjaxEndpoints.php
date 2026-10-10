@@ -24,6 +24,16 @@ defined( 'ABSPATH' ) || exit;
  * - `updatelens_site_check_report` (`session`, `secret`, `report`): accepts
  *   one run's attempts (ReportValidator format) once.
  *
+ * BEFORE runs keep baselines (Baselines). A `before` start opens sessions
+ * only for the checks whose baseline is due, and only while a plugin other
+ * than UpdateLens has an update available; otherwise it succeeds with
+ * `code` `not_needed` (`reason` `fresh` or `no_updates`), opens nothing and
+ * does not count against the rate limit. `before` responses carry
+ * `refresh_in` (seconds per check until its baseline is due). An accepted
+ * `before` report is stored as its check's baseline (`baseline`: `saved`,
+ * or `superseded` when a run that started later is already stored); if it
+ * cannot be stored, the report fails with `unavailable`.
+ *
  * Every request needs the `updatelens_site_check` nonce, `update_plugins`,
  * the opt-in (Settings) and a WordPress login session. Errors are
  * `{"success":false,"data":{"code":…}}` with a fixed code and HTTP status:
@@ -31,7 +41,7 @@ defined( 'ABSPATH' ) || exit;
  * 400, `invalid_report` 400 (+ `detail`), `rate_limited` 429 (+
  * `retry_after`), `not_owner` 403, `session_unavailable` 410,
  * `already_reported` 409, `unavailable` 503. Every response is marked
- * `no-store`. Nothing is logged; results are not stored yet.
+ * `no-store`. Nothing is logged; AFTER results are not stored yet.
  */
 final class AjaxEndpoints {
 
@@ -82,14 +92,44 @@ final class AjaxEndpoints {
 	private $hasher;
 
 	/**
+	 * Baselines (created on first use).
+	 *
+	 * @var Baselines|null
+	 */
+	private $baselines;
+
+	/**
+	 * Whether a plugin other than UpdateLens has an update: function (): bool.
+	 *
+	 * @var callable
+	 */
+	private $has_updates;
+
+	/**
 	 * Constructor.
 	 *
-	 * @param SessionManager     $manager Sessions.
-	 * @param ContextHasher|null $hasher  Context fingerprints (default: keyed with the site's salts).
+	 * @param SessionManager     $manager     Sessions.
+	 * @param ContextHasher|null $hasher      Context fingerprints (default: keyed with the site's salts).
+	 * @param Baselines|null     $baselines   Baselines (default: options table).
+	 * @param callable|null      $has_updates Update availability (default: BaselinePage::has_relevant_updates()).
 	 */
-	public function __construct( SessionManager $manager, ?ContextHasher $hasher = null ) {
-		$this->manager = $manager;
-		$this->hasher  = $hasher;
+	public function __construct( SessionManager $manager, ?ContextHasher $hasher = null, ?Baselines $baselines = null, ?callable $has_updates = null ) {
+		$this->manager     = $manager;
+		$this->hasher      = $hasher;
+		$this->baselines   = $baselines;
+		$this->has_updates = null === $has_updates ? array( BaselinePage::class, 'has_relevant_updates' ) : $has_updates;
+	}
+
+	/**
+	 * The check URLs, built from `home_url()` and `rest_url()` only.
+	 *
+	 * @return array<string, string> URL per check identifier.
+	 */
+	public static function target_urls() {
+		return array(
+			CheckDefinition::HOME => home_url( '/' ),
+			CheckDefinition::REST => add_query_arg( '_fields', CheckDefinition::REST_FIELDS, rest_url( ltrim( CheckDefinition::REST_ROUTE, '/' ) ) ),
+		);
 	}
 
 	/**
@@ -111,18 +151,32 @@ final class AjaxEndpoints {
 		$login = $this->authorize();
 
 		try {
-			$home    = home_url( '/' );
-			$rest    = add_query_arg( '_fields', CheckDefinition::REST_FIELDS, rest_url( ltrim( CheckDefinition::REST_ROUTE, '/' ) ) );
-			$targets = array(
-				CheckDefinition::HOME => $this->hasher()->target( $home ),
-				CheckDefinition::REST => $this->hasher()->target( $rest ),
-			);
+			$urls    = self::target_urls();
+			$targets = array_map( array( $this->hasher(), 'target' ), $urls );
 		} catch ( InvalidArgumentException $e ) {
 			self::error( SessionManager::UNAVAILABLE );
 			return;
 		}
 
-		$outcome = $this->manager->start( get_current_user_id(), $login, self::input( 'purpose' ), $targets );
+		$user       = get_current_user_id();
+		$purpose    = self::input( 'purpose' );
+		$refresh_in = null;
+		if ( CheckSession::PURPOSE_BEFORE === $purpose ) {
+			if ( ! call_user_func( $this->has_updates ) ) {
+				self::not_needed( 'no_updates' );
+				return;
+			}
+			$readiness  = $this->baselines()->readiness( $user, $login, $targets );
+			$refresh_in = Baselines::refresh_in( $readiness );
+			$due        = Baselines::due( $readiness );
+			if ( array() === $due ) {
+				self::not_needed( 'fresh', $refresh_in );
+				return;
+			}
+			$targets = array_intersect_key( $targets, array_flip( $due ) );
+		}
+
+		$outcome = $this->manager->start( $user, $login, $purpose, $targets );
 		if ( SessionManager::STARTED !== $outcome['code'] ) {
 			self::error( $outcome['code'], isset( $outcome['retry_after'] ) ? array( 'retry_after' => $outcome['retry_after'] ) : array() );
 			return;
@@ -137,30 +191,32 @@ final class AjaxEndpoints {
 				'secret'     => $session['secret'],
 			);
 			if ( CheckDefinition::HOME === $check ) {
-				$entry['url'] = add_query_arg( FrontendMarker::QUERY_ARG, $session['session'], $home );
+				$entry['url'] = add_query_arg( FrontendMarker::QUERY_ARG, $session['session'], $urls[ $check ] );
 			} else {
-				$entry['url']        = $rest;
+				$entry['url']        = $urls[ $check ];
 				$entry['rest_nonce'] = wp_create_nonce( 'wp_rest' );
 				// The identity the REST response must name (the runner retries
 				// otherwise; the report is still checked against the session).
-				$entry['user'] = get_current_user_id();
+				$entry['user'] = $user;
 			}
 			$checks[] = $entry;
 		}
 
-		wp_send_json_success(
-			array(
-				'code'                 => SessionManager::STARTED,
-				'purpose'              => $outcome['purpose'],
-				'expires_in'           => $outcome['expires_in'],
-				'timeout_ms'           => CheckDefinition::TIMEOUT_MS,
-				'retry_delay_ms'       => CheckDefinition::RETRY_DELAY_MS,
-				'max_attempts'         => CheckDefinition::MAX_ATTEMPTS,
-				'header'               => FrontendMarker::HEADER,
-				'end_marker_attribute' => FrontendMarker::END_MARKER_ATTRIBUTE,
-				'checks'               => $checks,
-			)
+		$data = array(
+			'code'                 => SessionManager::STARTED,
+			'purpose'              => $outcome['purpose'],
+			'expires_in'           => $outcome['expires_in'],
+			'timeout_ms'           => CheckDefinition::TIMEOUT_MS,
+			'retry_delay_ms'       => CheckDefinition::RETRY_DELAY_MS,
+			'max_attempts'         => CheckDefinition::MAX_ATTEMPTS,
+			'header'               => FrontendMarker::HEADER,
+			'end_marker_attribute' => FrontendMarker::END_MARKER_ATTRIBUTE,
+			'checks'               => $checks,
 		);
+		if ( null !== $refresh_in ) {
+			$data['refresh_in'] = $refresh_in;
+		}
+		wp_send_json_success( $data );
 	}
 
 	/**
@@ -178,15 +234,42 @@ final class AjaxEndpoints {
 		}
 
 		$result = $outcome['result'];
-		wp_send_json_success(
-			array(
-				'code'    => SessionManager::ACCEPTED,
-				'check'   => $outcome['check'],
-				'purpose' => $outcome['purpose'],
-				'verdict' => $result->get_verdict(),
-				'reason'  => $result->get_reason(),
-			)
+		$data   = array(
+			'code'    => SessionManager::ACCEPTED,
+			'check'   => $outcome['check'],
+			'purpose' => $outcome['purpose'],
+			'verdict' => $result->get_verdict(),
+			'reason'  => $result->get_reason(),
 		);
+		if ( CheckSession::PURPOSE_BEFORE === $outcome['purpose'] ) {
+			$saved = $this->baselines()->save( $result );
+			if ( Baselines::FAILED === $saved ) {
+				// The session is used up: a BEFORE run that is not kept is no baseline.
+				self::error( SessionManager::UNAVAILABLE );
+				return;
+			}
+			$data['baseline'] = $saved;
+		}
+		wp_send_json_success( $data );
+	}
+
+	/**
+	 * Answer a `before` start that needs no run.
+	 *
+	 * @param string                  $reason     `fresh` or `no_updates`.
+	 * @param array<string, int>|null $refresh_in Seconds until each check is due (`fresh` only).
+	 * @return void
+	 */
+	private static function not_needed( $reason, ?array $refresh_in = null ) {
+		$data = array(
+			'code'    => 'not_needed',
+			'purpose' => CheckSession::PURPOSE_BEFORE,
+			'reason'  => $reason,
+		);
+		if ( null !== $refresh_in ) {
+			$data['refresh_in'] = $refresh_in;
+		}
+		wp_send_json_success( $data );
 	}
 
 	/**
@@ -246,6 +329,19 @@ final class AjaxEndpoints {
 	 */
 	private static function error( $code, array $extra = array() ) {
 		wp_send_json_error( array( 'code' => $code ) + $extra, isset( self::STATUS[ $code ] ) ? self::STATUS[ $code ] : 500 );
+	}
+
+	/**
+	 * Baselines.
+	 *
+	 * @return Baselines
+	 */
+	private function baselines() {
+		if ( null === $this->baselines ) {
+			$this->baselines = Baselines::from_wordpress();
+		}
+
+		return $this->baselines;
 	}
 
 	/**

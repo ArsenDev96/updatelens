@@ -9,6 +9,7 @@
 
 namespace UpdateLens\Admin;
 
+use UpdateLens\SiteCheck\BaselinePage;
 use UpdateLens\Update\FollowUpRequest;
 use WP_HTML_Tag_Processor;
 
@@ -69,9 +70,19 @@ final class AdminAssets {
 	const FOLLOW_UP_SETTINGS = 'updatelensUpdateFollowUp';
 
 	/**
+	 * Script handle of the site check baseline script.
+	 */
+	const SITE_CHECK_HANDLE = 'updatelens-site-check-baseline';
+
+	/**
+	 * Manifest key of the site check baseline script.
+	 */
+	const SITE_CHECK_ENTRY = 'src/admin/site-check-baseline.ts';
+
+	/**
 	 * Script handles loaded as ES modules.
 	 */
-	const MODULE_HANDLES = array( self::HANDLE, self::FOLLOW_UP_HANDLE );
+	const MODULE_HANDLES = array( self::HANDLE, self::FOLLOW_UP_HANDLE, self::SITE_CHECK_HANDLE );
 
 	/**
 	 * Built files that may be enqueued: a file directly in the build's
@@ -143,6 +154,39 @@ final class AdminAssets {
 				'selfPlugin' => plugin_basename( UPDATELENS_FILE ),
 			)
 		);
+		add_filter( 'script_loader_tag', array( self::class, 'add_module_type' ), 10, 2 );
+	}
+
+	/**
+	 * Enqueue the site check baseline script (`admin_enqueue_scripts`).
+	 *
+	 * Only where BaselinePage allows it (Plugins and Updates screens, opt-in
+	 * on, `update_plugins`, an update available, no maintenance mode). The
+	 * script collects BEFORE baselines in the background; it has no
+	 * user-facing text and adds nothing to the page.
+	 *
+	 * @param mixed $hook_suffix Admin page.
+	 * @return void
+	 */
+	public static function enqueue_site_check_baseline( $hook_suffix ) {
+		if ( ! in_array( $hook_suffix, BaselinePage::SCREENS, true ) ) {
+			return;
+		}
+		$settings = BaselinePage::settings( $hook_suffix );
+		if ( null === $settings ) {
+			return;
+		}
+		$manifest = UPDATELENS_DIR . self::DIST_DIR . self::MANIFEST;
+		if ( ! is_file( $manifest ) || ! is_readable( $manifest ) ) {
+			return;
+		}
+		$files = self::entry_files( wp_json_file_decode( $manifest, array( 'associative' => true ) ), self::SITE_CHECK_ENTRY );
+		if ( null === $files ) {
+			return;
+		}
+
+		wp_enqueue_script( self::SITE_CHECK_HANDLE, UPDATELENS_URL . self::DIST_DIR . $files['script'], array( 'jquery' ), UPDATELENS_VERSION, true );
+		wp_localize_script( self::SITE_CHECK_HANDLE, BaselinePage::SETTINGS, $settings );
 		add_filter( 'script_loader_tag', array( self::class, 'add_module_type' ), 10, 2 );
 	}
 

@@ -94,6 +94,11 @@ final class AdminAssetsTest extends TestCase {
 		$this->assertNotNull( $follow_up );
 		$this->assertFileExists( dirname( $file ) . '/' . $follow_up['script'] );
 		$this->assertSame( array(), $follow_up['styles'] );
+
+		$site_check = AdminAssets::entry_files( json_decode( (string) file_get_contents( $file ), true ), AdminAssets::SITE_CHECK_ENTRY ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local test file.
+		$this->assertNotNull( $site_check );
+		$this->assertFileExists( dirname( $file ) . '/' . $site_check['script'] );
+		$this->assertSame( array(), $site_check['styles'], 'The baseline script has no styles: it adds nothing to the page.' );
 	}
 
 	/**

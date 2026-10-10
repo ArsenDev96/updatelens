@@ -19,7 +19,11 @@ $GLOBALS['updatelens_test'] = array(
 	'admin'       => false,
 	'multisite'   => false,
 	'logged_in'   => false,
+	'maintenance' => false,
+	'updates'     => array( 'akismet/akismet.php' => (object) array( 'Name' => 'Akismet' ) ),
 );
+
+define( 'UPDATELENS_FILE', '/srv/wp-content/plugins/updatelens/updatelens.php' );
 
 /**
  * A wp_send_json_*() call, thrown so the request "ends" like in WordPress.
@@ -111,6 +115,26 @@ function wp_salt( $scheme = 'auth' ) {
 
 function nocache_headers() {
 	++$GLOBALS['updatelens_test']['nocache'];
+}
+
+function admin_url( $path = '' ) {
+	return 'https://example.com/wp-admin/' . $path;
+}
+
+function wp_is_maintenance_mode() {
+	return $GLOBALS['updatelens_test']['maintenance'];
+}
+
+function get_plugins() {
+	return array();
+}
+
+function get_plugin_updates() {
+	return $GLOBALS['updatelens_test']['updates'];
+}
+
+function plugin_basename( $file ) {
+	return 'updatelens/updatelens.php';
 }
 
 function esc_attr( $text ) {

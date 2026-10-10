@@ -1012,6 +1012,8 @@ describe( 'runSiteChecks: start', () => {
 		expect( result ).toEqual( {
 			status: 'start_failed',
 			error,
+			// The server's own retry time, for a rate-limited start only.
+			...( error === 'rate_limited' ? { retryAfter: 30 } : {} ),
 			checks: {
 				home: {
 					check: 'home',

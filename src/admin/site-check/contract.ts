@@ -66,6 +66,15 @@ export interface IssuedCheck {
 	user?: number;
 }
 
+/**
+ * Seconds until each check's BEFORE baseline is due (0 = due now), as
+ * decided by PHP (Baselines). Only `before` starts carry it.
+ */
+export type RefreshIn = Partial< Record< CheckId, number > >;
+
+/** Accepted range of a `refresh_in` value (Baselines::MAX_AGE_SECONDS and margin). */
+export const REFRESH_IN_BOUNDS = [ 0, 3600 ] as const;
+
 /** A parsed, validated start response. */
 export interface StartedRun {
 	purpose: Purpose;
@@ -74,6 +83,14 @@ export interface StartedRun {
 	retryDelayMs: number;
 	maxAttempts: number;
 	checks: Partial< Record< CheckId, IssuedCheck > >;
+	refreshIn?: RefreshIn;
+}
+
+/** A `before` start that opened no session (`code` `not_needed`). */
+export interface NotNeededRun {
+	/** `fresh`: every baseline is recent enough; `no_updates`: nothing to update. */
+	reason: 'fresh' | 'no_updates';
+	refreshIn?: RefreshIn;
 }
 
 export type MarkerFact = 'current' | 'absent' | 'other';
@@ -200,6 +217,11 @@ export function parseStartResponse( data: unknown ): StartedRun | null {
 		checks[ issued.check ] = issued;
 	}
 
+	const refreshIn = parseRefreshIn( data.refresh_in );
+	if ( refreshIn === null ) {
+		return null;
+	}
+
 	return {
 		purpose: data.purpose,
 		expiresInSeconds: data.expires_in as number,
@@ -207,5 +229,54 @@ export function parseStartResponse( data: unknown ): StartedRun | null {
 		retryDelayMs: data.retry_delay_ms as number,
 		maxAttempts: data.max_attempts as number,
 		checks,
+		...( refreshIn ? { refreshIn } : {} ),
 	};
+}
+
+/**
+ * The `data` of a `not_needed` start response, or null if it is not one.
+ *
+ * @param data `data` of `{"success":true,"data":…}`.
+ */
+export function parseNotNeeded( data: unknown ): NotNeededRun | null {
+	if (
+		! isRecord( data ) ||
+		data.code !== 'not_needed' ||
+		data.purpose !== 'before' ||
+		( data.reason !== 'fresh' && data.reason !== 'no_updates' )
+	) {
+		return null;
+	}
+	const refreshIn = parseRefreshIn( data.refresh_in );
+	if ( refreshIn === null ) {
+		return null;
+	}
+
+	return { reason: data.reason, ...( refreshIn ? { refreshIn } : {} ) };
+}
+
+/**
+ * A `refresh_in` object: undefined when absent, null when malformed.
+ *
+ * @param value Value.
+ */
+function parseRefreshIn( value: unknown ): RefreshIn | undefined | null {
+	if ( value === undefined ) {
+		return undefined;
+	}
+	if ( ! isRecord( value ) ) {
+		return null;
+	}
+	const refreshIn: RefreshIn = {};
+	for ( const [ check, seconds ] of Object.entries( value ) ) {
+		if (
+			! CHECKS.includes( check as CheckId ) ||
+			! inRange( seconds, REFRESH_IN_BOUNDS )
+		) {
+			return null;
+		}
+		refreshIn[ check as CheckId ] = seconds as number;
+	}
+
+	return refreshIn;
 }

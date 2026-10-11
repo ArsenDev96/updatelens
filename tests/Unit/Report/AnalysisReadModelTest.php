@@ -21,8 +21,10 @@ use UpdateLens\Snapshot\OptionValueHasher;
 use UpdateLens\Storage\ActionSchedulerDiffCodec;
 use UpdateLens\Storage\CronDiffCodec;
 use UpdateLens\Storage\OptionsDiffCodec;
+use UpdateLens\Storage\SiteCheckResultCodec;
 use UpdateLens\Tests\Support\ActionSchedulerFixture;
 use UpdateLens\Tests\Support\CronFixture;
+use UpdateLens\Tests\Support\SiteCheckFixture;
 use UpdateLens\Update\ActionSchedulerPhaseReason;
 use UpdateLens\Update\CronPhaseReason;
 
@@ -1041,6 +1043,59 @@ final class AnalysisReadModelTest extends TestCase {
 		foreach ( array( self::FAKE_SECRET, self::AS_SECRET, '###', 'token', 'fingerprint', 'args', 'snapshot', '"schema"' ) as $needle ) {
 			$this->assertStringNotContainsString( $needle, $json );
 		}
+	}
+
+	/**
+	 * Site checks are evaluated beside the Net result (`potential_impact.site_checks`):
+	 * a site check finding never changes the Net result's status, signals or
+	 * findings, and Net result findings never depend on site checks.
+	 */
+	public function test_potential_impact_with_site_checks() {
+		$net   = array(
+			'settle_outcome'     => 'follow_up',
+			'completed_at'       => gmdate( 'Y-m-d H:i:s', (int) floor( SiteCheckFixture::UPDATE_END ) ),
+			'options_final_diff' => self::options_diff_json(
+				array(),
+				array( 'acme_cache' => array( str_repeat( '#', 200000 ), 'auto' ) )
+			),
+		);
+		$codec = new SiteCheckResultCodec();
+		$fail  = SiteCheckFixture::home(
+			array(
+				'status'     => 500,
+				'end_marker' => 'absent',
+			)
+		);
+		$model = new AnalysisReadModel(
+			static function () {
+				return SiteCheckFixture::UPDATE_END + 3600;
+			}
+		);
+
+		$without = $model->report( self::row( $net ) )['potential_impact'];
+		$with    = $model->report(
+			self::row(
+				$net + array(
+					'site_check_update_started_at' => (string) SiteCheckFixture::UPDATE_START,
+					'site_check_after_started_at'  => (string) ( SiteCheckFixture::UPDATE_END + 0.25 ),
+					'site_check_home_before'       => $codec->encode( SiteCheckFixture::before( 'home', array( SiteCheckFixture::home() ) ) ),
+					'site_check_home_after'        => $codec->encode( SiteCheckFixture::after( 'home', array( $fail, $fail ) ) ),
+					'site_check_rest_before'       => $codec->encode( SiteCheckFixture::before( 'rest', array( SiteCheckFixture::rest() ) ) ),
+					'site_check_rest_after'        => $codec->encode( SiteCheckFixture::after( 'rest', array( SiteCheckFixture::rest() ) ) ),
+				)
+			)
+		)['potential_impact'];
+
+		$this->assertSame( array( 'phase', 'status', 'signals', 'findings', 'site_checks' ), array_keys( $with ) );
+		$this->assertSame( array_diff_key( $without, array( 'site_checks' => true ) ), array_diff_key( $with, array( 'site_checks' => true ) ) );
+		$this->assertSame( array( 'large_autoloaded_option' ), array_column( $with['findings'], 'code' ) );
+		$this->assertSame( 'evaluated', $with['site_checks']['status'] );
+		$this->assertSame( array( 'site_check_newly_failing' ), array_column( $with['site_checks']['findings'], 'code' ) );
+
+		// Recorded before site checks: not applicable, nothing to review.
+		$this->assertSame( 'not_applicable', $without['site_checks']['status'] );
+		$this->assertSame( array( 'not_captured', 'not_captured' ), array_values( array_column( $without['site_checks']['checks'], 'reason' ) ) );
+		$this->assertSame( array(), $without['site_checks']['findings'] );
 	}
 
 	/**

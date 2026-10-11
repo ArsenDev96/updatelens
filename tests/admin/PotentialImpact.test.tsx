@@ -344,6 +344,8 @@ describe( 'Potential Impact', () => {
 			'Checked · 2 findings',
 			'Checked · 2 findings',
 			'Checked · 1 finding',
+			// Recorded before site checks: one quiet row, not a warning.
+			'Not captured · This update was observed before UpdateLens recorded site checks.',
 		] );
 		expect( details ).toHaveTextContent(
 			'WP-Cron: recurring events no longer observed, and recurring schedules that changed.'
@@ -801,6 +803,8 @@ describe( 'Potential Impact', () => {
 				'Checked · no findings',
 				'Checked · 1 finding',
 				'Not applicable · Action Scheduler was not detected during this update.',
+				// Recorded before site checks: one quiet row, not a warning.
+				'Not captured · This update was observed before UpdateLens recorded site checks.',
 			] );
 			// Not applicable is not an incomplete check.
 			expect( incompleteTexts() ).toHaveLength( 0 );
@@ -812,7 +816,7 @@ describe( 'Potential Impact', () => {
 
 			expect(
 				within( impact() ).getByText(
-					'No Potential Impact patterns matched the available observations.'
+					'No findings matched the completed observations.'
 				)
 			).toBeInTheDocument();
 			expect( impact() ).toHaveTextContent(
@@ -835,7 +839,7 @@ describe( 'Potential Impact', () => {
 
 			expect(
 				within( impact() ).getByText(
-					'No Potential Impact patterns matched the available observations.'
+					'No findings in completed observations; some checks were unavailable.'
 				)
 			).toBeInTheDocument();
 			const [ cron ] = incompleteTexts();
@@ -890,13 +894,15 @@ describe( 'Potential Impact', () => {
 
 			expect(
 				within( impact() ).getByText(
-					'No Potential Impact patterns matched the available observations.'
+					'No findings matched the completed observations.'
 				)
 			).toBeInTheDocument();
 			expect( checkTexts() ).toEqual( [
 				'Checked · no findings',
 				'Checked · no findings',
 				'Checked · no findings',
+				// Recorded before site checks: one quiet row, not a warning.
+				'Not captured · This update was observed before UpdateLens recorded site checks.',
 			] );
 		} );
 

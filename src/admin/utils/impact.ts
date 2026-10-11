@@ -21,6 +21,7 @@ import {
 	unavailableReasonText,
 	windowText,
 } from './labels';
+import { siteCheckFindings } from './siteCheckImpact';
 
 /*
  * Wording of Potential Impact: the API's rule codes, statuses and evidence
@@ -495,8 +496,14 @@ export type ImpactState =
  * @param impact API evaluation.
  */
 export function impactState( impact: PotentialImpact ): ImpactState {
+	const siteFindings = siteCheckFindings( impact ).length;
 	if ( impact.status !== 'not_evaluated' ) {
-		return impact.findings.length > 0 ? 'findings' : 'none';
+		return impact.findings.length + siteFindings > 0 ? 'findings' : 'none';
+	}
+	// Site checks are not part of the Net result: their findings are shown
+	// even when it could not be evaluated.
+	if ( siteFindings > 0 ) {
+		return 'findings';
 	}
 	// Options drives the analysis lifecycle, so its reason explains the report.
 	switch ( impact.signals.options.reason ) {
@@ -511,6 +518,32 @@ export function impactState( impact: PotentialImpact ): ImpactState {
 }
 
 /**
+ * How complete an evaluated result is, from the API's statuses: every
+ * applicable check completed (`complete`; site checks that were off or not
+ * recorded do not count), a site check still pending (`pending`), or some
+ * checks could not be completed (`partial`). Pending and unavailable checks
+ * are never presented as passed.
+ *
+ * @param impact API evaluation.
+ */
+export function impactCompleteness(
+	impact: PotentialImpact
+): 'complete' | 'pending' | 'partial' {
+	const site = impact.site_checks?.status;
+	if ( site === 'pending' ) {
+		return 'pending';
+	}
+	if (
+		impact.status === 'partial' ||
+		site === 'partial' ||
+		site === 'not_evaluated'
+	) {
+		return 'partial';
+	}
+	return 'complete';
+}
+
+/**
  * Headline of the section.
  *
  * @param impact API evaluation.
@@ -520,6 +553,7 @@ export function impactHeadline(
 	impact: PotentialImpact,
 	state: ImpactState
 ): string {
+	const total = impact.findings.length + siteCheckFindings( impact ).length;
 	switch ( state ) {
 		case 'findings':
 			return sprintf(
@@ -527,16 +561,29 @@ export function impactHeadline(
 				_n(
 					'%s finding to review',
 					'%s findings to review',
-					impact.findings.length,
+					total,
 					'updatelens'
 				),
-				formatCount( impact.findings.length )
+				formatCount( total )
 			);
 		case 'none':
-			return __(
-				'No Potential Impact patterns matched the available observations.',
-				'updatelens'
-			);
+			switch ( impactCompleteness( impact ) ) {
+				case 'pending':
+					return __(
+						'No findings yet — site checks are still pending.',
+						'updatelens'
+					);
+				case 'partial':
+					return __(
+						'No findings in completed observations; some checks were unavailable.',
+						'updatelens'
+					);
+				default:
+					return __(
+						'No findings matched the completed observations.',
+						'updatelens'
+					);
+			}
 		case 'waiting':
 			return __( 'Waiting for the Net result', 'updatelens' );
 		case 'expired':
@@ -559,15 +606,39 @@ export function impactDescription(
 ): string {
 	switch ( state ) {
 		case 'findings':
-			return __(
-				'Changes in the Net result that match patterns worth a closer look. They are not confirmed problems, and they may not come from the updated plugin.',
-				'updatelens'
-			);
+			if ( siteCheckFindings( impact ).length === 0 ) {
+				return __(
+					'Changes in the Net result that match patterns worth a closer look. They are not confirmed problems, and they may not come from the updated plugin.',
+					'updatelens'
+				);
+			}
+			return impact.findings.length === 0
+				? __(
+						'Site check results that changed around the update and are worth a closer look. They do not show what caused the change, and it may not come from the updated plugin.',
+						'updatelens'
+					)
+				: __(
+						'Site check results and changes in the Net result that are worth a closer look. They are not confirmed problems, and they may not come from the updated plugin.',
+						'updatelens'
+					);
 		case 'none':
-			return __(
-				'Only a few specific patterns are checked, so this does not show that the update had no other effects.',
-				'updatelens'
-			);
+			switch ( impactCompleteness( impact ) ) {
+				case 'pending':
+					return __(
+						'The site check results from after the update have not arrived yet; until they do, they are not counted as passed. Only a few specific patterns are checked.',
+						'updatelens'
+					);
+				case 'partial':
+					return __(
+						'Checks that could not be completed are listed below and are not counted as passed. Only a few specific patterns are checked, so this does not show that the update had no other effects.',
+						'updatelens'
+					);
+				default:
+					return __(
+						'Only a few specific patterns are checked, so this does not show that the update had no other effects.',
+						'updatelens'
+					);
+			}
 		case 'waiting':
 			return __(
 				'Potential Impact checks the Net result, which is available once the post-update observation has been captured. Refresh the report later to see it.',
@@ -676,13 +747,23 @@ export function checkedPatterns(): string[] {
 	];
 }
 
-/** What a Potential Impact result does not show, for "What was checked". */
-export function checkLimitations(): string[] {
+/**
+ * What a Potential Impact result does not show, for "What was checked".
+ *
+ * @param siteChecks Whether site checks were part of the update: the Net
+ *                   result sentence then names the signals it covers.
+ */
+export function checkLimitations( siteChecks = false ): string[] {
 	return [
-		__(
-			'Checks use the Net result only: the state before the update compared with the state after it settled, whichever phase is selected. Changes undone in between are not seen.',
-			'updatelens'
-		),
+		siteChecks
+			? __(
+					'Options & autoload, WP-Cron and Action Scheduler checks use the Net result only: the state before the update compared with the state after it settled, whichever phase is selected. Changes undone in between are not seen.',
+					'updatelens'
+				)
+			: __(
+					'Checks use the Net result only: the state before the update compared with the state after it settled, whichever phase is selected. Changes undone in between are not seen.',
+					'updatelens'
+				),
 		__(
 			'Only the patterns above are checked. No match does not show that the update had no other effects.',
 			'updatelens'

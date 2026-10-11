@@ -5,12 +5,14 @@ import {
 	useId,
 	useMemo,
 	useRef,
+	useState,
 	type ReactNode,
 } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+import type { PendingRefresh } from '../hooks/use-pending-refresh';
 import type {
 	ActionScheduleType,
 	ImpactActionSide,
@@ -19,6 +21,10 @@ import type {
 	ImpactFinding,
 	PhaseKey,
 	PotentialImpact as PotentialImpactData,
+	SiteCheckFinding,
+	SiteCheckId,
+	SiteChecks,
+	SiteCheckSide,
 } from '../types/api';
 import {
 	formatBytesDelta,
@@ -46,9 +52,32 @@ import {
 	whatChanged,
 	whatToCheck,
 	whyItMatters,
+	type CheckCategory,
 	type FindingGroup,
 	type ImpactView,
 } from '../utils/impact';
+import {
+	attemptText,
+	comparedTimingText,
+	requestLabel,
+	sideTimingText,
+	sideSummaryText,
+	SITE_CHECKS,
+	siteCheckCoverage,
+	siteCheckFindings,
+	siteCheckFindingTitle,
+	siteCheckLimitations,
+	siteCheckName,
+	siteCheckPatterns,
+	siteChecksApplicable,
+	siteChecksEvaluated,
+	siteChecksNotUsed,
+	siteCheckSubject,
+	siteCheckSummary,
+	siteCheckWhatChanged,
+	siteCheckWhatToCheck,
+	siteCheckWhyItMatters,
+} from '../utils/siteCheckImpact';
 import {
 	actionScheduleTypeLabel,
 	phaseLabel,
@@ -57,7 +86,7 @@ import {
 } from '../utils/labels';
 import { AppLink } from './AppLink';
 import { Time, To } from './DiffRow';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
 import { Identifier, RowDetails } from './SignalParts';
 
 /*
@@ -93,9 +122,11 @@ const FINDINGS_STEP = 50;
  * @param props.selectedPhase   Phase selected in the report's tabs.
  * @param props.view            Expanded groups and disclosures.
  * @param props.onViewChange    Updates them.
+ * @param props.pendingRefresh  Background reads while site check results are pending.
  */
 export function PotentialImpact( {
 	impact,
+	siteChecks,
 	windowSeconds,
 	findingHref,
 	onOpenFinding,
@@ -103,8 +134,10 @@ export function PotentialImpact( {
 	selectedPhase,
 	view,
 	onViewChange,
+	pendingRefresh,
 }: {
 	impact: PotentialImpactData;
+	siteChecks?: SiteChecks;
 	windowSeconds: number;
 	findingHref: ( finding: ImpactFinding ) => string;
 	onOpenFinding: ( finding: ImpactFinding ) => void;
@@ -112,12 +145,41 @@ export function PotentialImpact( {
 	selectedPhase: PhaseKey;
 	view: ImpactView;
 	onViewChange: ( view: ImpactView ) => void;
+	pendingRefresh?: PendingRefresh;
 } ) {
 	const state = impactState( impact );
+	const title = useRef< HTMLHeadingElement >( null );
+	const refreshing =
+		pendingRefresh !== undefined && pendingRefresh.state !== 'off';
+	// Announced once when pending site check results arrive while open.
+	const sitePending = impact.site_checks?.status === 'pending';
+	const [ wasPending, setWasPending ] = useState( sitePending );
+	const [ arrived, setArrived ] = useState( false );
+	if ( wasPending !== sitePending ) {
+		setWasPending( sitePending );
+		setArrived( ! sitePending );
+	}
+	// The refresh line disappears when results arrive: if it had focus, focus
+	// moves to the section title instead of being lost.
+	const refreshFocused = useRef( false );
+	useEffect( () => {
+		if ( ! refreshing && refreshFocused.current ) {
+			refreshFocused.current = false;
+			if (
+				document.activeElement === null ||
+				document.activeElement === document.body
+			) {
+				title.current?.focus();
+			}
+		}
+	}, [ refreshing ] );
 	const groups = useMemo(
 		() => groupFindings( impact.findings ),
 		[ impact.findings ]
 	);
+	const siteFindings = siteCheckFindings( impact );
+	const netEvaluated = impact.status !== 'not_evaluated';
+	const siteEvaluated = siteChecksEvaluated( impact );
 	// Position of each finding in the API's list, for links and focus.
 	const indexes = useMemo(
 		() =>
@@ -148,24 +210,35 @@ export function PotentialImpact( {
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
 				<h3
 					id="updatelens-impact-title"
-					className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600"
+					ref={ title }
+					tabIndex={ -1 }
+					className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600 focus:outline-none"
 				>
 					{ __( 'Potential impact', 'updatelens' ) }
 				</h3>
 				<span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
-					{ __( 'Based on Net result', 'updatelens' ) }
+					{ sourceLabel( netEvaluated, siteEvaluated ) }
 				</span>
 			</div>
 			{ elsewhere && (
 				<p className="mt-3 max-w-3xl rounded-lg bg-slate-50 px-3 py-2 text-[13px] leading-5 text-slate-700 ring-1 ring-inset ring-slate-200">
-					{ sprintf(
-						/* translators: %s: selected phase, e.g. "During update". */
-						__(
-							'You are viewing %s. These findings do not come from that phase: Potential Impact always uses the Net result (before the update compared with after it).',
-							'updatelens'
-						),
-						phaseLabel( selectedPhase )
-					) }
+					{ siteEvaluated
+						? sprintf(
+								/* translators: %s: selected phase, e.g. "During update". */
+								__(
+									'You are viewing %s. These findings do not come from that phase: Potential Impact uses the Net result (before the update compared with after it) and site checks taken just before and after the update.',
+									'updatelens'
+								),
+								phaseLabel( selectedPhase )
+							)
+						: sprintf(
+								/* translators: %s: selected phase, e.g. "During update". */
+								__(
+									'You are viewing %s. These findings do not come from that phase: Potential Impact always uses the Net result (before the update compared with after it).',
+									'updatelens'
+								),
+								phaseLabel( selectedPhase )
+							) }
 					{ onShowNetResult && (
 						<>
 							{ ' ' }
@@ -199,14 +272,46 @@ export function PotentialImpact( {
 			{ evaluated && (
 				<IncompleteChecks
 					impact={ impact }
+					siteChecks={ siteChecks }
 					windowSeconds={ windowSeconds }
 				/>
 			) }
-			{ groups.length > 0 && (
+			{ refreshing && (
+				<PendingRefreshLine
+					refresh={ pendingRefresh }
+					onFocus={ () => {
+						refreshFocused.current = true;
+					} }
+				/>
+			) }
+			<p role="status" className="sr-only">
+				{ arrived && __( 'Site check results arrived.', 'updatelens' ) }
+			</p>
+			{ groups.length + siteFindings.length > 0 && (
 				<ul
 					aria-label={ __( 'Findings', 'updatelens' ) }
 					className="mt-5 space-y-2.5"
 				>
+					{ /* Site checks first: they describe how the site responds. */ }
+					{ siteFindings.map( ( finding ) => {
+						const key = `site_check:${ finding.check }`;
+						const expanded = view.open[ key ] !== undefined;
+						return (
+							<SiteCheckFindingItem
+								key={ key }
+								finding={ finding }
+								expanded={ expanded }
+								onToggle={ () =>
+									setVisible(
+										key,
+										expanded
+											? null
+											: DEFAULT_VISIBLE_FINDINGS
+									)
+								}
+							/>
+						);
+					} ) }
 					{ groups.map( ( group ) => (
 						<FindingGroupItem
 							key={ group.key }
@@ -224,6 +329,7 @@ export function PotentialImpact( {
 			) }
 			<WhatWasChecked
 				impact={ impact }
+				siteChecks={ siteChecks }
 				windowSeconds={ windowSeconds }
 				open={ view.checks }
 				onToggle={ ( checks ) => onViewChange( { ...view, checks } ) }
@@ -233,24 +339,95 @@ export function PotentialImpact( {
 }
 
 /**
+ * While site check results are pending: that the report checks for them by
+ * itself, or that it stopped, and a button to check now. The button stays
+ * the same element in both states, so focus is kept.
+ *
+ * @param props         Props.
+ * @param props.refresh Background reads.
+ * @param props.onFocus Notes that focus is inside.
+ */
+function PendingRefreshLine( {
+	refresh,
+	onFocus,
+}: {
+	refresh: PendingRefresh;
+	onFocus: () => void;
+} ) {
+	const stopped = refresh.state === 'stopped';
+	return (
+		<p
+			onFocus={ onFocus }
+			className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-5 text-slate-600"
+		>
+			<span>
+				{ stopped
+					? __(
+							'Automatic checking stopped; the site check results have not arrived yet.',
+							'updatelens'
+						)
+					: __(
+							'This report checks for the pending site check results every few seconds while it is open.',
+							'updatelens'
+						) }
+			</span>
+			<Button
+				type="button"
+				variant="outline"
+				size="sm"
+				aria-disabled={ refresh.checking }
+				onClick={ () => {
+					if ( ! refresh.checking ) {
+						refresh.refreshNow();
+					}
+				} }
+			>
+				<Icon
+					name="progress"
+					className={ cn(
+						'size-4',
+						refresh.checking && 'motion-safe:animate-spin'
+					) }
+				/>
+				{ stopped
+					? __( 'Check again', 'updatelens' )
+					: __( 'Check now', 'updatelens' ) }
+			</Button>
+		</p>
+	);
+}
+
+/**
  * Signals whose checks did not run, always visible (also while every group
  * is collapsed): partial results must never read as complete.
  *
  * @param props               Props.
  * @param props.impact        API evaluation.
+ * @param props.siteChecks    The report's site checks (inconclusive details).
  * @param props.windowSeconds Observation window length from the API.
  */
 function IncompleteChecks( {
 	impact,
+	siteChecks,
 	windowSeconds,
 }: {
 	impact: PotentialImpactData;
+	siteChecks?: SiteChecks;
 	windowSeconds: number;
 } ) {
 	const incomplete = PROVIDERS.filter(
 		( signal ) => impact.signals[ signal ].status === 'not_evaluated'
 	);
-	if ( incomplete.length === 0 ) {
+	// Site checks that were used but not compared (never those turned off or
+	// recorded before site checks existed: no warning on every old report).
+	const sites = siteChecksApplicable( impact )
+		? SITE_CHECKS.filter( ( check ) =>
+				[ 'pending', 'not_evaluated' ].includes(
+					impact.site_checks.checks[ check ]?.status
+				)
+			)
+		: [];
+	if ( incomplete.length + sites.length === 0 ) {
 		return null;
 	}
 	return (
@@ -286,6 +463,38 @@ function IncompleteChecks( {
 					</li>
 				);
 			} ) }
+			{ sites.map( ( check ) => {
+				const text = siteCheckCoverage(
+					check,
+					impact.site_checks.checks[ check ],
+					siteChecks?.checks[ check ]
+				);
+				return (
+					<li
+						key={ check }
+						data-category={ text.category }
+						className="flex gap-2"
+					>
+						<Icon
+							name="site_checks"
+							className="mt-0.5 size-4 shrink-0 text-amber-700"
+						/>
+						<span>
+							<span className="font-medium">
+								{ siteCheckName( check ) }
+							</span>
+							{ ': ' }
+							{ text.status }
+							{ text.detail && (
+								<>
+									{ ' · ' }
+									{ text.detail }
+								</>
+							) }
+						</span>
+					</li>
+				);
+			} ) }
 		</ul>
 	);
 }
@@ -296,21 +505,26 @@ function IncompleteChecks( {
  *
  * @param props               Props.
  * @param props.impact        API evaluation.
+ * @param props.siteChecks    The report's site checks (timing of compared checks).
  * @param props.windowSeconds Observation window length from the API.
  * @param props.open          Whether it is open.
  * @param props.onToggle      Reports a new open state.
  */
 function WhatWasChecked( {
 	impact,
+	siteChecks,
 	windowSeconds,
 	open,
 	onToggle,
 }: {
 	impact: PotentialImpactData;
+	siteChecks?: SiteChecks;
 	windowSeconds: number;
 	open: boolean;
 	onToggle: ( open: boolean ) => void;
 } ) {
+	// Site checks that were off or not recorded: one quiet row, not one per check.
+	const notUsed = siteChecksNotUsed( impact );
 	return (
 		<details
 			open={ open }
@@ -330,64 +544,68 @@ function WhatWasChecked( {
 			</summary>
 			<div className="mt-2 space-y-4 pb-1 text-[13px] leading-5">
 				<dl className="grid gap-x-6 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)]">
-					{ PROVIDERS.map( ( signal ) => {
-						const text = impactSignalText(
-							signal,
-							impact,
-							windowSeconds
-						);
-						const incomplete =
-							text.category !== 'checked' &&
-							text.category !== 'not_applicable';
-						return (
-							<div key={ signal } className="contents">
-								<dt className="flex items-center gap-2 font-medium text-slate-800">
-									<Icon
-										name={ signal }
-										className="size-4 text-slate-500"
+					{ PROVIDERS.map( ( signal ) => (
+						<CheckedRow
+							key={ signal }
+							icon={ signal }
+							label={ providerLabel( signal ) }
+							text={ impactSignalText(
+								signal,
+								impact,
+								windowSeconds
+							) }
+						/>
+					) ) }
+					{ notUsed ? (
+						<CheckedRow
+							icon="site_checks"
+							label={ __( 'Site checks', 'updatelens' ) }
+							text={ {
+								...notUsed,
+								category: 'not_applicable',
+								description: null,
+							} }
+						/>
+					) : (
+						SITE_CHECKS.map( ( check ) => {
+							const evaluation =
+								impact.site_checks.checks[ check ];
+							return (
+								evaluation && (
+									<CheckedRow
+										key={ check }
+										icon="site_checks"
+										label={ siteCheckName( check ) }
+										text={ {
+											...siteCheckCoverage(
+												check,
+												evaluation,
+												siteChecks?.checks[ check ]
+											),
+											description:
+												evaluation.status ===
+												'evaluated'
+													? comparedTimingText(
+															siteChecks,
+															check
+														)
+													: null,
+										} }
 									/>
-									{ providerLabel( signal ) }
-								</dt>
-								<dd
-									data-category={ text.category }
-									className={ cn(
-										'pl-6 sm:pl-0',
-										incomplete
-											? 'text-amber-900'
-											: 'text-slate-600'
-									) }
-								>
-									<span
-										className={ cn(
-											'font-medium',
-											text.category === 'checked' &&
-												'text-slate-800'
-										) }
-									>
-										{ text.status }
-									</span>
-									{ text.detail && (
-										<>
-											{ ' · ' }
-											{ text.detail }
-										</>
-									) }
-									{ text.description && (
-										<span className="block text-slate-600">
-											{ text.description }
-										</span>
-									) }
-								</dd>
-							</div>
-						);
-					} ) }
+								)
+							);
+						} )
+					) }
 				</dl>
 				<div>
 					<h4 className="font-semibold text-slate-800">
 						{ __( 'Patterns checked', 'updatelens' ) }
 					</h4>
 					<ul className="mt-1 list-disc space-y-0.5 pl-5 text-slate-600 marker:text-slate-400">
-						{ checkedPatterns().map( ( line ) => (
+						{ [
+							...checkedPatterns(),
+							...( notUsed ? [] : siteCheckPatterns() ),
+						].map( ( line ) => (
 							<li key={ line }>{ line }</li>
 						) ) }
 					</ul>
@@ -397,7 +615,10 @@ function WhatWasChecked( {
 						{ __( 'What this does not show', 'updatelens' ) }
 					</h4>
 					<ul className="mt-1 list-disc space-y-0.5 pl-5 text-slate-600 marker:text-slate-400">
-						{ checkLimitations().map( ( line ) => (
+						{ [
+							...checkLimitations( ! notUsed ),
+							...( notUsed ? [] : siteCheckLimitations() ),
+						].map( ( line ) => (
 							<li key={ line }>{ line }</li>
 						) ) }
 					</ul>
@@ -405,6 +626,84 @@ function WhatWasChecked( {
 			</div>
 		</details>
 	);
+}
+
+/**
+ * One row of "What was checked": a signal or site check and how its checks
+ * ended. Incomplete checks are amber; checked and not applicable ones quiet.
+ *
+ * @param props       Props.
+ * @param props.icon  Icon.
+ * @param props.label Signal or check name.
+ * @param props.text  Category, status, detail and description.
+ */
+function CheckedRow( {
+	icon,
+	label,
+	text,
+}: {
+	icon: IconName;
+	label: string;
+	text: {
+		category: CheckCategory;
+		status: string;
+		detail: string | null;
+		description: string | null;
+	};
+} ) {
+	const incomplete =
+		text.category !== 'checked' && text.category !== 'not_applicable';
+	return (
+		<div className="contents">
+			<dt className="flex items-center gap-2 font-medium text-slate-800">
+				<Icon name={ icon } className="size-4 text-slate-500" />
+				{ label }
+			</dt>
+			<dd
+				data-category={ text.category }
+				className={ cn(
+					'pl-6 sm:pl-0',
+					incomplete ? 'text-amber-900' : 'text-slate-600'
+				) }
+			>
+				<span
+					className={ cn(
+						'font-medium',
+						text.category === 'checked' && 'text-slate-800'
+					) }
+				>
+					{ text.status }
+				</span>
+				{ text.detail && (
+					<>
+						{ ' · ' }
+						{ text.detail }
+					</>
+				) }
+				{ text.description && (
+					<span className="block text-slate-600">
+						{ text.description }
+					</span>
+				) }
+			</dd>
+		</div>
+	);
+}
+
+/**
+ * The evidence label: "Based on Net result", "Based on Net result and site
+ * checks" when site checks were compared too, or "Based on site checks".
+ *
+ * @param net  Whether the Net result was evaluated.
+ * @param site Whether at least one site check was compared.
+ */
+function sourceLabel( net: boolean, site: boolean ): string {
+	if ( site && net ) {
+		return __( 'Based on Net result and site checks', 'updatelens' );
+	}
+	return site
+		? __( 'Based on site checks', 'updatelens' )
+		: __( 'Based on Net result', 'updatelens' );
 }
 
 /**
@@ -435,13 +734,225 @@ function FindingGroupItem( {
 	findingHref: ( finding: ImpactFinding ) => string;
 	onOpenFinding: ( finding: ImpactFinding ) => void;
 } ) {
+	const { names, more } = groupSubjects( group );
+
+	return (
+		<CompactRow
+			icon={ group.signal }
+			title={ findingGroupTitle( group ) }
+			count={ group.findings.length }
+			source={
+				<>
+					<span>{ providerLabel( group.signal ) }</span>{ ' ' }
+					<span aria-hidden="true">·</span>{ ' ' }
+					{ names.map( ( name, index ) => (
+						<Fragment key={ name }>
+							<span className="inline-flex min-w-0 max-w-full">
+								<code
+									title={ name }
+									className="truncate bg-transparent p-0 font-mono text-[12.5px] text-slate-700"
+								>
+									{ name }
+								</code>
+								{ index < names.length - 1 && ',' }
+							</span>{ ' ' }
+						</Fragment>
+					) ) }
+					{ more > 0 && (
+						<span>
+							{ sprintf(
+								/* translators: %s: number of further option names or hooks. */
+								_n(
+									'and %s more',
+									'and %s more',
+									more,
+									'updatelens'
+								),
+								formatCount( more )
+							) }
+						</span>
+					) }
+				</>
+			}
+			summary={ groupSummary( group ) }
+			expanded={ visible !== null }
+			onToggle={ () =>
+				onVisibleChange(
+					visible !== null ? null : DEFAULT_VISIBLE_FINDINGS
+				)
+			}
+			details={ () =>
+				visible !== null && (
+					<GroupDetails
+						group={ group }
+						visible={ visible }
+						onVisibleChange={ onVisibleChange }
+						indexes={ indexes }
+						findingHref={ findingHref }
+						onOpenFinding={ onOpenFinding }
+					/>
+				)
+			}
+		/>
+	);
+}
+
+/**
+ * A site check finding as a compact row, like a group of findings: title,
+ * source ("Site checks · Homepage") and one sentence. Expanded, it shows the
+ * exact earlier and later observations, why it might matter and what to
+ * check next. There is no signal page to link to: the evidence is here.
+ *
+ * @param props          Props.
+ * @param props.finding  Finding.
+ * @param props.expanded Whether it is expanded.
+ * @param props.onToggle Expands or collapses it.
+ */
+function SiteCheckFindingItem( {
+	finding,
+	expanded,
+	onToggle,
+}: {
+	finding: SiteCheckFinding;
+	expanded: boolean;
+	onToggle: () => void;
+} ) {
+	return (
+		<CompactRow
+			icon="site_checks"
+			title={ siteCheckFindingTitle( finding ) }
+			count={ 1 }
+			source={
+				<>
+					<span>{ __( 'Site checks', 'updatelens' ) }</span>{ ' ' }
+					<span aria-hidden="true">·</span>{ ' ' }
+					<span>{ siteCheckSubject( finding.check ) }</span>
+				</>
+			}
+			summary={ siteCheckSummary( finding ) }
+			expanded={ expanded }
+			onToggle={ onToggle }
+			details={ () => (
+				<div className="border-t">
+					<div className="px-4 pt-3 sm:px-5">
+						<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+							{ __( 'What changed', 'updatelens' ) }
+						</h5>
+						<p className="mt-1.5 text-sm leading-6 text-slate-800">
+							{ siteCheckWhatChanged( finding ) }
+						</p>
+						<RowDetails
+							boxed
+							rows={ [
+								[
+									__( 'Earlier check', 'updatelens' ),
+									<SideEvidence
+										key="b"
+										check={ finding.check }
+										side={ finding.before }
+										purpose="before"
+									/>,
+								],
+								[
+									__( 'Later check', 'updatelens' ),
+									<SideEvidence
+										key="a"
+										check={ finding.check }
+										side={ finding.after }
+										purpose="after"
+									/>,
+								],
+							] }
+						/>
+					</div>
+					<Guidance
+						why={ siteCheckWhyItMatters( finding ) }
+						next={ siteCheckWhatToCheck( finding ) }
+					/>
+				</div>
+			) }
+		/>
+	);
+}
+
+/**
+ * One side of a site check as observed: its verdict, when it ran relative to
+ * the update, and every request.
+ *
+ * @param props         Props.
+ * @param props.check   Check.
+ * @param props.side    Side.
+ * @param props.purpose `before` or `after`.
+ */
+function SideEvidence( {
+	check,
+	side,
+	purpose,
+}: {
+	check: SiteCheckId;
+	side: SiteCheckSide;
+	purpose: 'before' | 'after';
+} ) {
+	const timing = sideTimingText( side, purpose );
+	return (
+		<span className="block space-y-0.5">
+			<span className="block font-medium text-slate-800">
+				{ sideSummaryText( side ) }
+			</span>
+			{ timing && (
+				<span className="block text-muted-foreground">{ timing }</span>
+			) }
+			{ ( side.result?.attempts ?? [] ).map( ( attempt, index ) => (
+				<span key={ index } className="block">
+					<span className="text-muted-foreground">
+						{ requestLabel( index ) }
+						{ ': ' }
+					</span>
+					{ attemptText( check, attempt ) }
+				</span>
+			) ) }
+		</span>
+	);
+}
+
+/**
+ * A finding row, collapsed by default: a signal icon, the title with its
+ * count, the source line, one summary sentence and a button over the whole
+ * row. `details` is rendered only while expanded (never hidden DOM).
+ *
+ * @param props          Props.
+ * @param props.icon     Icon of the source.
+ * @param props.title    Title.
+ * @param props.count    Number of findings.
+ * @param props.source   Source line (signal and subjects).
+ * @param props.summary  One short sentence, the button's description.
+ * @param props.expanded Whether it is expanded.
+ * @param props.onToggle Expands or collapses it.
+ * @param props.details  Renders the expanded content.
+ */
+function CompactRow( {
+	icon,
+	title,
+	count,
+	source,
+	summary,
+	expanded,
+	onToggle,
+	details,
+}: {
+	icon: IconName;
+	title: string;
+	count: number;
+	source: ReactNode;
+	summary: string;
+	expanded: boolean;
+	onToggle: () => void;
+	details: () => ReactNode;
+} ) {
 	const id = useId();
 	const titleId = `${ id }-title`;
 	const summaryId = `${ id }-summary`;
 	const panelId = `${ id }-panel`;
-	const expanded = visible !== null;
-	const total = group.findings.length;
-	const { names, more } = groupSubjects( group );
 
 	return (
 		<li
@@ -459,7 +970,7 @@ function FindingGroupItem( {
 			>
 				{ /* The signal is named in the row; on phones its icon would only narrow the text. */ }
 				<span className="hidden size-9 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600 sm:grid">
-					<Icon name={ group.signal } className="size-[1.125rem]" />
+					<Icon name={ icon } className="size-[1.125rem]" />
 				</span>
 				<div className="min-w-0 flex-1">
 					<h4
@@ -471,19 +982,15 @@ function FindingGroupItem( {
 							aria-expanded={ expanded }
 							aria-controls={ panelId }
 							aria-describedby={ summaryId }
-							onClick={ () =>
-								onVisibleChange(
-									expanded ? null : DEFAULT_VISIBLE_FINDINGS
-								)
-							}
+							onClick={ onToggle }
 							className="text-left after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-ring"
 						>
-							{ findingGroupTitle( group ) }
+							{ title }
 							<span
 								aria-hidden="true"
 								className="ml-2 inline-flex min-w-6 justify-center rounded-full bg-slate-100 px-2 align-[1px] text-xs font-semibold tabular-nums leading-5 text-slate-700"
 							>
-								{ formatCount( total ) }
+								{ formatCount( count ) }
 							</span>
 							<span className="sr-only">
 								{ ', ' }
@@ -492,50 +999,22 @@ function FindingGroupItem( {
 									_n(
 										'%s finding',
 										'%s findings',
-										total,
+										count,
 										'updatelens'
 									),
-									formatCount( total )
+									formatCount( count )
 								) }
 							</span>
 						</button>
 					</h4>
 					<p className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-[13px] leading-5 text-muted-foreground">
-						<span>{ providerLabel( group.signal ) }</span>{ ' ' }
-						<span aria-hidden="true">·</span>{ ' ' }
-						{ names.map( ( name, index ) => (
-							<Fragment key={ name }>
-								<span className="inline-flex min-w-0 max-w-full">
-									<code
-										title={ name }
-										className="truncate bg-transparent p-0 font-mono text-[12.5px] text-slate-700"
-									>
-										{ name }
-									</code>
-									{ index < names.length - 1 && ',' }
-								</span>{ ' ' }
-							</Fragment>
-						) ) }
-						{ more > 0 && (
-							<span>
-								{ sprintf(
-									/* translators: %s: number of further option names or hooks. */
-									_n(
-										'and %s more',
-										'and %s more',
-										more,
-										'updatelens'
-									),
-									formatCount( more )
-								) }
-							</span>
-						) }
+						{ source }
 					</p>
 					<p
 						id={ summaryId }
 						className="mt-1 text-sm leading-6 text-slate-700"
 					>
-						{ groupSummary( group ) }
+						{ summary }
 					</p>
 				</div>
 				<span
@@ -557,18 +1036,43 @@ function FindingGroupItem( {
 				</span>
 			</div>
 			<div id={ panelId } hidden={ ! expanded }>
-				{ expanded && (
-					<GroupDetails
-						group={ group }
-						visible={ visible }
-						onVisibleChange={ onVisibleChange }
-						indexes={ indexes }
-						findingHref={ findingHref }
-						onOpenFinding={ onOpenFinding }
-					/>
-				) }
+				{ expanded && details() }
 			</div>
 		</li>
+	);
+}
+
+/**
+ * "Why it might matter" and "What to check next", side by side from tablets on.
+ *
+ * @param props      Props.
+ * @param props.why  Sentences.
+ * @param props.next Steps.
+ */
+function Guidance( { why, next }: { why: string[]; next: string[] } ) {
+	return (
+		<div className="grid gap-x-8 gap-y-4 px-4 py-4 sm:px-5 md:grid-cols-2">
+			<div>
+				<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+					{ __( 'Why it might matter', 'updatelens' ) }
+				</h5>
+				<div className="mt-1.5 space-y-1.5 text-sm leading-relaxed text-slate-700">
+					{ why.map( ( sentence ) => (
+						<p key={ sentence }>{ sentence }</p>
+					) ) }
+				</div>
+			</div>
+			<div>
+				<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+					{ __( 'What to check next', 'updatelens' ) }
+				</h5>
+				<ul className="mt-1.5 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-700 marker:text-slate-400">
+					{ next.map( ( step ) => (
+						<li key={ step }>{ step }</li>
+					) ) }
+				</ul>
+			</div>
+		</div>
 	);
 }
 
@@ -705,28 +1209,10 @@ function GroupDetails( {
 					) }
 				</div>
 			) }
-			<div className="grid gap-x-8 gap-y-4 px-4 py-4 sm:px-5 md:grid-cols-2">
-				<div>
-					<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
-						{ __( 'Why it might matter', 'updatelens' ) }
-					</h5>
-					<div className="mt-1.5 space-y-1.5 text-sm leading-relaxed text-slate-700">
-						{ whyItMatters( group ).map( ( sentence ) => (
-							<p key={ sentence }>{ sentence }</p>
-						) ) }
-					</div>
-				</div>
-				<div>
-					<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
-						{ __( 'What to check next', 'updatelens' ) }
-					</h5>
-					<ul className="mt-1.5 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-700 marker:text-slate-400">
-						{ whatToCheck( group ).map( ( step ) => (
-							<li key={ step }>{ step }</li>
-						) ) }
-					</ul>
-				</div>
-			</div>
+			<Guidance
+				why={ whyItMatters( group ) }
+				next={ whatToCheck( group ) }
+			/>
 		</div>
 	);
 }

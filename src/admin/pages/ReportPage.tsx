@@ -27,6 +27,10 @@ import { SignalDetail } from '../components/SignalDetail';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { Icon, type IconName } from '../components/Icon';
+import {
+	usePendingRefresh,
+	type PendingRefresh,
+} from '../hooks/use-pending-refresh';
 import { useRequest } from '../hooks/use-request';
 import type {
 	AnalysisReport,
@@ -79,6 +83,22 @@ export function ReportPage( {
 	const load = useCallback( () => getAnalysis( id ), [ id ] );
 	const [ request, reload ] = useRequest( load );
 	const history: Route = { view: 'history', page: route.page };
+	// A newer report read in the background while results were pending. It
+	// replaces the loaded one in place (the report stays mounted, so the
+	// selected phase, expanded findings and focus are kept), and only for
+	// the load it was read for.
+	const loaded = request.status === 'ready' ? request.data : null;
+	const [ latest, setLatest ] = useState< {
+		base: AnalysisReport;
+		report: AnalysisReport;
+	} | null >( null );
+	const report =
+		latest !== null && latest.base === loaded ? latest.report : loaded;
+	const refresh = usePendingRefresh( id, report, ( next ) => {
+		if ( loaded !== null && next.id === loaded.id ) {
+			setLatest( { base: loaded, report: next } );
+		}
+	} );
 
 	return (
 		<div className="space-y-5">
@@ -106,13 +126,14 @@ export function ReportPage( {
 					onRetry={ reload }
 				/>
 			) }
-			{ request.status === 'ready' && (
+			{ report !== null && (
 				<Report
-					report={ request.data }
+					report={ report }
 					route={ route }
 					href={ href }
 					onNavigate={ onNavigate }
 					onRefresh={ reload }
+					pendingRefresh={ refresh }
 					focusHeading={ focusHeading }
 				/>
 			) }
@@ -126,11 +147,13 @@ function Report( {
 	href,
 	onNavigate,
 	onRefresh,
+	pendingRefresh,
 	focusHeading,
 }: Omit< ReportPageProps, 'route' > & {
 	report: AnalysisReport;
 	route: ReportRoute;
 	onRefresh: () => void;
+	pendingRefresh: PendingRefresh;
 } ) {
 	const heading = useRef< HTMLHeadingElement >( null );
 	// Counts come from the summaries only; computed once per loaded report.
@@ -138,9 +161,15 @@ function Report( {
 		() => reportChangeCounts( report.phases ),
 		[ report.phases ]
 	);
-	// The default phase is the report's, so overview and details agree.
+	// The default phase is the report's, so overview and details agree. It
+	// is kept once shown: a background update never switches the phase.
 	const initial = defaultPhase( report.phases, counts );
-	const selected = initial === null ? null : ( route.phase ?? initial );
+	const [ shown, setShown ] = useState( initial );
+	if ( shown === null && initial !== null ) {
+		setShown( initial );
+	}
+	const selected =
+		initial === null ? null : ( route.phase ?? shown ?? initial );
 	const { signal } = route;
 
 	// A located item (from a Potential Impact link) applies to the Net result
@@ -264,6 +293,8 @@ function Report( {
 							onNavigate( at( { signal: provider } ) )
 						}
 						impact={ report.potential_impact }
+						siteChecks={ report.site_checks }
+						pendingRefresh={ pendingRefresh }
 						findingHref={ ( finding ) =>
 							href( findingRoute( finding ) )
 						}

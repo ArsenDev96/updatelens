@@ -272,8 +272,8 @@ Before WP-Cron reporting, each phase _was_ the options object. It is now `phases
 - `settle_outcome`: `null` while open, else `admin_shutdown`, `follow_up`, `next_update`, `expired`, `not_applicable`, or `unknown`. `follow_up`: the post-update observation was taken by the follow-up request the updating administrator's browser sends once the WordPress update queue is idle; `admin_shutdown`: at the end of a later wp-admin page request.
 - `error`: `null` or `{"code": "…"}`, a sanitized identifier (e.g. `update_not_completed`, `fingerprint_context_changed`, or a WordPress updater code such as `incompatible_archive`). No messages, paths or URLs.
 - `observation_window_seconds`: length of the post-update observation window. Presentation derives its wording ("within 5 minutes") from it.
-- `potential_impact`: review rules evaluated on the Net result, with per-signal evaluation status (see [`potential_impact`](#potential_impact)). Added later; every other field is unchanged.
-- `site_checks`: the homepage and REST API checks before and after the update, compared per check (see [`site_checks`](#site_checks)). Added later; every other field is unchanged. Not part of `potential_impact`.
+- `potential_impact`: review rules evaluated on the Net result, with per-signal evaluation status, plus the site check comparison evaluated separately in `potential_impact.site_checks` (see [`potential_impact`](#potential_impact)). Added later; every other field is unchanged.
+- `site_checks`: the homepage and REST API checks before and after the update, compared per check (see [`site_checks`](#site_checks)). Added later; every other field is unchanged. Not part of any phase; Potential Impact reads its comparison (`potential_impact.site_checks`).
 - No user information, snapshots, fingerprints, fingerprint contexts, option values, WP-Cron arguments or Action Scheduler arguments are returned.
 
 ### Phases
@@ -440,6 +440,42 @@ Never included: option values, arguments, argument fingerprints, md5 event keys,
       },
       "before": { "removed_recurring": [{ "timestamp": 1791223800, "schedule": "hourly", "interval": 3600 }] },
       "after": { "added_recurring": [] }
+    }
+  ],
+  "site_checks": { "status": "not_applicable", "checks": { … }, "findings": [] }
+}
+```
+
+#### `potential_impact.site_checks`
+
+The report's [`site_checks`](#site_checks) comparison evaluated beside the Net result (`PotentialImpact::evaluate_site_checks()`). Site checks are observations taken by the updating administrator's browser around the update, not part of any phase: they never change `potential_impact.status`, `signals` or `findings`, and the same result applies whichever phase a client shows. Added later; additive.
+
+- `status`: `evaluated` (every applicable check compared), `partial` (some), `pending` (an AFTER result can still arrive), `not_evaluated` (none compared), `not_applicable` (no check applies: site checks were turned off for this update, or it was recorded before UpdateLens had them).
+- `checks.home`, `checks.rest`: `status` (`evaluated`, `pending`, `not_evaluated`, `not_applicable`), `state` (the comparison state from `site_checks`), `change` (for `changed`: `redirect_appeared`, `redirect_disappeared`, `redirect_then_failure`; else `null`), `reason` (`null` when evaluated or pending; for `not_comparable` the comparison's reason, e.g. `after_inconclusive`, `overlapping_update`; for `not_run` the reason of the missing side, BEFORE first, e.g. `missing`, `not_completed_before_update`, `not_reported`, `not_started`), `finding_count` (0 or 1 when evaluated, else `null`). `not_applicable` only for the reasons `disabled` and `not_captured`; every other unavailable check is `not_evaluated`, never "no findings".
+- `findings` (homepage first): only from the comparison state, never inferred from other fields.
+
+| `code`                     | When (comparison state)                                                                                                                                                     | `evidence`                                                                                                                                                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `site_check_newly_failing` | `newly_failing`: passed before, and both requests after the update failed.                                                                                                  | `failure` (the AFTER result's reason: `server_error`, `not_found`, `refused`, `client_error`, `timeout`, `incomplete`, `wrong_user`, `unexpected_json`, `extra_output`, `invalid_json`, `redirected`), `attempt_count` |
+| `site_check_changed`       | `changed` with `redirect_appeared`: the homepage passed (WordPress verified) before the update and redirected in both requests after it. A changed response, not a failure. | `change` (`redirect_appeared`), `attempt_count`                                                                                                                                                                        |
+
+Each finding has `code`, `signal` (`site_checks`), `check` (`home`, `rest`), `evidence`, and `before` / `after`: the check's sides exactly as in `site_checks` (verdicts, browser-observed attempt facts, UTC times, `age_seconds`, `delay_seconds`). Not findings: `passed_both`, `failing_both` (already failing before the update), `recovered`, `changed` with `redirect_disappeared` or `redirect_then_failure` (the baseline was a redirect, not a verified pass, so nothing can be called newly failing; the comparison and its `change` stay in `checks`), `not_run`, `not_comparable` (including a failure followed by a passing retry, which is inconclusive `unconfirmed`), `pending`. A finding says what the browser observed; it never says what caused it, that WordPress or the updated plugin produced a response, or that a passing check means the site works.
+
+```json
+"site_checks": {
+  "status": "evaluated",
+  "checks": {
+    "home": { "status": "evaluated", "state": "newly_failing", "change": null, "reason": null, "finding_count": 1 },
+    "rest": { "status": "evaluated", "state": "passed_both", "change": null, "reason": null, "finding_count": 0 }
+  },
+  "findings": [
+    {
+      "code": "site_check_newly_failing",
+      "signal": "site_checks",
+      "check": "home",
+      "evidence": { "failure": "server_error", "attempt_count": 2 },
+      "before": { "available": true, "reason": null, "started_at": "…", "completed_at": "…", "result": { "verdict": "pass", … }, "age_seconds": 252 },
+      "after": { "available": true, "reason": null, "started_at": "…", "completed_at": "…", "result": { "verdict": "fail", "reason": "server_error", … }, "delay_seconds": 3 }
     }
   ]
 }

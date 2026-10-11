@@ -240,7 +240,9 @@ final class AnalysisReadModel {
 	 * `potential_impact` is evaluated on the Net result phase built here (the
 	 * diffs decoded once for the report), on every read; it is never stored.
 	 * `site_checks` (SiteCheckReport) compares the stored BEFORE and AFTER
-	 * site check results on every read; it is not part of Potential Impact.
+	 * site check results on every read; Potential Impact evaluates that
+	 * comparison separately (`potential_impact.site_checks`), never as part of
+	 * a phase.
 	 * Action Scheduler is not applicable only when every phase stored
 	 * `not_installed_throughout` (absent at all three captures); older rows'
 	 * `not_installed` cannot show that.
@@ -282,6 +284,10 @@ final class AnalysisReadModel {
 			);
 		}
 
+		$site_checks                     = SiteCheckReport::build( $row, (float) call_user_func( $this->now ) );
+		$potential_impact                = $this->potential_impact->evaluate( $phases, $absent );
+		$potential_impact['site_checks'] = $this->potential_impact->evaluate_site_checks( $site_checks );
+
 		return array(
 			'id'                         => $metadata['id'],
 			'plugin'                     => $metadata['plugin'],
@@ -290,8 +296,8 @@ final class AnalysisReadModel {
 			'timestamps'                 => $metadata['timestamps'],
 			'observation_window_seconds' => PluginUpdateAnalyzer::SETTLE_WINDOW_SECONDS,
 			'phases'                     => $phases,
-			'potential_impact'           => $this->potential_impact->evaluate( $phases, $absent ),
-			'site_checks'                => SiteCheckReport::build( $row, (float) call_user_func( $this->now ) ),
+			'potential_impact'           => $potential_impact,
+			'site_checks'                => $site_checks,
 			'error'                      => $metadata['error'],
 		);
 	}

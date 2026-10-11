@@ -20,6 +20,9 @@ import type {
 	PotentialImpact,
 	Provider,
 	ReportPhase,
+	SiteCheckImpact,
+	SiteChecks,
+	SiteCheckSide,
 	UnavailableActionSchedulerPhase,
 	UnavailableCronPhase,
 	UnavailableOptionsPhase,
@@ -476,24 +479,92 @@ export function impactOf(
 		status,
 		signals,
 		findings: status === 'not_evaluated' ? [] : findings,
+		site_checks: NOT_CAPTURED_SITE_CHECK_IMPACT,
 	};
 }
+
+/** A site check side without a result. */
+export function missingSide(
+	reason: string,
+	purpose: 'before' | 'after'
+): SiteCheckSide {
+	return {
+		available: false,
+		reason,
+		started_at: null,
+		completed_at: null,
+		result: null,
+		...( purpose === 'before'
+			? { age_seconds: null }
+			: { delay_seconds: null } ),
+	};
+}
+
+/** `site_checks` of an analysis recorded before site checks (API output). */
+export const NOT_CAPTURED_SITE_CHECKS: SiteChecks = {
+	status: 'unavailable',
+	checks: {
+		home: {
+			state: 'not_run',
+			reason: 'baseline_missing',
+			before: missingSide( 'not_captured', 'before' ),
+			after: missingSide( 'not_captured', 'after' ),
+		},
+		rest: {
+			state: 'not_run',
+			reason: 'baseline_missing',
+			before: missingSide( 'not_captured', 'before' ),
+			after: missingSide( 'not_captured', 'after' ),
+		},
+	},
+};
+
+/** `potential_impact.site_checks` of such an analysis. */
+export const NOT_CAPTURED_SITE_CHECK_IMPACT: SiteCheckImpact = {
+	status: 'not_applicable',
+	checks: {
+		home: {
+			status: 'not_applicable',
+			state: 'not_run',
+			change: null,
+			reason: 'not_captured',
+			finding_count: null,
+		},
+		rest: {
+			status: 'not_applicable',
+			state: 'not_run',
+			change: null,
+			reason: 'not_captured',
+			finding_count: null,
+		},
+	},
+	findings: [],
+};
 
 /**
  * A report with Potential Impact derived from its phases (impactOf()).
  *
- * @param report   Report without (or with a stale) Potential Impact.
+ * @param report   Report without (or with a stale) Potential Impact; site
+ *                 checks default to an analysis recorded before them.
  * @param findings Findings of the evaluated signals.
  */
 export function withImpact(
-	report: Omit< AnalysisReport, 'potential_impact' > & {
+	report: Omit< AnalysisReport, 'potential_impact' | 'site_checks' > & {
 		potential_impact?: PotentialImpact;
+		site_checks?: SiteChecks;
 	},
 	findings: ImpactFinding[] = []
 ): AnalysisReport {
 	return {
 		...report,
-		potential_impact: impactOf( report.phases, findings ),
+		potential_impact: {
+			...impactOf( report.phases, findings ),
+			// Site checks are evaluated beside the phases: kept as given.
+			site_checks:
+				report.potential_impact?.site_checks ??
+				NOT_CAPTURED_SITE_CHECK_IMPACT,
+		},
+		site_checks: report.site_checks ?? NOT_CAPTURED_SITE_CHECKS,
 	};
 }
 

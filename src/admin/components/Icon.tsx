@@ -41,6 +41,13 @@ const PATHS = {
 			<path d="m8.5 12.25 2.5 2.5 4.5-5" />
 		</>
 	),
+	site_checks: (
+		<>
+			<rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+			<path d="M3.5 8.5h17" />
+			<path d="m9 14 2 2 4-4" />
+		</>
+	),
 	progress: (
 		<>
 			<path d="M19.5 10.5A7.75 7.75 0 0 0 5.4 7.5M4.5 4v3.5H8" />

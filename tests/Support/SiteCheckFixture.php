@@ -13,6 +13,7 @@ use UpdateLens\SiteCheck\CheckDefinition;
 use UpdateLens\SiteCheck\CheckResult;
 use UpdateLens\SiteCheck\ResponseClassifier;
 use UpdateLens\SiteCheck\UpdateWindow;
+use UpdateLens\Storage\SiteCheckResultCodec;
 
 /**
  * Builds browser facts the way the browser reports them, and results around
@@ -179,6 +180,44 @@ final class SiteCheckFixture {
 		);
 
 		return new CheckResult( $check, $options['version'], self::context( $check, $options ), $options['started_at'], $options['completed_at'], $attempts, $options['generation'] );
+	}
+
+	/**
+	 * A completed analysis row (settled by the follow-up) holding the given
+	 * site check sides as stored: results through the codec, reasons as
+	 * stored. The AFTER run was claimed 0.25 s after the update ended.
+	 *
+	 * @param array $before    Per check: CheckResult, a stored reason, or nothing.
+	 * @param array $after     Per check: CheckResult, a stored reason, or [CheckResult, reason].
+	 * @param array $overrides Columns to replace.
+	 * @return array
+	 */
+	public static function analysis_row( array $before, array $after, array $overrides = array() ) {
+		$codec = new SiteCheckResultCodec();
+		$row   = array(
+			'status'                       => 'completed',
+			'settle_outcome'               => 'follow_up',
+			'completed_at'                 => gmdate( 'Y-m-d H:i:s', (int) floor( self::UPDATE_END ) ),
+			'site_check_update_started_at' => (string) self::UPDATE_START,
+			'site_check_after_started_at'  => (string) ( self::UPDATE_END + 0.25 ),
+		);
+		foreach ( CheckDefinition::all() as $definition ) {
+			$check = $definition->get_id();
+			$b     = isset( $before[ $check ] ) ? $before[ $check ] : null;
+			$a     = isset( $after[ $check ] ) ? $after[ $check ] : null;
+			if ( is_array( $a ) ) {
+				list( $a, $reason ) = $a;
+			} else {
+				$reason = is_string( $a ) ? $a : null;
+			}
+
+			$row[ "site_check_{$check}_before" ]        = $b instanceof CheckResult ? $codec->encode( $b ) : null;
+			$row[ "site_check_{$check}_before_reason" ] = is_string( $b ) ? $b : null;
+			$row[ "site_check_{$check}_after" ]         = $a instanceof CheckResult ? $codec->encode( $a ) : null;
+			$row[ "site_check_{$check}_after_reason" ]  = $reason;
+		}
+
+		return array_merge( $row, $overrides );
 	}
 
 	/**

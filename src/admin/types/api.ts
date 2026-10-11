@@ -533,9 +533,141 @@ export type ImpactFinding =
 	| CronScheduleChangedFinding
 	| ActionScheduleChangedFinding;
 
+/** The two site checks: the anonymous homepage and REST `users/me`. */
+export type SiteCheckId = 'home' | 'rest';
+
+/** Comparison state of one site check (`pending`: AFTER may still arrive). */
+export type SiteCheckState =
+	| 'passed_both'
+	| 'newly_failing'
+	| 'failing_both'
+	| 'recovered'
+	| 'changed'
+	| 'not_run'
+	| 'not_comparable'
+	| 'pending';
+
+export type SiteCheckVerdict = 'pass' | 'fail' | 'redirect' | 'inconclusive';
+
+/**
+ * What the browser observed in one request: fixed codes, the HTTP status
+ * (null when no response was readable) and the duration. `end_marker` is
+ * homepage only, `body`/`error_code` REST only.
+ */
+export interface SiteCheckAttempt {
+	outcome: string;
+	status: number | null;
+	header: string;
+	end_marker?: string;
+	body?: string;
+	error_code?: string | null;
+	duration_ms: number;
+	/** `verified` (this run's marker came back), `unverified`, `unknown` (no response). */
+	origin: 'verified' | 'unverified' | 'unknown';
+	verdict: SiteCheckVerdict;
+	reason: string | null;
+}
+
+/** One side (BEFORE or AFTER) of a site check. */
+export interface SiteCheckSide {
+	available: boolean;
+	/** Why there is no result, or why a stored AFTER result is not compared. */
+	reason: string | null;
+	/** UTC ISO 8601: the run's session start and the acceptance of its report. */
+	started_at: string | null;
+	completed_at: string | null;
+	result: {
+		verdict: SiteCheckVerdict;
+		reason: string | null;
+		attempts: SiteCheckAttempt[];
+	} | null;
+	/** BEFORE only: whole seconds from completion to the update start. */
+	age_seconds?: number | null;
+	/** AFTER only: whole seconds from the update's end to the run's start. */
+	delay_seconds?: number | null;
+}
+
+export interface SiteCheckComparison {
+	state: SiteCheckState;
+	reason: string | null;
+	before: SiteCheckSide;
+	after: SiteCheckSide;
+}
+
+/** The report's `site_checks`: per check its sides and their comparison. */
+export interface SiteChecks {
+	status: 'pending' | 'complete' | 'partial' | 'unavailable';
+	checks: Record< SiteCheckId, SiteCheckComparison >;
+}
+
+/**
+ * Site check finding: passed before and failure confirmed after
+ * (`site_check_newly_failing`, `evidence.failure` = the AFTER result's
+ * reason), or a verified pass that became a homepage redirect
+ * (`site_check_changed`).
+ */
+export interface SiteCheckNewlyFailingFinding {
+	code: 'site_check_newly_failing';
+	signal: 'site_checks';
+	check: SiteCheckId;
+	evidence: { failure: string; attempt_count: number };
+	before: SiteCheckSide;
+	after: SiteCheckSide;
+}
+
+/**
+ * Kind of a `changed` comparison. Only `redirect_appeared` is a finding; the
+ * others start from a redirect, not a verified pass.
+ */
+export type SiteCheckChange =
+	'redirect_appeared' | 'redirect_disappeared' | 'redirect_then_failure';
+
+export interface SiteCheckChangedFinding {
+	code: 'site_check_changed';
+	signal: 'site_checks';
+	check: SiteCheckId;
+	evidence: { change: 'redirect_appeared'; attempt_count: number };
+	before: SiteCheckSide;
+	after: SiteCheckSide;
+}
+
+export type SiteCheckFinding =
+	SiteCheckNewlyFailingFinding | SiteCheckChangedFinding;
+
+/** Evaluation of one site check. */
+export interface SiteCheckImpactCheck {
+	/**
+	 * `evaluated` (compared), `pending`, `not_evaluated` (not compared,
+	 * `reason` says why) or `not_applicable` (site checks off or not recorded).
+	 */
+	status: 'evaluated' | 'pending' | 'not_evaluated' | 'not_applicable';
+	state: SiteCheckState;
+	/** Kind of a `changed` state, else null. */
+	change: SiteCheckChange | null;
+	reason: string | null;
+	/** Null unless evaluated. */
+	finding_count: number | null;
+}
+
+/**
+ * Site checks evaluated beside the Net result: independent observations
+ * around the update, not part of any phase.
+ */
+export interface SiteCheckImpact {
+	status:
+		| 'evaluated'
+		| 'partial'
+		| 'pending'
+		| 'not_evaluated'
+		| 'not_applicable';
+	checks: Record< SiteCheckId, SiteCheckImpactCheck >;
+	findings: SiteCheckFinding[];
+}
+
 /**
  * Review rules evaluated on the Net result (always `final`, whatever phase
- * is shown). Findings are observations worth a look, not problems.
+ * is shown), plus the site checks taken around the update. Findings are
+ * observations worth a look, not problems.
  */
 export interface PotentialImpact {
 	phase: 'final';
@@ -543,6 +675,7 @@ export interface PotentialImpact {
 	status: 'evaluated' | 'partial' | 'not_evaluated';
 	signals: Record< Provider, ImpactSignal >;
 	findings: ImpactFinding[];
+	site_checks: SiteCheckImpact;
 }
 
 /** GET /updatelens/v1/analyses/{id}. */
@@ -551,6 +684,7 @@ export interface AnalysisReport extends AnalysisBase {
 	observation_window_seconds: number;
 	phases: Record< PhaseKey, ReportPhase >;
 	potential_impact: PotentialImpact;
+	site_checks: SiteChecks;
 }
 
 /** One history page with the pagination headers. */

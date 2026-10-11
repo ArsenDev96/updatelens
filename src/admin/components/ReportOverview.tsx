@@ -3,10 +3,12 @@ import { Fragment } from 'react';
 
 import { cn } from '@/lib/utils';
 
+import type { PendingRefresh } from '../hooks/use-pending-refresh';
 import type {
 	ImpactFinding,
 	PhaseKey,
 	PotentialImpact as PotentialImpactData,
+	SiteChecks,
 	Provider,
 	ReportPhase,
 } from '../types/api';
@@ -41,7 +43,9 @@ import { PotentialImpact } from './PotentialImpact';
  * @param props.windowSeconds Observation window length from the API.
  * @param props.signalHref      Link target of a signal's details.
  * @param props.onOpenSignal    Opens a signal's details in the app.
- * @param props.impact          Potential Impact of the report (Net result).
+ * @param props.impact          Potential Impact of the report (Net result and site checks).
+ * @param props.siteChecks      The report's site checks.
+ * @param props.pendingRefresh  Background reads while site check results are pending.
  * @param props.findingHref     Link target of a finding's signal details.
  * @param props.onOpenFinding   Opens a finding's signal details in the app.
  * @param props.onShowNetResult Selects the Net result phase; null if selected.
@@ -56,6 +60,8 @@ export function ReportOverview( {
 	signalHref,
 	onOpenSignal,
 	impact,
+	siteChecks,
+	pendingRefresh,
 	findingHref,
 	onOpenFinding,
 	onShowNetResult,
@@ -69,6 +75,8 @@ export function ReportOverview( {
 	signalHref: ( signal: Provider ) => string;
 	onOpenSignal: ( signal: Provider ) => void;
 	impact: PotentialImpactData;
+	siteChecks?: SiteChecks;
+	pendingRefresh?: PendingRefresh;
 	findingHref: ( finding: ImpactFinding ) => string;
 	onOpenFinding: ( finding: ImpactFinding ) => void;
 	onShowNetResult: ( () => void ) | null;
@@ -85,6 +93,8 @@ export function ReportOverview( {
 			/>
 			<PotentialImpact
 				impact={ impact }
+				siteChecks={ siteChecks }
+				pendingRefresh={ pendingRefresh }
 				windowSeconds={ windowSeconds }
 				findingHref={ findingHref }
 				onOpenFinding={ onOpenFinding }

@@ -7,6 +7,10 @@
 
 namespace UpdateLens\Report;
 
+use UpdateLens\SiteCheck\AfterReason;
+use UpdateLens\SiteCheck\BeforeReason;
+use UpdateLens\SiteCheck\ComparisonState;
+use UpdateLens\SiteCheck\Verdict;
 use UpdateLens\Update\ObservationPhase;
 
 defined( 'ABSPATH' ) || exit;
@@ -48,6 +52,11 @@ defined( 'ABSPATH' ) || exit;
  * Output contains only option names, hooks, groups, timestamps, schedules,
  * intervals, cron expressions, sizes and autoload states that the decoded
  * diffs already hold: never option values, arguments or fingerprints.
+ *
+ * Site checks are evaluated separately (evaluate_site_checks()): they are
+ * observations taken around the update by the administrator's browser, not
+ * part of any phase, so they never change the Net result's status, signals
+ * or findings.
  */
 final class PotentialImpact {
 
@@ -116,6 +125,45 @@ final class PotentialImpact {
 	const CHANGE_INTERVAL            = 'interval_changed';
 	const CHANGE_SCHEDULE_TYPE       = 'schedule_type_changed';
 	const CHANGE_CRON_EXPRESSION     = 'cron_expression_changed';
+
+	/**
+	 * Site check rules, both from a verified pass before the update: a
+	 * failure confirmed after it (`newly_failing`), and a new homepage
+	 * redirect (`changed` with `redirect_appeared`). Other `changed`
+	 * comparisons (`redirect_disappeared`, `redirect_then_failure`) are
+	 * evaluated without a finding.
+	 */
+	const SITE_CHECK_NEWLY_FAILING = 'site_check_newly_failing';
+	const SITE_CHECK_CHANGED       = 'site_check_changed';
+
+	/**
+	 * Source of site check findings.
+	 */
+	const SIGNAL_SITE_CHECKS = 'site_checks';
+
+	/**
+	 * Site check evaluation status while the AFTER result may still arrive.
+	 */
+	const PENDING = 'pending';
+
+	/**
+	 * `site_check_changed` kinds.
+	 *
+	 * - `redirect_appeared`:     passed before, redirected after.
+	 * - `redirect_disappeared`:  redirected before, passed after.
+	 * - `redirect_then_failure`: redirected before, failure confirmed after.
+	 */
+	const CHANGE_REDIRECT_APPEARED     = 'redirect_appeared';
+	const CHANGE_REDIRECT_DISAPPEARED  = 'redirect_disappeared';
+	const CHANGE_REDIRECT_THEN_FAILURE = 'redirect_then_failure';
+
+	/**
+	 * Reasons of a check that was not part of this analysis at all: site
+	 * checks were turned off for the update, or the analysis was recorded
+	 * before UpdateLens had them. Such a check is `not_applicable`, never an
+	 * incomplete evaluation.
+	 */
+	const SITE_CHECK_NOT_USED = array( BeforeReason::DISABLED, BeforeReason::NOT_CAPTURED, AfterReason::NOT_CAPTURED );
 
 	/**
 	 * Rules per signal, in output order.
@@ -228,6 +276,189 @@ final class PotentialImpact {
 			'signals'  => $signals,
 			'findings' => $findings,
 		);
+	}
+
+	/**
+	 * Evaluate the site checks of a report (SiteCheckReport::build()).
+	 *
+	 * The comparison is the source of truth: only `newly_failing` (passed
+	 * before, failure confirmed by both attempts after) and a `changed`
+	 * comparison where a verified pass became a redirect are findings.
+	 * `passed_both`, `failing_both`, `recovered` and the other `changed`
+	 * kinds are compared without a finding (`change` says which kind);
+	 * `not_run`, `not_comparable` (including an
+	 * unconfirmed failure followed by a passing retry, which is inconclusive)
+	 * and `pending` are never findings and never "no findings".
+	 *
+	 * Per check `status`: `evaluated` (compared; `finding_count` 0 or 1),
+	 * `pending` (the AFTER result may still arrive), `not_evaluated` (not
+	 * compared; `reason` says why) or `not_applicable` (site checks were off
+	 * for this update or not recorded yet; SITE_CHECK_NOT_USED). Overall:
+	 * `not_applicable` when no check applies, else `pending` while one is,
+	 * `evaluated` (every applicable check), `partial` (some) or
+	 * `not_evaluated` (none).
+	 *
+	 * `reason` is the comparison's reason for `not_comparable`, and for
+	 * `not_run` the reason of the side that is missing (BEFORE first), so a
+	 * missing baseline reads `missing` or `disabled`, not `baseline_missing`.
+	 *
+	 * Findings (home, then rest) carry the check's `before` and `after`
+	 * sides exactly as the report has them: browser-observed facts, verdicts,
+	 * UTC times and ages, never URLs, markers, users or fingerprints.
+	 *
+	 * @param array $site_checks `site_checks` of the report.
+	 * @return array{status: string, checks: array<string, array>, findings: array<int, array>}
+	 */
+	public function evaluate_site_checks( array $site_checks ) {
+		$checks   = array();
+		$findings = array();
+		$counts   = array(
+			self::EVALUATED      => 0,
+			self::PENDING        => 0,
+			self::NOT_EVALUATED  => 0,
+			self::NOT_APPLICABLE => 0,
+		);
+
+		$reported = isset( $site_checks['checks'] ) && is_array( $site_checks['checks'] ) ? $site_checks['checks'] : array();
+		foreach ( $reported as $check => $data ) {
+			$state   = isset( $data['state'] ) && is_string( $data['state'] ) ? $data['state'] : ComparisonState::NOT_RUN;
+			$finding = null;
+			$reason  = null;
+			$change  = ComparisonState::CHANGED === $state ? self::site_check_change( $data ) : null;
+
+			if ( SiteCheckReport::STATE_PENDING === $state ) {
+				$status = self::PENDING;
+			} elseif ( in_array( $state, SiteCheckReport::COMPARED, true ) ) {
+				$status  = self::EVALUATED;
+				$finding = self::site_check_finding( (string) $check, $state, $change, $data );
+			} else {
+				$reason = self::site_check_reason( $state, $data );
+				$status = in_array( $reason, self::SITE_CHECK_NOT_USED, true ) ? self::NOT_APPLICABLE : self::NOT_EVALUATED;
+			}
+
+			++$counts[ $status ];
+			$checks[ $check ] = array(
+				'status'        => $status,
+				'state'         => $state,
+				'change'        => $change,
+				'reason'        => $reason,
+				'finding_count' => self::EVALUATED === $status ? ( null === $finding ? 0 : 1 ) : null,
+			);
+			if ( null !== $finding ) {
+				$findings[] = $finding;
+			}
+		}
+
+		$applicable = count( $checks ) - $counts[ self::NOT_APPLICABLE ];
+		if ( 0 === $applicable ) {
+			$status = self::NOT_APPLICABLE;
+		} elseif ( $counts[ self::PENDING ] > 0 ) {
+			$status = self::PENDING;
+		} elseif ( $counts[ self::EVALUATED ] === $applicable ) {
+			$status = self::EVALUATED;
+		} else {
+			$status = $counts[ self::EVALUATED ] > 0 ? self::PARTIAL : self::NOT_EVALUATED;
+		}
+
+		return array(
+			'status'   => $status,
+			'checks'   => $checks,
+			'findings' => $findings,
+		);
+	}
+
+	/**
+	 * Kind of a `changed` comparison, from the two verdicts, or null.
+	 *
+	 * @param array $data The check in the report.
+	 * @return string|null CHANGE_REDIRECT_* constant.
+	 */
+	private static function site_check_change( array $data ) {
+		$from = isset( $data['before']['result']['verdict'] ) ? $data['before']['result']['verdict'] : null;
+		$to   = isset( $data['after']['result']['verdict'] ) ? $data['after']['result']['verdict'] : null;
+		if ( Verdict::PASS === $from && Verdict::REDIRECT === $to ) {
+			return self::CHANGE_REDIRECT_APPEARED;
+		}
+		if ( Verdict::REDIRECT === $from && Verdict::PASS === $to ) {
+			return self::CHANGE_REDIRECT_DISAPPEARED;
+		}
+		if ( Verdict::REDIRECT === $from && Verdict::FAIL === $to ) {
+			return self::CHANGE_REDIRECT_THEN_FAILURE;
+		}
+
+		return null;
+	}
+
+	/**
+	 * The finding of a compared check, or null when its state is not one.
+	 *
+	 * Only a verified pass before the update can make a finding: a new
+	 * failure (`newly_failing`) or a new redirect (`redirect_appeared`). A
+	 * redirect that disappeared, or a redirecting baseline followed by a
+	 * failure, stays a compared observation without a finding: the baseline
+	 * was not a verified pass, so nothing can be called newly broken.
+	 *
+	 * @param string      $check  Check identifier.
+	 * @param string      $state  Compared state.
+	 * @param string|null $change Kind of a `changed` state.
+	 * @param array       $data   The check in the report.
+	 * @return array|null
+	 */
+	private static function site_check_finding( $check, $state, $change, array $data ) {
+		$before = isset( $data['before'] ) && is_array( $data['before'] ) ? $data['before'] : array();
+		$after  = isset( $data['after'] ) && is_array( $data['after'] ) ? $data['after'] : array();
+		$from   = isset( $before['result']['verdict'] ) ? $before['result']['verdict'] : null;
+		$to     = isset( $after['result']['verdict'] ) ? $after['result']['verdict'] : null;
+
+		if ( ComparisonState::NEWLY_FAILING === $state ) {
+			if ( Verdict::PASS !== $from || Verdict::FAIL !== $to ) {
+				return null; // Never inferred from anything but a pass and a confirmed failure.
+			}
+			$code     = self::SITE_CHECK_NEWLY_FAILING;
+			$evidence = array(
+				'failure'       => $after['result']['reason'],
+				'attempt_count' => count( $after['result']['attempts'] ),
+			);
+		} elseif ( self::CHANGE_REDIRECT_APPEARED === $change ) {
+			$code     = self::SITE_CHECK_CHANGED;
+			$evidence = array(
+				'change'        => $change,
+				'attempt_count' => count( $after['result']['attempts'] ),
+			);
+		} else {
+			return null; // passed_both, failing_both, recovered, other changes.
+		}
+
+		return array(
+			'code'     => $code,
+			'signal'   => self::SIGNAL_SITE_CHECKS,
+			'check'    => $check,
+			'evidence' => $evidence,
+			'before'   => $before,
+			'after'    => $after,
+		);
+	}
+
+	/**
+	 * Why a check was not compared: the comparison's reason, or for a missing
+	 * side that side's own reason (BEFORE first).
+	 *
+	 * @param string $state `not_run` or `not_comparable`.
+	 * @param array  $data  The check in the report.
+	 * @return string|null
+	 */
+	private static function site_check_reason( $state, array $data ) {
+		$reason = isset( $data['reason'] ) && is_string( $data['reason'] ) ? $data['reason'] : null;
+		if ( ComparisonState::NOT_RUN !== $state ) {
+			return $reason;
+		}
+		foreach ( array( 'before', 'after' ) as $side ) {
+			if ( isset( $data[ $side ] ) && is_array( $data[ $side ] ) && empty( $data[ $side ]['available'] ) && isset( $data[ $side ]['reason'] ) && is_string( $data[ $side ]['reason'] ) ) {
+				return $data[ $side ]['reason'];
+			}
+		}
+
+		return $reason;
 	}
 
 	/**

@@ -244,7 +244,8 @@ final class SiteCheckWordPressTest extends TestCase {
 
 	/**
 	 * Nonce, capability, opt-in and login session are required, in that
-	 * order, before any input is used.
+	 * order, before any input is used. Turning site checks off (saved
+	 * `disabled`, or the host filter) stops new sessions at once.
 	 */
 	public function test_authorization() {
 		$cases = array(
@@ -252,6 +253,8 @@ final class SiteCheckWordPressTest extends TestCase {
 			'no capability'      => array( 'caps', array( 'read' ), 'forbidden' ),
 			'opt-in missing'     => array( 'options', array(), 'disabled' ),
 			'opt-in not enabled' => array( 'options', array( 'updatelens_site_checks' => 'yes' ), 'disabled' ),
+			'turned off'         => array( 'options', array( 'updatelens_site_checks' => 'disabled' ), 'disabled' ),
+			'host filter'        => array( 'filters', array( 'updatelens_site_checks_enabled' => array( array( self::class, 'keep_off' ) ) ), 'disabled' ),
 			'no login session'   => array( 'token', '', 'forbidden' ),
 		);
 		foreach ( $cases as $name => $case ) {
@@ -264,6 +267,15 @@ final class SiteCheckWordPressTest extends TestCase {
 			$GLOBALS['updatelens_test'][ $case[0] ] = $saved;
 		}
 		$this->assertSame( array(), $this->store->values, 'No session was started.' );
+	}
+
+	/**
+	 * A host filter that keeps site checks off.
+	 *
+	 * @return bool
+	 */
+	public static function keep_off() {
+		return false;
 	}
 
 	/**
@@ -1041,6 +1053,12 @@ final class SiteCheckWordPressTest extends TestCase {
 
 		$site->update( 'other/other.php' );
 		$with_baseline( 3 );
+		$GLOBALS['updatelens_test']['filters']['updatelens_site_checks_enabled'] = array( array( self::class, 'keep_off' ) );
+		$this->assertFalse( $respond( array( 'other/other.php' ) )[0]['site_checks'], 'Host filter keeps them off.' );
+
+		$site->update( 'other/other.php' );
+		$with_baseline( 4 );
+		$GLOBALS['updatelens_test']['filters'] = array();
 		$GLOBALS['updatelens_test']['options'] = array();
 		$this->assertFalse( $respond( array( 'other/other.php' ) )[0]['site_checks'], 'Site checks turned off.' );
 	}
@@ -1111,11 +1129,13 @@ final class SiteCheckWordPressTest extends TestCase {
 			BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['schedule']['refresh_in']
 		);
 
-		foreach ( array( 'index.php', 'plugin-install.php', 'themes.php', 'toplevel_page_updatelens', null, array( 'plugins.php' ) ) as $screen ) {
+		foreach ( array( 'index.php', 'plugin-install.php', 'themes.php', 'toplevel_page_updatelens', 'updatelens_page_updatelens-settings', null, array( 'plugins.php' ) ) as $screen ) {
 			$this->assertNull( BaselinePage::settings( $screen, $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity ), 'Screen ' . ( is_string( $screen ) ? $screen : gettype( $screen ) ) );
 		}
 		$cases = array(
 			'disabled'      => array( 'options', array() ),
+			'turned off'    => array( 'options', array( 'updatelens_site_checks' => 'disabled' ) ),
+			'host filter'   => array( 'filters', array( 'updatelens_site_checks_enabled' => array( array( self::class, 'keep_off' ) ) ) ),
 			'no capability' => array( 'caps', array( 'manage_options' ) ),
 			'maintenance'   => array( 'maintenance', true ),
 			'no session'    => array( 'token', '' ),

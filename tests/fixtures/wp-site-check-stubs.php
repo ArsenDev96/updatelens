@@ -21,6 +21,7 @@ $GLOBALS['updatelens_test'] = array(
 	'logged_in'   => false,
 	'maintenance' => false,
 	'updates'     => array( 'akismet/akismet.php' => (object) array( 'Name' => 'Akismet' ) ),
+	'filters'     => array(),
 );
 
 define( 'UPDATELENS_FILE', '/srv/wp-content/plugins/updatelens/updatelens.php' );
@@ -43,6 +44,14 @@ final class UpdateLensTestJsonResponse extends Exception {
 
 function add_action( $hook, $callback, $priority = 10, $args = 1 ) {
 	$GLOBALS['updatelens_test']['actions'][] = array( $hook, $callback, $priority );
+}
+
+function apply_filters( $hook, $value, ...$args ) {
+	foreach ( $GLOBALS['updatelens_test']['filters'][ $hook ] ?? array() as $callback ) {
+		$value = $callback( $value, ...$args );
+	}
+
+	return $value;
 }
 
 function is_admin() {

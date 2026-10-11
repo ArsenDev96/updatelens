@@ -718,3 +718,21 @@ export interface MonitoringBaseline {
 	/** Never updated after monitoring started. */
 	plugins: BaselinePlugin[] | null;
 }
+
+/** Why site checks cannot run whatever the saved preference. */
+export type SiteCheckRestriction = 'filter';
+
+/** The site check opt-in. */
+export interface SiteCheckSettings {
+	/** The saved preference (off by default). */
+	enabled: boolean;
+	/** Whether site checks may run: saved on and not kept off by the site. */
+	effective: boolean;
+	/** `filter`: the `updatelens_site_checks_enabled` filter keeps them off. */
+	restriction: SiteCheckRestriction | null;
+}
+
+/** GET/POST /updatelens/v1/settings. */
+export interface UpdateLensSettings {
+	site_checks: SiteCheckSettings;
+}

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { HistoryPage } from './pages/HistoryPage';
 import { ReportPage } from './pages/ReportPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { parseRoute, routeHref, type Route } from './utils/route';
 
 /**
@@ -11,10 +12,16 @@ import { parseRoute, routeHref, type Route } from './utils/route';
  * `&paged=<n>`). Navigation uses the History API, so reports can be
  * bookmarked and Back/Forward work without page reloads. Switching phases
  * replaces the current entry instead of adding one.
+ *
+ * The Settings screen (`admin.php?page=updatelens-settings`) is its own
+ * wp-admin page with the same shell and no in-app navigation.
  */
 export default function App( {
+	view = 'reports',
 	pluginsUrl = '',
 }: {
+	/** Which UpdateLens screen this is (from the page shell). */
+	view?: 'reports' | 'settings';
 	/** Plugins screen URL (from the page shell); empty if the user cannot open it. */
 	pluginsUrl?: string;
 } ) {
@@ -55,7 +62,8 @@ export default function App( {
 					'updatelens'
 				) }
 			</p>
-			{ route.view === 'history' ? (
+			{ view === 'settings' && <SettingsPage /> }
+			{ view === 'reports' && route.view === 'history' && (
 				<HistoryPage
 					page={ route.page }
 					reportHref={ ( id ) =>
@@ -82,7 +90,8 @@ export default function App( {
 					focusHeading={ navigated }
 					pluginsUrl={ pluginsUrl }
 				/>
-			) : (
+			) }
+			{ view === 'reports' && route.view === 'report' && (
 				<ReportPage
 					key={ route.id }
 					route={ route }

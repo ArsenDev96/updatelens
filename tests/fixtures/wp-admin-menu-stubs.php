@@ -7,18 +7,19 @@
  * @package UpdateLens
  */
 
-// phpcs:disable WordPress.NamingConventions.PrefixAllGlobals, WordPress.WP.GlobalVariablesOverride, Generic.CodeAnalysis.UnusedFunctionParameter, Squiz.Commenting, Generic.Commenting.DocComment -- Test stand-ins for WordPress core.
+// phpcs:disable WordPress.NamingConventions.PrefixAllGlobals, WordPress.WP.GlobalVariablesOverride, Generic.CodeAnalysis.UnusedFunctionParameter, Squiz.Commenting, Generic.Commenting.DocComment, WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Test stand-ins for WordPress core.
 
 require __DIR__ . '/wpdb-recorder.php';
 
 $GLOBALS['updatelens_test'] = array(
-	'menu_pages' => array(),
-	'actions'    => array(),
-	'caps'       => array( 'manage_options' ),
-	'multisite'  => false,
-	'user_id'    => 1,
-	'options'    => array(),
-	'usermeta'   => array(),
+	'menu_pages'    => array(),
+	'submenu_pages' => array(),
+	'actions'       => array(),
+	'caps'          => array( 'manage_options' ),
+	'multisite'     => false,
+	'user_id'       => 1,
+	'options'       => array(),
+	'usermeta'      => array(),
 );
 $GLOBALS['plugin_page']     = null;
 
@@ -38,6 +39,30 @@ function esc_html( $text ) {
 	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
 }
 
+function esc_html_e( $text, $domain = 'default' ) {
+	echo esc_html( $text );
+}
+
+function esc_html__( $text, $domain = 'default' ) {
+	return esc_html( $text );
+}
+
+function esc_attr( $text ) {
+	return esc_html( $text );
+}
+
+function esc_url( $url ) {
+	return esc_html( $url );
+}
+
+function admin_url( $path = '' ) {
+	return 'https://example.com/wp-admin/' . $path;
+}
+
+function wp_die( $message = '' ) {
+	throw new RuntimeException( $message );
+}
+
 function absint( $value ) {
 	return abs( (int) $value );
 }
@@ -51,6 +76,18 @@ function add_menu_page( $page_title, $menu_title, $capability, $menu_slug, $call
 		'position'   => $position,
 	);
 	return 'toplevel_page_' . $menu_slug;
+}
+
+function add_submenu_page( $parent_slug, $page_title, $menu_title, $capability, $menu_slug, $callback = '' ) {
+	$GLOBALS['updatelens_test']['submenu_pages'][] = array(
+		'parent_slug' => $parent_slug,
+		'page_title'  => $page_title,
+		'menu_title'  => $menu_title,
+		'capability'  => $capability,
+		'menu_slug'   => $menu_slug,
+		'callback'    => '' !== $callback,
+	);
+	return 'updatelens_page_' . $menu_slug;
 }
 
 function add_action( $hook_name, $callback, $priority = 10, $accepted_args = 1 ) {

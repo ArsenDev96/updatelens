@@ -1,10 +1,10 @@
 # UpdateLens REST API (v0.1)
 
-Read-only endpoints for analysis history, reports and the monitoring start, namespace `updatelens/v1`. The admin app calls them through `wp.apiFetch` (cookie authentication + `wp_rest` nonce).
+Endpoints for analysis history, reports, the monitoring start (all read-only) and the one setting (site checks), namespace `updatelens/v1`. The admin app calls them through `wp.apiFetch` (cookie authentication + `wp_rest` nonce).
 
 - **Permission:** `manage_options` (`Core\Plugin::CAPABILITY`) on every route. Not logged in → `401 rest_forbidden`; logged in without the capability → `403 rest_forbidden`.
-- **Single site only.** The analysis and baseline routes are not registered on Multisite.
-- **Read-only.** Before every history or report read, analyses past their settle deadline are expired (`completed`, `settle_outcome: "expired"`, no settled snapshot), and the analyses table is recreated if it is missing. Nothing else is changed.
+- **Single site only.** The analysis, baseline and settings routes are not registered on Multisite.
+- **Read-only reports.** Only `POST /updatelens/v1/settings` changes anything. Before every history or report read, analyses past their settle deadline are expired (`completed`, `settle_outcome: "expired"`, no settled snapshot), and the analyses table is recreated if it is missing. Nothing else is changed.
 - **Errors:** if storage cannot be read (or the table cannot be recreated): `500 updatelens_reports_unavailable` with a generic message. Database errors are never part of a response.
 - **Types:** IDs, counts, byte sizes and deltas are JSON integers; flags are booleans. Timestamps are UTC ISO 8601 (`2026-10-05T17:46:23Z`) or `null`, never site-local time.
 - **Wording:** phases describe _when_ changes were observed, not what caused them.
@@ -575,3 +575,25 @@ When UpdateLens started monitoring, and which plugins were installed at that mom
 - The History boundary requests only the start time, with WordPress's `_fields=started_at`.
 
 Storage: option `updatelens_monitoring_baseline` (not autoloaded), versioned JSON written by `Storage\MonitoringBaselineCodec`: `{"schema":1,"started_at":"2026-10-07 22:32:00","plugins":[{"file":…,"name":…,"version":…,"active":…}]}`. It is written once by `Baseline\MonitoringBaseline::ensure()`: on activation, or, if activation could not write it (e.g. sites upgraded from a version without a baseline), when the UpdateLens screen loads. An existing value, even an unreadable one, is never replaced. Deactivation keeps it; uninstall deletes it.
+
+## `GET /updatelens/v1/settings` and `POST /updatelens/v1/settings`
+
+The site check opt-in, shown on the UpdateLens Settings screen (`admin.php?page=updatelens-settings`). Both methods need `manage_options` (running site checks still needs `update_plugins`). WordPress's REST cookie authentication applies: a request without a `wp_rest` nonce is treated as signed out (`401 rest_forbidden`), an invalid nonce is `403 rest_cookie_invalid_nonce`.
+
+```json
+{
+  "site_checks": {
+    "enabled": true,
+    "effective": false,
+    "restriction": "filter"
+  }
+}
+```
+
+- `enabled`: the saved preference. `false` on a new installation; nothing but a save turns it on.
+- `effective`: whether site checks may run: the preference is on and the site's configuration does not keep them off. The start and report endpoints, the update screens and the update request all use this value.
+- `restriction`: `"filter"` when the `updatelens_site_checks_enabled` filter returns false (site checks stay off whatever is saved; the filter can never turn them on), else `null`.
+
+`POST` accepts exactly one JSON body, `{"site_checks":{"enabled":true}}` or `{"site_checks":{"enabled":false}}`, and answers with the stored state read back (same shape as `GET`). Anything else is a `400` and changes nothing: other keys at either level (`updatelens_invalid_settings`, `rest_invalid_param`), strings, numbers or `null` for `enabled` (`rest_invalid_param`), no `site_checks` (`rest_missing_callback_param`), form-encoded or query-string values, invalid JSON (`rest_invalid_json`). Saving the stored value again is not an error. If the value cannot be written or read back: `500 updatelens_settings_not_saved`; if it cannot be read: `500 updatelens_settings_unavailable`. Database errors are never part of a response.
+
+Storage: option `updatelens_site_checks` (not autoloaded): `enabled` or `disabled`; anything else, or no option, is off. Turning site checks off stops new check sessions at once (the start and report endpoints answer `disabled`). Sessions already started expire within two minutes, and a report sent after turning them off is not accepted, so that check stays unavailable in its report. Stored reports, baselines and history are not changed or deleted. Uninstall deletes the option.

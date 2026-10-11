@@ -9,6 +9,8 @@ interface LoadErrorProps {
 	error: ApiError;
 	/** Message for a generic failure. */
 	message: string;
+	/** Message when access is denied (default: about reports). */
+	forbiddenMessage?: string;
 	onRetry: () => void;
 	/** Extra action, e.g. a link back. */
 	children?: ReactNode;
@@ -22,15 +24,18 @@ interface LoadErrorProps {
 export function LoadError( {
 	error,
 	message,
+	forbiddenMessage,
 	onRetry,
 	children,
 }: LoadErrorProps ) {
 	let text = message;
 	if ( error.kind === 'forbidden' ) {
-		text = __(
-			"You don't have permission to view UpdateLens reports.",
-			'updatelens'
-		);
+		text =
+			forbiddenMessage ??
+			__(
+				"You don't have permission to view UpdateLens reports.",
+				'updatelens'
+			);
 	} else if ( error.kind === 'not_found' ) {
 		text = __( 'This analysis no longer exists.', 'updatelens' );
 	}

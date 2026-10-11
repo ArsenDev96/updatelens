@@ -8,6 +8,8 @@
 namespace UpdateLens\Tests\Unit\Admin;
 
 use PHPUnit\Framework\TestCase;
+use ReflectionProperty;
+use RuntimeException;
 use UpdateLens\Admin\AdminPage;
 use UpdateLens\Admin\UnreadReports;
 
@@ -46,6 +48,79 @@ final class AdminPageTest extends TestCase {
 			),
 			$GLOBALS['updatelens_test']['menu_pages']
 		);
+	}
+
+	/**
+	 * Two entries on single sites: the History (the top-level page itself,
+	 * same slug, no second callback) and Settings.
+	 */
+	public function test_registers_history_and_settings_entries() {
+		( new AdminPage() )->add_page();
+
+		$this->assertSame(
+			array(
+				array(
+					'parent_slug' => 'updatelens',
+					'page_title'  => 'UpdateLens',
+					'menu_title'  => 'Update History',
+					'capability'  => 'manage_options',
+					'menu_slug'   => 'updatelens',
+					'callback'    => false,
+				),
+				array(
+					'parent_slug' => 'updatelens',
+					'page_title'  => 'UpdateLens Settings',
+					'menu_title'  => 'Settings',
+					'capability'  => 'manage_options',
+					'menu_slug'   => 'updatelens-settings',
+					'callback'    => true,
+				),
+			),
+			$GLOBALS['updatelens_test']['submenu_pages']
+		);
+	}
+
+	/**
+	 * Multisite (no site checks, no analyses): no Settings entry.
+	 */
+	public function test_no_settings_entry_on_multisite() {
+		$GLOBALS['updatelens_test']['multisite'] = true;
+		( new AdminPage() )->add_page();
+
+		$this->assertSame( array(), $GLOBALS['updatelens_test']['submenu_pages'] );
+	}
+
+	/**
+	 * Both screens render the same shell; the root names the view, and the
+	 * page heading stays "UpdateLens".
+	 */
+	public function test_shell_names_the_view() {
+		$page   = new AdminPage();
+		$loaded = new ReflectionProperty( AdminPage::class, 'assets_loaded' );
+		$loaded->setAccessible( true );
+		$loaded->setValue( $page, true );
+
+		foreach ( array(
+			'render'          => 'reports',
+			'render_settings' => 'settings',
+		) as $method => $view ) {
+			ob_start();
+			$page->$method();
+			$html = (string) ob_get_clean();
+
+			$this->assertStringContainsString( '<h1>UpdateLens</h1>', $html );
+			$this->assertStringContainsString( '<div id="updatelens-root" data-view="' . $view . '" data-plugins-url="">', $html );
+		}
+	}
+
+	/**
+	 * Users without manage_options cannot open either screen.
+	 */
+	public function test_shell_requires_capability() {
+		$GLOBALS['updatelens_test']['caps'] = array( 'update_plugins' );
+
+		$this->expectException( RuntimeException::class );
+		( new AdminPage() )->render_settings();
 	}
 
 	/**

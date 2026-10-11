@@ -11,6 +11,7 @@ use UpdateLens\Admin\AdminAssets;
 use UpdateLens\Admin\AdminPage;
 use UpdateLens\Rest\AnalysesController;
 use UpdateLens\Rest\BaselineController;
+use UpdateLens\Rest\SettingsController;
 use UpdateLens\Rest\StatusController;
 use UpdateLens\SiteCheck\AjaxEndpoints;
 use UpdateLens\SiteCheck\FrontendMarker;
@@ -114,10 +115,12 @@ final class Plugin {
 	public function register_rest_routes() {
 		( new StatusController() )->register_routes();
 
-		// Analyses and the monitoring baseline exist on single sites only (see register_hooks()).
+		// Analyses, the monitoring baseline and site checks (the only setting)
+		// exist on single sites only (see register_hooks()).
 		if ( ! is_multisite() ) {
 			( new AnalysesController() )->register_routes();
 			( new BaselineController() )->register_routes();
+			( new SettingsController() )->register_routes();
 		}
 	}
 }

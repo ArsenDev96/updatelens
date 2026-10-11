@@ -20,6 +20,10 @@ $GLOBALS['updatelens_test'] = array(
 	'queries'  => array(),
 	'routes'   => array(),
 	'usermeta' => array(),
+	'filters'  => array(),
+	// Option names whose update_option() fails like a database error.
+	'failing'  => array(),
+	'writes'   => 0,
 );
 
 function get_option( $name, $default_value = false ) {
@@ -34,6 +38,28 @@ function add_option( $name, $value = '', $deprecated = '', $autoload = null ) {
 	$GLOBALS['updatelens_test']['autoload'][ $name ] = $autoload;
 
 	return true;
+}
+
+function update_option( $name, $value, $autoload = null ) {
+	if ( in_array( $name, $GLOBALS['updatelens_test']['failing'], true ) ) {
+		return false;
+	}
+	if ( array_key_exists( $name, $GLOBALS['updatelens_test']['options'] ) && $GLOBALS['updatelens_test']['options'][ $name ] === $value ) {
+		return false;
+	}
+	++$GLOBALS['updatelens_test']['writes'];
+	$GLOBALS['updatelens_test']['options'][ $name ]  = $value;
+	$GLOBALS['updatelens_test']['autoload'][ $name ] = $autoload;
+
+	return true;
+}
+
+function apply_filters( $hook, $value, ...$args ) {
+	foreach ( $GLOBALS['updatelens_test']['filters'][ $hook ] ?? array() as $callback ) {
+		$value = $callback( $value, ...$args );
+	}
+
+	return $value;
 }
 
 function delete_option( $name ) {
@@ -90,6 +116,10 @@ function rest_authorization_required_code() {
 	return 403;
 }
 
+function is_multisite() {
+	return ! empty( $GLOBALS['updatelens_test']['multisite'] );
+}
+
 function register_rest_route( $route_namespace, $route, $args = array() ) {
 	$GLOBALS['updatelens_test']['routes'][ $route_namespace . $route ] = $args;
 
@@ -121,6 +151,17 @@ class WP_REST_Server {
 }
 
 class WP_REST_Request implements ArrayAccess {
+	private $body = '';
+
+	public function set_body( $body ) {
+		$this->body = $body;
+	}
+
+	// Like WordPress for a JSON request: the decoded body, or null.
+	public function get_json_params() {
+		return json_decode( $this->body, true );
+	}
+
 	#[\ReturnTypeWillChange]
 	public function offsetExists( $offset ) {
 		return false;

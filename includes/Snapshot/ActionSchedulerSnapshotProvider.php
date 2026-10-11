@@ -42,6 +42,12 @@ defined( 'ABSPATH' ) || exit;
  * snapshot): a queue run during capture can complete actions already read,
  * or add rows (with higher IDs) that are read later. Rows are never read
  * twice and rows present for the whole capture are never missed.
+ *
+ * Every column read is bounded by the table definition except `schedule`
+ * (longtext): a schedule longer than ActionSchedulerScheduleParser::MAX_LENGTH
+ * is invalid anyway, so the query returns it as an empty string, which the
+ * parser rejects the same way, instead of reading the whole value (one
+ * corrupt row could otherwise exhaust memory during an update).
  */
 final class ActionSchedulerSnapshotProvider {
 
@@ -64,6 +70,15 @@ final class ActionSchedulerSnapshotProvider {
 	 * Rows per query.
 	 */
 	const BATCH_SIZE = 500;
+
+	/**
+	 * Largest row a batch is budgeted for (ObservationBudget), in bytes: hook
+	 * and args (191 bytes each), extended_args (8,000), the group slug (255),
+	 * status and date, and a schedule of up to 1 KiB (Action Scheduler's
+	 * schedule objects serialize to a few hundred bytes; longer ones are
+	 * read only up to ActionSchedulerScheduleParser::MAX_LENGTH).
+	 */
+	const MAX_ROW_BYTES = 10240;
 
 	/**
 	 * Action Scheduler's actions table, without the site prefix.
@@ -121,6 +136,41 @@ final class ActionSchedulerSnapshotProvider {
 		$this->assert_available();
 
 		return $this->builder->build( $this->active_rows() );
+	}
+
+	/**
+	 * Number of active actions a snapshot would read (an estimate for
+	 * ObservationBudget), counted without reading them; 0 when no snapshot can
+	 * be taken (capture() then reports why, without reading actions).
+	 *
+	 * @return int
+	 * @throws ActionSchedulerUnavailableException If the count fails.
+	 */
+	public function count_active() {
+		global $wpdb;
+
+		try {
+			$this->assert_available();
+		} catch ( ActionSchedulerUnavailableException $e ) {
+			if ( ActionSchedulerUnavailableException::READ_FAILED === $e->get_reason() ) {
+				throw $e;
+			}
+			return 0;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only count of a third-party table; must reflect the current state.
+		$count = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT COUNT(*) FROM %i WHERE status IN ( %s, %s )',
+				$wpdb->prefix . self::ACTIONS_TABLE,
+				ActionSchedulerActionRecord::STATUS_PENDING,
+				ActionSchedulerActionRecord::STATUS_IN_PROGRESS
+			)
+		);
+		self::assert_no_error();
+		$wpdb->flush();
+
+		return (int) $count;
 	}
 
 	/**
@@ -233,11 +283,12 @@ final class ActionSchedulerSnapshotProvider {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only snapshot of a third-party table; must reflect the current state.
 			$batch = $wpdb->get_results(
 				$wpdb->prepare(
-					'SELECT a.action_id, a.hook, a.status, a.scheduled_date_gmt, a.args, a.extended_args, a.schedule, g.slug AS group_slug
+					'SELECT a.action_id, a.hook, a.status, a.scheduled_date_gmt, a.args, a.extended_args, IF(LENGTH(a.schedule) > %d, \'\', a.schedule) AS schedule, g.slug AS group_slug
 					FROM %i a LEFT JOIN %i g ON g.group_id = a.group_id
 					WHERE a.status IN ( %s, %s ) AND a.action_id > %d
 					ORDER BY a.action_id
 					LIMIT %d',
+					ActionSchedulerScheduleParser::MAX_LENGTH,
 					$actions,
 					$groups,
 					ActionSchedulerActionRecord::STATUS_PENDING,

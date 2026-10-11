@@ -159,7 +159,7 @@ final class CronObservation {
 		}
 
 		if ( ! self::is_resolved( $row, ObservationPhase::DURING_UPDATE ) ) {
-			$changes += $this->phase( ObservationPhase::DURING_UPDATE, $this->stored( $row, self::BEFORE_SNAPSHOT ), $immediate );
+			$changes += $this->phase( ObservationPhase::DURING_UPDATE, $row, self::BEFORE_SNAPSHOT, $immediate );
 		}
 
 		return $changes;
@@ -177,10 +177,10 @@ final class CronObservation {
 		$changes = self::cleared();
 
 		if ( ! self::is_resolved( $row, ObservationPhase::POST_UPDATE ) ) {
-			$changes += $this->phase( ObservationPhase::POST_UPDATE, $this->stored( $row, self::IMMEDIATE_SNAPSHOT ), $settled );
+			$changes += $this->phase( ObservationPhase::POST_UPDATE, $row, self::IMMEDIATE_SNAPSHOT, $settled );
 		}
 		if ( ! self::is_resolved( $row, ObservationPhase::FINAL ) ) {
-			$changes += $this->phase( ObservationPhase::FINAL, $this->stored( $row, self::BEFORE_SNAPSHOT ), $settled );
+			$changes += $this->phase( ObservationPhase::FINAL, $row, self::BEFORE_SNAPSHOT, $settled );
 		}
 		if ( ! self::is_resolved( $row, ObservationPhase::DURING_UPDATE ) ) {
 			// Only an analysis that started before Cron observation existed.
@@ -252,19 +252,28 @@ final class CronObservation {
 	/**
 	 * Diff or reason for one phase.
 	 *
-	 * @param string              $phase ObservationPhase.
-	 * @param CronSnapshot|string $from  Earlier snapshot or reason.
-	 * @param CronSnapshot|string $to    Later snapshot or reason.
+	 * The earlier snapshot is decoded only when the later one is readable:
+	 * decoding is the largest allocation of a phase, and a later capture that
+	 * was skipped for memory must not cause it.
+	 *
+	 * @param string              $phase  ObservationPhase.
+	 * @param array               $row    Analysis with Cron columns.
+	 * @param string              $column Column of the earlier snapshot.
+	 * @param CronSnapshot|string $to     Later snapshot or reason.
 	 * @return array<string, string>
 	 */
-	private function phase( $phase, $from, $to ) {
+	private function phase( $phase, array $row, $column, $to ) {
 		list( $diff_column, $reason_column ) = self::PHASES[ $phase ];
 
-		if ( is_string( $from ) ) {
-			return array( $reason_column => $from );
+		if ( ! isset( $row[ $column ] ) ) {
+			return array( $reason_column => CronPhaseReason::NOT_CAPTURED );
 		}
 		if ( is_string( $to ) ) {
 			return array( $reason_column => $to );
+		}
+		$from = $this->stored( $row[ $column ] );
+		if ( is_string( $from ) ) {
+			return array( $reason_column => $from );
 		}
 
 		try {
@@ -279,17 +288,12 @@ final class CronObservation {
 	/**
 	 * A stored snapshot, or the reason it is unavailable.
 	 *
-	 * @param array  $row    Analysis.
-	 * @param string $column Snapshot column.
+	 * @param string $json Stored snapshot.
 	 * @return CronSnapshot|string
 	 */
-	private function stored( array $row, $column ) {
-		if ( ! isset( $row[ $column ] ) ) {
-			return CronPhaseReason::NOT_CAPTURED;
-		}
-
+	private function stored( $json ) {
 		try {
-			return $this->snapshot_codec->decode( $row[ $column ] );
+			return $this->snapshot_codec->decode( $json );
 		} catch ( Throwable $e ) {
 			return CronPhaseReason::SNAPSHOT_UNAVAILABLE;
 		}

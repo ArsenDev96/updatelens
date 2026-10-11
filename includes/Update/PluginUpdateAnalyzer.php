@@ -166,8 +166,8 @@ final class PluginUpdateAnalyzer {
 	private $diff_builder;
 
 	/**
-	 * Returns whether an options observation stage fits in memory
-	 * (ObservationBudget::fits(); stage constant => bool).
+	 * Returns which signals an observation stage may capture
+	 * (ObservationBudget::plan(): signal => bool), or one bool for all.
 	 *
 	 * @var callable
 	 */
@@ -202,8 +202,9 @@ final class PluginUpdateAnalyzer {
 	 *                                                analyses of earlier requests.
 	 * @param SiteCheckObservation|null $site_checks BEFORE site check baselines attached when an
 	 *                                         analysis is created. Null: the columns are not written.
-	 * @param callable|null             $fits  Returns whether an observation stage (ObservationBudget
-	 *                                         constant) fits in memory. Null: every stage fits.
+	 * @param callable|null             $fits  Returns which signals an observation stage (ObservationBudget
+	 *                                         constant) may capture: ObservationBudget::plan(), or one bool
+	 *                                         for all signals. Null: everything fits.
 	 */
 	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null, ?float $request_started_at = null, ?SiteCheckObservation $site_checks = null, ?callable $fits = null ) {
 		$this->fits               = null === $fits ? static function () {
@@ -240,12 +241,6 @@ final class PluginUpdateAnalyzer {
 			}
 			return $provider->capture();
 		};
-		$fits     = static function ( $stage ) use ( &$provider ) {
-			if ( null === $provider ) {
-				$provider = OptionsSnapshotProvider::create();
-			}
-			return ( new ObservationBudget( MemoryBudget::from_php(), array( $provider, 'count_options' ) ) )->fits( $stage );
-		};
 
 		$cron_provider = null;
 		$capture_cron  = static function () use ( &$cron_provider ) {
@@ -261,6 +256,19 @@ final class PluginUpdateAnalyzer {
 				$action_scheduler_provider = ActionSchedulerSnapshotProvider::create();
 			}
 			return $action_scheduler_provider->capture();
+		};
+
+		$fits = static function ( $stage ) use ( &$provider, &$cron_provider, &$action_scheduler_provider ) {
+			$provider                  = null === $provider ? OptionsSnapshotProvider::create() : $provider;
+			$cron_provider             = null === $cron_provider ? CronSnapshotProvider::create() : $cron_provider;
+			$action_scheduler_provider = null === $action_scheduler_provider ? ActionSchedulerSnapshotProvider::create() : $action_scheduler_provider;
+			$budget                    = new ObservationBudget(
+				MemoryBudget::from_php(),
+				array( $provider, 'count_options' ),
+				array( $cron_provider, 'stored_bytes' ),
+				array( $action_scheduler_provider, 'count_active' )
+			);
+			return $budget->plan( $stage );
 		};
 
 		return new self(
@@ -319,9 +327,10 @@ final class PluginUpdateAnalyzer {
 			return;
 		}
 
+		// The whole observation (up to SETTLED) must fit, or none is begun.
+		$plan = $this->plan( ObservationBudget::BEFORE );
 		try {
-			// The whole observation (up to SETTLED) must fit, or none is begun.
-			$snapshot = call_user_func( $this->fits, ObservationBudget::BEFORE ) ? call_user_func( $this->capture ) : null;
+			$snapshot = $plan[ ObservationBudget::OPTIONS ] ? call_user_func( $this->capture ) : null;
 		} catch ( Throwable $e ) {
 			$snapshot = null;
 		}
@@ -331,8 +340,7 @@ final class PluginUpdateAnalyzer {
 			}
 			return;
 		}
-		$cron_snapshot             = $this->cron->capture();
-		$action_scheduler_snapshot = $this->action_scheduler->capture();
+		list( $cron_snapshot, $action_scheduler_snapshot ) = $this->capture_signals( $plan );
 
 		foreach ( $to_settle as $row ) {
 			$this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::NEXT_UPDATE );
@@ -374,7 +382,8 @@ final class PluginUpdateAnalyzer {
 			return;
 		}
 
-		if ( ! call_user_func( $this->fits, ObservationBudget::IMMEDIATE ) ) {
+		$plan = $this->plan( ObservationBudget::IMMEDIATE );
+		if ( ! $plan[ ObservationBudget::OPTIONS ] ) {
 			// Skipped before anything large is allocated; the update continues.
 			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NOT_APPLICABLE );
 			return;
@@ -387,11 +396,12 @@ final class PluginUpdateAnalyzer {
 		unset( $row['options_before_snapshot'] ); // Decoded; the JSON is no longer needed.
 
 		try {
-			$immediate                  = call_user_func( $this->capture );
-			$cron_immediate             = $this->cron->capture();
-			$action_scheduler_immediate = $this->action_scheduler->capture();
-			$during_update_json         = $this->diff_codec->encode( $this->diff_builder->build( $before, $immediate ) );
-			$immediate_json             = $this->snapshot_codec->encode( $immediate );
+			$immediate = call_user_func( $this->capture );
+
+			list( $cron_immediate, $action_scheduler_immediate ) = $this->capture_signals( $plan );
+
+			$during_update_json = $this->diff_codec->encode( $this->diff_builder->build( $before, $immediate ) );
+			$immediate_json     = $this->snapshot_codec->encode( $immediate );
 		} catch ( IncompatibleSnapshotsException $e ) {
 			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED, SettleOutcome::NOT_APPLICABLE );
 			return;
@@ -479,16 +489,16 @@ final class PluginUpdateAnalyzer {
 			}
 
 			if ( null === $snapshot ) {
+				$plan = $this->plan( ObservationBudget::SETTLED );
+				if ( ! $plan[ ObservationBudget::OPTIONS ] ) {
+					return; // Does not fit in this request: a later one may, within the window.
+				}
 				try {
-					if ( ! call_user_func( $this->fits, ObservationBudget::SETTLED ) ) {
-						return; // Does not fit in this request: a later one may, within the window.
-					}
 					$snapshot = call_user_func( $this->capture );
 				} catch ( Throwable $e ) {
 					return; // Try again on a later request within the window.
 				}
-				$cron_snapshot             = $this->cron->capture();
-				$action_scheduler_snapshot = $this->action_scheduler->capture();
+				list( $cron_snapshot, $action_scheduler_snapshot ) = $this->capture_signals( $plan );
 			}
 			$this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::ADMIN_SHUTDOWN );
 		}
@@ -531,8 +541,9 @@ final class PluginUpdateAnalyzer {
 			return $results;
 		}
 
+		$plan = $this->plan( ObservationBudget::SETTLED );
 		try {
-			$snapshot = call_user_func( $this->fits, ObservationBudget::SETTLED ) ? call_user_func( $this->capture ) : null;
+			$snapshot = $plan[ ObservationBudget::OPTIONS ] ? call_user_func( $this->capture ) : null;
 		} catch ( Throwable $e ) {
 			$snapshot = null;
 		}
@@ -543,8 +554,7 @@ final class PluginUpdateAnalyzer {
 			}
 			return $results;
 		}
-		$cron_snapshot             = $this->cron->capture();
-		$action_scheduler_snapshot = $this->action_scheduler->capture();
+		list( $cron_snapshot, $action_scheduler_snapshot ) = $this->capture_signals( $plan );
 
 		foreach ( $eligible as $plugin_file => $row ) {
 			$results[ $plugin_file ] = $this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::FOLLOW_UP );
@@ -554,6 +564,46 @@ final class PluginUpdateAnalyzer {
 		}
 
 		return $results;
+	}
+
+	/**
+	 * Which signals an observation stage may capture (ObservationBudget::plan()).
+	 * Anything the callable does not allow, or a failure to ask, means no.
+	 *
+	 * @param string $stage ObservationBudget stage.
+	 * @return array<string, bool> ObservationBudget signal => whether it fits.
+	 */
+	private function plan( $stage ) {
+		$signals = array( ObservationBudget::OPTIONS, ObservationBudget::CRON, ObservationBudget::ACTION_SCHEDULER );
+		try {
+			$plan = call_user_func( $this->fits, $stage );
+		} catch ( Throwable $e ) {
+			$plan = false;
+		}
+		if ( ! is_array( $plan ) ) {
+			return array_fill_keys( $signals, true === $plan );
+		}
+
+		$result = array();
+		foreach ( $signals as $signal ) {
+			$result[ $signal ] = isset( $plan[ $signal ] ) && true === $plan[ $signal ];
+		}
+		return $result;
+	}
+
+	/**
+	 * Capture WP-Cron and Action Scheduler as far as the stage's plan allows.
+	 * A signal that does not fit is not captured: it is unavailable
+	 * (`snapshot_unavailable`, like a capture that failed), never "no changes".
+	 *
+	 * @param array<string, bool> $plan The stage's plan (plan()).
+	 * @return array{0: CronSnapshot|string, 1: ActionSchedulerSnapshot|string}
+	 */
+	private function capture_signals( array $plan ) {
+		return array(
+			$plan[ ObservationBudget::CRON ] ? $this->cron->capture() : CronPhaseReason::SNAPSHOT_UNAVAILABLE,
+			$plan[ ObservationBudget::ACTION_SCHEDULER ] ? $this->action_scheduler->capture() : ActionSchedulerPhaseReason::SNAPSHOT_UNAVAILABLE,
+		);
 	}
 
 	/**

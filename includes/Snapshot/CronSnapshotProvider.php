@@ -7,6 +7,8 @@
 
 namespace UpdateLens\Snapshot;
 
+use RuntimeException;
+
 defined( 'ABSPATH' ) || exit;
 
 /**
@@ -56,5 +58,31 @@ final class CronSnapshotProvider {
 	 */
 	public function capture() {
 		return $this->builder->build( get_option( 'cron' ) );
+	}
+
+	/**
+	 * Stored size of the `cron` option in bytes, measured in SQL without
+	 * reading the value (an estimate for ObservationBudget; 0 without a row).
+	 *
+	 * @return int
+	 * @throws RuntimeException If it cannot be measured: the query fails, or a
+	 *                          `pre_option_cron` backend supplies the events
+	 *                          from elsewhere.
+	 */
+	public function stored_bytes() {
+		global $wpdb;
+
+		if ( has_filter( 'pre_option_cron' ) ) {
+			throw new RuntimeException( 'UpdateLens cannot measure WP-Cron events kept outside the options table.' );
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only; must reflect the stored value.
+		$bytes = $wpdb->get_var( $wpdb->prepare( 'SELECT LENGTH(option_value) FROM %i WHERE option_name = %s', $wpdb->options, 'cron' ) );
+		$error = (string) $wpdb->last_error;
+		$wpdb->flush();
+		if ( '' !== $error ) {
+			throw new RuntimeException( 'UpdateLens could not measure the WP-Cron events.' );
+		}
+
+		return (int) $bytes;
 	}
 }

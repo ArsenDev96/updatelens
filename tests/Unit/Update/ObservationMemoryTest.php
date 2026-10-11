@@ -10,8 +10,12 @@ namespace UpdateLens\Tests\Unit\Update;
 use PHPUnit\Framework\TestCase;
 use UpdateLens\Report\AnalysisReadModel;
 use UpdateLens\Report\UnavailableReason;
+use UpdateLens\Snapshot\ActionSchedulerUnavailableException;
+use UpdateLens\Tests\Support\CronFixture;
 use UpdateLens\Tests\Support\FakeSite;
+use UpdateLens\Update\ActionSchedulerPhaseReason;
 use UpdateLens\Update\AnalysisStatus;
+use UpdateLens\Update\CronPhaseReason;
 use UpdateLens\Update\FollowUpRequest;
 use UpdateLens\Update\ObservationBudget;
 use UpdateLens\Update\PluginUpdateAnalyzer;
@@ -201,6 +205,119 @@ final class ObservationMemoryTest extends TestCase {
 		$this->assertArrayNotHasKey( 'options_immediate_snapshot', $read );
 		$this->assertArrayNotHasKey( 'options_final_diff', $read );
 		$this->assertArrayHasKey( 'cron_before_snapshot', $read );
+	}
+
+	/**
+	 * Update, then the follow-up settles it.
+	 *
+	 * @return array The analysis row.
+	 */
+	private function update_and_settle() {
+		$this->update();
+		$this->site->cron  = CronFixture::cron( array( CronFixture::recurring( self::T + 900, 'acme_report', 'hourly' ) ) );
+		$this->site->time += 2;
+		$this->site->request()->settle_follow_up( array( self::PLUGIN ), 7 );
+
+		return $this->only_row();
+	}
+
+	/**
+	 * WP-Cron without memory for the whole observation is not captured at
+	 * all at BEFORE: its BEFORE phases are unavailable, the options analysis
+	 * and the post-update Cron phase are unaffected.
+	 */
+	public function test_cron_that_does_not_fit_is_not_captured() {
+		$this->site->no_memory_for = array( ObservationBudget::BEFORE . ':' . ObservationBudget::CRON );
+
+		$row = $this->update_and_settle();
+
+		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'] );
+		$this->assertNotNull( $row['options_final_diff'] );
+		$this->assertSame( CronPhaseReason::SNAPSHOT_UNAVAILABLE, $row['cron_during_update_reason'] );
+		$this->assertSame( CronPhaseReason::SNAPSHOT_UNAVAILABLE, $row['cron_final_reason'] );
+		$this->assertNull( $row['cron_during_update_diff'] );
+		$this->assertNull( $row['cron_final_diff'] );
+		$this->assertNotNull( $row['cron_post_update_diff'], 'IMMEDIATE and SETTLED fit.' );
+		$this->assertSame( 2, $this->site->cron_captures, 'Not captured at BEFORE.' );
+
+		$report = ( new AnalysisReadModel() )->report( $row );
+		$this->assertFalse( $report['phases']['final']['cron']['available'], 'Unavailable, never "no changes".' );
+		$this->assertTrue( $report['phases']['final']['options']['available'] );
+	}
+
+	/**
+	 * Action Scheduler without memory at IMMEDIATE: the phases that need the
+	 * IMMEDIATE capture are unavailable, the Net result is still compared.
+	 */
+	public function test_action_scheduler_that_does_not_fit_at_immediate() {
+		$this->site->action_scheduler = array();
+		$this->site->no_memory_for    = array( ObservationBudget::IMMEDIATE . ':' . ObservationBudget::ACTION_SCHEDULER );
+
+		$row = $this->update_and_settle();
+
+		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'] );
+		$this->assertSame( ActionSchedulerPhaseReason::SNAPSHOT_UNAVAILABLE, $row['action_scheduler_during_update_reason'] );
+		$this->assertSame( ActionSchedulerPhaseReason::SNAPSHOT_UNAVAILABLE, $row['action_scheduler_post_update_reason'] );
+		$this->assertNotNull( $row['action_scheduler_final_diff'] );
+		$this->assertSame( 2, $this->site->action_scheduler_captures, 'Not captured at IMMEDIATE.' );
+		$this->assertNotNull( $row['cron_during_update_diff'], 'WP-Cron is independent.' );
+	}
+
+	/**
+	 * WP-Cron without memory at SETTLED: post-update and final are
+	 * unavailable, the stored snapshots are cleared as always.
+	 */
+	public function test_cron_that_does_not_fit_at_settled() {
+		$this->site->no_memory_for = array( ObservationBudget::SETTLED . ':' . ObservationBudget::CRON );
+
+		$row = $this->update_and_settle();
+
+		$this->assertSame( AnalysisStatus::COMPLETED, $row['status'] );
+		$this->assertNotNull( $row['cron_during_update_diff'] );
+		$this->assertSame( CronPhaseReason::SNAPSHOT_UNAVAILABLE, $row['cron_post_update_reason'] );
+		$this->assertSame( CronPhaseReason::SNAPSHOT_UNAVAILABLE, $row['cron_final_reason'] );
+		$this->assertNull( $row['cron_before_snapshot'] );
+		$this->assertNull( $row['cron_immediate_snapshot'] );
+		$this->assertSame( 2, $this->site->cron_captures, 'Not captured at SETTLED.' );
+	}
+
+	/**
+	 * A stored WP-Cron snapshot is not decoded when the later capture is
+	 * unavailable (as when it was skipped for memory): decoding is the
+	 * largest allocation of a phase. A corrupt stored snapshot shows it: the
+	 * phase gets the later capture's reason, not the decoding failure.
+	 */
+	public function test_stored_cron_snapshot_not_decoded_without_a_later_snapshot() {
+		$request = $this->site->request();
+		$this->site->start( $request, self::PLUGIN );
+		$id = (int) $this->only_row()['id'];
+		$this->site->repository->rows[ $id ]['cron_before_snapshot'] = '{"corrupt"';
+		$this->site->cron[ self::T + 99 ]['acme_broken']             = array( 'k' => 'malformed' );
+
+		$request->update_finished( self::PLUGIN, null, '1.1.0' );
+
+		$this->assertSame( CronPhaseReason::MALFORMED_CRON_STATE, $this->only_row()['cron_during_update_reason'] );
+	}
+
+	/**
+	 * The same for Action Scheduler; with a readable later snapshot the
+	 * stored one is decoded (and the corruption reported).
+	 */
+	public function test_stored_action_scheduler_snapshot_decoded_only_when_compared() {
+		$this->site->action_scheduler = array();
+		$request                      = $this->site->request();
+		$this->site->start( $request, self::PLUGIN );
+		$id = (int) $this->only_row()['id'];
+		$this->site->repository->rows[ $id ]['action_scheduler_before_snapshot'] = '{"corrupt"';
+		$this->site->action_scheduler = ActionSchedulerUnavailableException::unsupported_store();
+
+		$request->update_finished( self::PLUGIN, null, '1.1.0' );
+		$this->assertSame( ActionSchedulerPhaseReason::UNSUPPORTED_STORE, $this->only_row()['action_scheduler_during_update_reason'] );
+
+		$this->site->action_scheduler = array();
+		$this->site->time            += 2;
+		$this->site->request()->settle_follow_up( array( self::PLUGIN ), 7 );
+		$this->assertSame( ActionSchedulerPhaseReason::SNAPSHOT_UNAVAILABLE, $this->only_row()['action_scheduler_final_reason'] );
 	}
 
 	/**

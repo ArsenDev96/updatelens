@@ -17,6 +17,7 @@ use UpdateLens\Snapshot\CronSnapshotBuilder;
 use UpdateLens\Snapshot\OptionNoiseFilter;
 use UpdateLens\Snapshot\OptionsSnapshotBuilder;
 use UpdateLens\Snapshot\OptionValueHasher;
+use UpdateLens\Update\ObservationBudget;
 use UpdateLens\Update\PluginUpdateAnalyzer;
 
 /**
@@ -112,8 +113,9 @@ final class FakeSite {
 	public $site_checks = null;
 
 	/**
-	 * Stages that do not fit in memory (ObservationBudget constants); every
-	 * stage asked is recorded in $fits_asked.
+	 * What does not fit in memory: a stage (ObservationBudget constant: nothing
+	 * fits), or '<stage>:<signal>' (only that signal, e.g. 'settled:cron').
+	 * Every stage asked is recorded in $fits_asked.
 	 *
 	 * @var string[]
 	 */
@@ -197,7 +199,11 @@ final class FakeSite {
 			$this->site_checks,
 			function ( $stage ) {
 				$this->fits_asked[] = $stage;
-				return ! in_array( $stage, $this->no_memory_for, true );
+				$plan               = array();
+				foreach ( array( ObservationBudget::OPTIONS, ObservationBudget::CRON, ObservationBudget::ACTION_SCHEDULER ) as $signal ) {
+					$plan[ $signal ] = ! in_array( $stage, $this->no_memory_for, true ) && ! in_array( $stage . ':' . $signal, $this->no_memory_for, true );
+				}
+				return $plan;
 			}
 		);
 	}

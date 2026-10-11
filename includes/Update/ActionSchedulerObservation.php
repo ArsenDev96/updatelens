@@ -196,7 +196,7 @@ final class ActionSchedulerObservation {
 		}
 
 		if ( ! self::is_resolved( $row, ObservationPhase::DURING_UPDATE ) ) {
-			$changes += $this->phase( ObservationPhase::DURING_UPDATE, $this->stored( $row, self::BEFORE_SNAPSHOT ), $immediate );
+			$changes += $this->phase( ObservationPhase::DURING_UPDATE, $row, self::BEFORE_SNAPSHOT, $immediate );
 		}
 
 		return $changes;
@@ -214,10 +214,10 @@ final class ActionSchedulerObservation {
 		$changes = self::cleared();
 
 		if ( ! self::is_resolved( $row, ObservationPhase::POST_UPDATE ) ) {
-			$changes += $this->phase( ObservationPhase::POST_UPDATE, $this->stored( $row, self::IMMEDIATE_SNAPSHOT ), $settled );
+			$changes += $this->phase( ObservationPhase::POST_UPDATE, $row, self::IMMEDIATE_SNAPSHOT, $settled );
 		}
 		if ( ! self::is_resolved( $row, ObservationPhase::FINAL ) ) {
-			$changes += $this->phase( ObservationPhase::FINAL, $this->stored( $row, self::BEFORE_SNAPSHOT ), $settled );
+			$changes += $this->phase( ObservationPhase::FINAL, $row, self::BEFORE_SNAPSHOT, $settled );
 		}
 		if ( ! self::is_resolved( $row, ObservationPhase::DURING_UPDATE ) ) {
 			// Only an analysis that started before Action Scheduler observation existed.
@@ -291,13 +291,19 @@ final class ActionSchedulerObservation {
 	/**
 	 * Diff or reason for one phase.
 	 *
-	 * @param string                         $phase ObservationPhase.
-	 * @param ActionSchedulerSnapshot|string $from  Earlier snapshot or reason.
-	 * @param ActionSchedulerSnapshot|string $to    Later snapshot or reason.
+	 * The earlier snapshot is decoded only when the later one is readable:
+	 * decoding is the largest allocation of a phase, and a later capture that
+	 * was skipped for memory must not cause it.
+	 *
+	 * @param string                         $phase  ObservationPhase.
+	 * @param array                          $row    Analysis with Action Scheduler columns.
+	 * @param string                         $column Column of the earlier snapshot.
+	 * @param ActionSchedulerSnapshot|string $to     Later snapshot or reason.
 	 * @return array<string, string>
 	 */
-	private function phase( $phase, $from, $to ) {
+	private function phase( $phase, array $row, $column, $to ) {
 		list( $diff_column, $reason_column ) = self::PHASES[ $phase ];
+		$from                                = $this->stored( $row, $column, ! is_string( $to ) );
 
 		if ( ActionSchedulerPhaseReason::NOT_INSTALLED === $from ) {
 			if ( ActionSchedulerPhaseReason::NOT_INSTALLED === $to ) {
@@ -327,14 +333,18 @@ final class ActionSchedulerObservation {
 	 *
 	 * @param array  $row    Analysis.
 	 * @param string $column Snapshot column.
-	 * @return ActionSchedulerSnapshot|string
+	 * @param bool   $decode Whether to decode a stored snapshot (else null for one).
+	 * @return ActionSchedulerSnapshot|string|null
 	 */
-	private function stored( array $row, $column ) {
+	private function stored( array $row, $column, $decode = true ) {
 		if ( ! isset( $row[ $column ] ) ) {
 			return ActionSchedulerPhaseReason::NOT_CAPTURED;
 		}
 		if ( self::NOT_INSTALLED_MARKER === $row[ $column ] ) {
 			return ActionSchedulerPhaseReason::NOT_INSTALLED;
+		}
+		if ( ! $decode ) {
+			return null;
 		}
 
 		try {

@@ -43,4 +43,12 @@ final class ActionSchedulerSnapshotProviderTest extends TestCase {
 			$this->assertSame( ActionSchedulerUnavailableException::NOT_INSTALLED, $e->get_reason() );
 		}
 	}
+
+	/**
+	 * ObservationBudget's estimate: no Action Scheduler, nothing to capture
+	 * (capture() reports why), and nothing is queried.
+	 */
+	public function test_count_without_action_scheduler() {
+		$this->assertSame( 0, $this->provider()->count_active() );
+	}
 }

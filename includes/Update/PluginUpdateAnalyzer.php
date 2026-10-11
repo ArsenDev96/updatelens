@@ -15,6 +15,7 @@ use UpdateLens\Snapshot\ActionSchedulerSnapshot;
 use UpdateLens\Snapshot\ActionSchedulerSnapshotProvider;
 use UpdateLens\Snapshot\CronSnapshot;
 use UpdateLens\Snapshot\CronSnapshotProvider;
+use UpdateLens\Snapshot\MemoryBudget;
 use UpdateLens\Snapshot\OptionsSnapshot;
 use UpdateLens\Snapshot\OptionsSnapshotProvider;
 use UpdateLens\Storage\AnalysisRepository;
@@ -165,6 +166,14 @@ final class PluginUpdateAnalyzer {
 	private $diff_builder;
 
 	/**
+	 * Returns whether an options observation stage fits in memory
+	 * (ObservationBudget::fits(); stage constant => bool).
+	 *
+	 * @var callable
+	 */
+	private $fits;
+
+	/**
 	 * Analyses created in this request, plugin file => ID.
 	 *
 	 * @var array<string, int>
@@ -193,8 +202,13 @@ final class PluginUpdateAnalyzer {
 	 *                                                analyses of earlier requests.
 	 * @param SiteCheckObservation|null $site_checks BEFORE site check baselines attached when an
 	 *                                         analysis is created. Null: the columns are not written.
+	 * @param callable|null             $fits  Returns whether an observation stage (ObservationBudget
+	 *                                         constant) fits in memory. Null: every stage fits.
 	 */
-	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null, ?float $request_started_at = null, ?SiteCheckObservation $site_checks = null ) {
+	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null, ?float $request_started_at = null, ?SiteCheckObservation $site_checks = null, ?callable $fits = null ) {
+		$this->fits               = null === $fits ? static function () {
+			return true;
+		} : $fits;
 		$this->site_checks        = $site_checks;
 		$this->repository         = $repository;
 		$this->capture            = $capture;
@@ -226,6 +240,12 @@ final class PluginUpdateAnalyzer {
 			}
 			return $provider->capture();
 		};
+		$fits     = static function ( $stage ) use ( &$provider ) {
+			if ( null === $provider ) {
+				$provider = OptionsSnapshotProvider::create();
+			}
+			return ( new ObservationBudget( MemoryBudget::from_php(), array( $provider, 'count_options' ) ) )->fits( $stage );
+		};
 
 		$cron_provider = null;
 		$capture_cron  = static function () use ( &$cron_provider ) {
@@ -252,7 +272,8 @@ final class PluginUpdateAnalyzer {
 			},
 			$capture_action_scheduler,
 			RequestStart::get(),
-			SiteCheckObservation::from_wordpress()
+			SiteCheckObservation::from_wordpress(),
+			$fits
 		);
 	}
 
@@ -299,8 +320,12 @@ final class PluginUpdateAnalyzer {
 		}
 
 		try {
-			$snapshot = call_user_func( $this->capture );
+			// The whole observation (up to SETTLED) must fit, or none is begun.
+			$snapshot = call_user_func( $this->fits, ObservationBudget::BEFORE ) ? call_user_func( $this->capture ) : null;
 		} catch ( Throwable $e ) {
+			$snapshot = null;
+		}
+		if ( null === $snapshot ) {
 			foreach ( $to_settle as $row ) {
 				$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NEXT_UPDATE );
 			}
@@ -349,10 +374,17 @@ final class PluginUpdateAnalyzer {
 			return;
 		}
 
+		if ( ! call_user_func( $this->fits, ObservationBudget::IMMEDIATE ) ) {
+			// Skipped before anything large is allocated; the update continues.
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NOT_APPLICABLE );
+			return;
+		}
+
 		$before = $this->decode_snapshot( $row, 'options_before_snapshot', SettleOutcome::NOT_APPLICABLE );
 		if ( null === $before ) {
 			return;
 		}
+		unset( $row['options_before_snapshot'] ); // Decoded; the JSON is no longer needed.
 
 		try {
 			$immediate                  = call_user_func( $this->capture );
@@ -448,6 +480,9 @@ final class PluginUpdateAnalyzer {
 
 			if ( null === $snapshot ) {
 				try {
+					if ( ! call_user_func( $this->fits, ObservationBudget::SETTLED ) ) {
+						return; // Does not fit in this request: a later one may, within the window.
+					}
 					$snapshot = call_user_func( $this->capture );
 				} catch ( Throwable $e ) {
 					return; // Try again on a later request within the window.
@@ -497,10 +532,14 @@ final class PluginUpdateAnalyzer {
 		}
 
 		try {
-			$snapshot = call_user_func( $this->capture );
+			$snapshot = call_user_func( $this->fits, ObservationBudget::SETTLED ) ? call_user_func( $this->capture ) : null;
 		} catch ( Throwable $e ) {
+			$snapshot = null;
+		}
+		if ( null === $snapshot ) {
+			// Capture failed or would not fit: still awaiting a settled snapshot.
 			foreach ( array_keys( $eligible ) as $plugin_file ) {
-				$results[ $plugin_file ] = FollowUpRequest::CAPTURE_FAILED; // Still awaiting a settled snapshot.
+				$results[ $plugin_file ] = FollowUpRequest::CAPTURE_FAILED;
 			}
 			return $results;
 		}
@@ -719,18 +758,23 @@ final class PluginUpdateAnalyzer {
 			return FollowUpRequest::CONFLICT; // Settled, expired or ended by another request meanwhile.
 		}
 
-		$before = $this->decode_snapshot( $row, 'options_before_snapshot', $outcome );
-		if ( null === $before ) {
-			return FollowUpRequest::ANALYSIS_FAILED;
-		}
+		// One stored snapshot at a time, each released after its comparison.
 		$immediate = $this->decode_snapshot( $row, 'options_immediate_snapshot', $outcome );
 		if ( null === $immediate ) {
 			return FollowUpRequest::ANALYSIS_FAILED;
 		}
+		unset( $row['options_immediate_snapshot'] );
 
 		try {
 			$post_update_json = $this->diff_codec->encode( $this->diff_builder->build( $immediate, $settled ) );
-			$final_json       = $this->diff_codec->encode( $this->diff_builder->build( $before, $settled ) );
+			unset( $immediate );
+			$before = $this->decode_snapshot( $row, 'options_before_snapshot', $outcome );
+			if ( null === $before ) {
+				return FollowUpRequest::ANALYSIS_FAILED;
+			}
+			unset( $row['options_before_snapshot'] );
+			$final_json = $this->diff_codec->encode( $this->diff_builder->build( $before, $settled ) );
+			unset( $before );
 		} catch ( IncompatibleSnapshotsException $e ) {
 			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED, $outcome );
 			return FollowUpRequest::ANALYSIS_FAILED;
@@ -806,7 +850,7 @@ final class PluginUpdateAnalyzer {
 	 */
 	private function abandon_open( $id, $error_code ) {
 		try {
-			$row = $this->repository->find( $id );
+			$row = $this->repository->find_signals( $id );
 		} catch ( Throwable $e ) {
 			return;
 		}
@@ -823,7 +867,7 @@ final class PluginUpdateAnalyzer {
 	 */
 	private function fail_if_captured( $id ) {
 		try {
-			$row = $this->repository->find( $id );
+			$row = $this->repository->find_signals( $id );
 		} catch ( Throwable $e ) {
 			return;
 		}
@@ -912,7 +956,7 @@ final class PluginUpdateAnalyzer {
 		}
 
 		try {
-			$full = $this->repository->find( (int) $row['id'] );
+			$full = $this->repository->find_signals( (int) $row['id'] );
 		} catch ( Throwable $e ) {
 			return $row;
 		}

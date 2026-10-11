@@ -214,6 +214,29 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	}
 
 	/**
+	 * Find a row without its options snapshots and diffs (SIGNAL_COLUMNS,
+	 * like the real repository).
+	 *
+	 * @param int $id ID.
+	 * @return array|null
+	 */
+	public function find_signals( $id ) {
+		if ( ! isset( $this->rows[ $id ] ) ) {
+			return null;
+		}
+		++$this->signal_reads;
+
+		return array_intersect_key( $this->rows[ $id ], array_flip( array_map( 'trim', explode( ',', self::SIGNAL_COLUMNS ) ) ) );
+	}
+
+	/**
+	 * Calls of find_signals().
+	 *
+	 * @var int
+	 */
+	public $signal_reads = 0;
+
+	/**
 	 * Open row for a plugin (metadata columns only, like the real repository).
 	 *
 	 * @param string $plugin_file Plugin.

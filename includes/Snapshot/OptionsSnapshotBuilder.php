@@ -77,6 +77,8 @@ final class OptionsSnapshotBuilder {
 				$autoload,
 				$this->autoload_policy->is_autoloaded( $autoload )
 			);
+			// Release the raw value before the next row is read (it may be large).
+			unset( $row, $value );
 		}
 
 		return new OptionsSnapshot( $records, $this->hasher->get_context() );

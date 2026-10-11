@@ -126,7 +126,11 @@ final class PluginUpdateTracker {
 			// Every updater download (any type, any user, also cron and WP-CLI)
 			// is recorded first, so no older site check baseline can be used for
 			// a later update.
-			$activity = $this->record_activity();
+			$activity = self::quietly(
+				function () {
+					return $this->record_activity();
+				}
+			);
 
 			// Translations are not attributed and run inside plugin updates (Language_Pack_Upgrader::async_upgrade()).
 			if ( $upgrader instanceof \Language_Pack_Upgrader ) {
@@ -146,11 +150,11 @@ final class PluginUpdateTracker {
 				)
 			);
 
-			$this->analyzer->update_starting(
-				$plugin_file,
-				null === $plugin_file ? array() : self::plugin_data( $plugin_file ),
-				get_current_user_id(),
-				$activity
+			$plugin = null === $plugin_file ? array() : self::plugin_data( $plugin_file );
+			self::quietly(
+				function () use ( $plugin_file, $plugin, $activity ) {
+					$this->analyzer->update_starting( $plugin_file, $plugin, get_current_user_id(), $activity );
+				}
 			);
 		} catch ( Throwable $e ) {
 			return $reply; // Never block the update.
@@ -192,11 +196,18 @@ final class PluginUpdateTracker {
 			$result = array_key_exists( $plugin_file, $this->install_results ) ? $this->install_results[ $plugin_file ] : 'update_not_installed';
 
 			if ( true === $result ) {
-				$after = self::plugin_data( $plugin_file );
-				$this->analyzer->update_finished( $plugin_file, null, '' === $after['version'] ? null : $after['version'] );
+				$data  = self::plugin_data( $plugin_file );
+				$error = null;
+				$after = '' === $data['version'] ? null : $data['version'];
 			} else {
-				$this->analyzer->update_finished( $plugin_file, '' === $result ? 'update_failed' : $result, null );
+				$error = '' === $result ? 'update_failed' : $result;
+				$after = null;
 			}
+			self::quietly(
+				function () use ( $plugin_file, $error, $after ) {
+					$this->analyzer->update_finished( $plugin_file, $error, $after );
+				}
+			);
 		} catch ( Throwable $e ) {
 			return; // Never interfere with the update.
 		}
@@ -208,13 +219,39 @@ final class PluginUpdateTracker {
 	 * @return void
 	 */
 	public function on_shutdown() {
+		self::quietly(
+			function () {
+				try {
+					$this->analyzer->request_ending( self::may_settle_at_shutdown(), $this->activation_changed() );
+				} catch ( Throwable $e ) {
+					// Never interfere with the request; the activity still ends.
+					unset( $e );
+				}
+				$this->end_activity();
+			}
+		);
+	}
+
+	/**
+	 * Run UpdateLens's own storage work with database errors hidden: with
+	 * `WP_DEBUG_DISPLAY` they would be printed into the update's Ajax
+	 * response, the follow-up response or the page (e.g. while the analyses
+	 * table is missing). WordPress still logs them. Only this work is
+	 * affected: the previous setting is restored afterwards, also when it
+	 * throws.
+	 *
+	 * @param callable $work Work.
+	 * @return mixed What $work returns.
+	 */
+	private static function quietly( callable $work ) {
+		global $wpdb;
+
+		$shown = $wpdb->hide_errors();
 		try {
-			$this->analyzer->request_ending( self::may_settle_at_shutdown(), $this->activation_changed() );
-		} catch ( Throwable $e ) {
-			$this->end_activity();
-			return;
+			return call_user_func( $work );
+		} finally {
+			$wpdb->show_errors( $shown );
 		}
-		$this->end_activity();
 	}
 
 	/**
@@ -286,7 +323,11 @@ final class PluginUpdateTracker {
 
 		$settled = array();
 		try {
-			$results = $this->analyzer->settle_follow_up( $plugins, get_current_user_id(), $this->activation_changed(), $settled );
+			$results = self::quietly(
+				function () use ( $plugins, &$settled ) {
+					return $this->analyzer->settle_follow_up( $plugins, get_current_user_id(), $this->activation_changed(), $settled );
+				}
+			);
 		} catch ( Throwable $e ) {
 			wp_send_json_error( array( 'code' => 'failed' ), 500 );
 		}
@@ -301,7 +342,11 @@ final class PluginUpdateTracker {
 				// Exactly the analysis this request settled (never "the latest one"), and
 				// whether its AFTER site checks should start now (SiteCheckAfter decides).
 				$entry['analysis']    = $settled[ $plugin ];
-				$entry['site_checks'] = $this->wants_site_checks( $settled[ $plugin ] );
+				$entry['site_checks'] = self::quietly(
+					function () use ( $settled, $plugin ) {
+						return $this->wants_site_checks( $settled[ $plugin ] );
+					}
+				);
 			}
 			$response[] = $entry;
 		}

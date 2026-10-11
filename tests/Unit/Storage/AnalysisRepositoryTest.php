@@ -10,6 +10,7 @@ namespace UpdateLens\Tests\Unit\Storage;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use UpdateLens\Storage\AnalysisRepository;
+use UpdateLens\Storage\Schema;
 use wpdb;
 
 /**
@@ -201,6 +202,23 @@ final class AnalysisRepositoryTest extends TestCase {
 		$this->wpdb->query_results = array( false );
 		$this->expectException( RuntimeException::class );
 		$repository->claim_site_check_after( 5, 7, 'completed', 'follow_up', 1.0 );
+	}
+
+	/**
+	 * Ending an analysis reads every column except the options snapshots and
+	 * diffs; the list follows the schema. Reads release $wpdb's copy.
+	 */
+	public function test_signal_columns() {
+		$payload = array( 'options_before_snapshot', 'options_immediate_snapshot', 'options_during_update_diff', 'options_post_update_diff', 'options_final_diff' );
+		$this->assertSame( array_values( array_diff( Schema::columns(), $payload ) ), array_map( 'trim', explode( ',', AnalysisRepository::SIGNAL_COLUMNS ) ) );
+
+		$this->wpdb->row = array( 'id' => '5' );
+		$this->assertSame( array( 'id' => '5' ), ( new AnalysisRepository( $this->wpdb ) )->find_signals( 5 ) );
+		$this->assertSame( array( 'SELECT ' . AnalysisRepository::SIGNAL_COLUMNS . ' FROM %i WHERE id = %d', array( 'wp_updatelens_analyses', 5 ) ), $this->wpdb->prepared[0] );
+		$this->assertSame( 1, $this->wpdb->flushes );
+
+		( new AnalysisRepository( $this->wpdb ) )->find( 5 );
+		$this->assertSame( 2, $this->wpdb->flushes );
 	}
 
 	/**

@@ -112,6 +112,21 @@ final class FakeSite {
 	public $site_checks = null;
 
 	/**
+	 * Stages that do not fit in memory (ObservationBudget constants); every
+	 * stage asked is recorded in $fits_asked.
+	 *
+	 * @var string[]
+	 */
+	public $no_memory_for = array();
+
+	/**
+	 * Stages the analyzers asked about, in order.
+	 *
+	 * @var string[]
+	 */
+	public $fits_asked = array();
+
+	/**
 	 * Constructor.
 	 *
 	 * @param array<string, array{string, string}> $options Initial options.
@@ -179,7 +194,11 @@ final class FakeSite {
 			},
 			$capture_action_scheduler,
 			null === $started_at ? $this->time + 0.5 : (float) $started_at,
-			$this->site_checks
+			$this->site_checks,
+			function ( $stage ) {
+				$this->fits_asked[] = $stage;
+				return ! in_array( $stage, $this->no_memory_for, true );
+			}
 		);
 	}
 

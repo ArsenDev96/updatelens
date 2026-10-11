@@ -32,6 +32,13 @@ class AnalysisRepository {
 	const OPEN_COLUMNS = 'id, plugin_file, status, user_id, started_at, updated_at, settle_deadline, immediate_captured_at';
 
 	/**
+	 * Every column except the options snapshots and diffs (the largest
+	 * values): what ending an analysis needs (its status and the Cron and
+	 * Action Scheduler columns, see find_signals()).
+	 */
+	const SIGNAL_COLUMNS = 'id, plugin_file, plugin_name, version_before, version_after, user_id, status, active_plugin, settle_outcome, started_at, updated_at, settle_deadline, immediate_captured_at, completed_at, cron_before_snapshot, cron_immediate_snapshot, cron_during_update_diff, cron_post_update_diff, cron_final_diff, cron_during_update_reason, cron_post_update_reason, cron_final_reason, action_scheduler_before_snapshot, action_scheduler_immediate_snapshot, action_scheduler_during_update_diff, action_scheduler_post_update_diff, action_scheduler_final_diff, action_scheduler_during_update_reason, action_scheduler_post_update_reason, action_scheduler_final_reason, site_check_home_before, site_check_home_before_reason, site_check_rest_before, site_check_rest_before_reason, site_check_update_started_at, site_check_after_started_at, site_check_home_after, site_check_home_after_reason, site_check_rest_after, site_check_rest_after_reason, error_code, error_message';
+
+	/**
 	 * Report metadata columns. Never snapshots, user IDs or stored error messages.
 	 */
 	const REPORT_METADATA_COLUMNS = 'id, plugin_file, plugin_name, version_before, version_after, status, settle_outcome, started_at, settle_deadline, completed_at, error_code';
@@ -117,8 +124,10 @@ class AnalysisRepository {
 		if ( 1 !== $inserted ) {
 			throw new RuntimeException( 'UpdateLens could not create the analysis.' );
 		}
+		$id = (int) $this->wpdb->insert_id;
+		$this->wpdb->flush(); // Release $wpdb's copy of the statement (it holds the snapshots).
 
-		return (int) $this->wpdb->insert_id;
+		return $id;
 	}
 
 	/**
@@ -146,6 +155,7 @@ class AnalysisRepository {
 		if ( false === $updated ) {
 			throw new RuntimeException( 'UpdateLens could not update the analysis.' );
 		}
+		$this->wpdb->flush(); // Release $wpdb's copy of the statement (it may hold snapshots).
 
 		return 1 === $updated;
 	}
@@ -162,6 +172,25 @@ class AnalysisRepository {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
 		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM %i WHERE id = %d', $this->table, (int) $id ), ARRAY_A );
 		$this->assert_no_error();
+		$wpdb->flush(); // Release $wpdb's copy of the snapshots.
+
+		return $row ? $row : null;
+	}
+
+	/**
+	 * Find one analysis without its options snapshots and diffs
+	 * (SIGNAL_COLUMNS): enough to end it, without reading the largest values.
+	 *
+	 * @param int $id Analysis ID.
+	 * @return array<string, mixed>|null
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function find_signals( $id ) {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- Custom table; must not be cached. Column list is a class constant.
+		$row = $wpdb->get_row( $wpdb->prepare( 'SELECT ' . self::SIGNAL_COLUMNS . ' FROM %i WHERE id = %d', $this->table, (int) $id ), ARRAY_A );
+		$this->assert_no_error();
+		$wpdb->flush();
 
 		return $row ? $row : null;
 	}

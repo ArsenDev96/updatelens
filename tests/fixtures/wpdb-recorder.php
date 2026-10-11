@@ -7,7 +7,7 @@
  * @package UpdateLens
  */
 
-// phpcs:disable WordPress.NamingConventions.PrefixAllGlobals, WordPress.WP.GlobalVariablesOverride, Generic.CodeAnalysis.UnusedFunctionParameter, Squiz.Commenting, Generic.Commenting.DocComment, PEAR.NamingConventions.ValidClassName -- Test stand-in for WordPress core.
+// phpcs:disable WordPress.NamingConventions.PrefixAllGlobals, WordPress.WP.GlobalVariablesOverride, Generic.CodeAnalysis.UnusedFunctionParameter, Squiz.Commenting, Generic.Commenting.DocComment, PEAR.NamingConventions.ValidClassName, Generic.Classes.DuplicateClassName -- Test stand-in for WordPress core.
 
 if ( ! defined( 'ARRAY_A' ) ) {
 	define( 'ARRAY_A', 'ARRAY_A' );
@@ -109,6 +109,17 @@ class wpdb {
 		$this->show_errors = $show;
 
 		return $shown;
+	}
+
+	/**
+	 * Number of flush() calls.
+	 *
+	 * @var int
+	 */
+	public $flushes = 0;
+
+	public function flush() {
+		++$this->flushes;
 	}
 
 	public function get_col( $sql ) {

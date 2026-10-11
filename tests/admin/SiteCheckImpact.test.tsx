@@ -317,7 +317,7 @@ describe( 'Site checks in Potential Impact', () => {
 			within( impact() ).queryByRole( 'list', { name: 'Findings' } )
 		).not.toBeInTheDocument();
 		expect( incompleteTexts() ).toEqual( [
-			'Homepage check: Could not be compared · The earlier check was inconclusive: the response was too large to inspect.',
+			'Homepage check: Could not be compared · The earlier check was inconclusive: the response could not be fully inspected (too large, or not received completely within the time limit).',
 		] );
 	} );
 

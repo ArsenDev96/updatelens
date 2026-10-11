@@ -74,7 +74,8 @@ final class Attempt {
 	 * Marker states (verification header, homepage end-of-page marker):
 	 * this session's marker, none, another session's marker, or not read
 	 * (no readable response; for the end marker and the REST body also a
-	 * response too large to inspect).
+	 * response that was not inspected: too large, or its body not received
+	 * completely within the time limit).
 	 */
 	const MARKER_CURRENT = 'current';
 	const MARKER_ABSENT  = 'absent';
@@ -208,7 +209,8 @@ final class Attempt {
 		if ( ! in_array( $data['header'], self::MARKERS, true ) ) {
 			return false;
 		}
-		// NOT_READ with a status: the response was too large to inspect.
+		// NOT_READ with a status: the response was not inspected (too large, or
+		// its body not received completely within the time limit).
 		if ( CheckDefinition::HOME === $check ) {
 			return self::NOT_READ === $data['end_marker'] || in_array( $data['end_marker'], self::MARKERS, true );
 		}

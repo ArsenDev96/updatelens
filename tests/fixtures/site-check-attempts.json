@@ -242,6 +242,61 @@
       "reason": "network_error"
     },
     {
+      "name": "home: body still arriving at the time limit",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 10000,
+        "header": "current",
+        "end_marker": "unread",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "inconclusive",
+      "reason": "not_inspected"
+    },
+    {
+      "name": "home: body still arriving, unverified",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 10000,
+        "header": "absent",
+        "end_marker": "unread",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "inconclusive",
+      "reason": "not_verified"
+    },
+    {
+      "name": "home: 500 with its body still arriving",
+      "check": "home",
+      "facts": {
+        "kind": "response",
+        "status": 500,
+        "duration_ms": 10000,
+        "header": "current",
+        "end_marker": "unread",
+        "retry_after": false,
+        "challenge": false
+      },
+      "verdict": "fail",
+      "reason": "server_error"
+    },
+    {
+      "name": "home: no response, time limit noticed late (suspended page)",
+      "check": "home",
+      "facts": {
+        "kind": "network_error",
+        "duration_ms": 60000
+      },
+      "verdict": "inconclusive",
+      "reason": "network_error"
+    },
+    {
       "name": "rest: own user",
       "check": "rest",
       "facts": {
@@ -498,6 +553,23 @@
       },
       "verdict": "inconclusive",
       "reason": "blocked"
+    },
+    {
+      "name": "rest: body still arriving at the time limit",
+      "check": "rest",
+      "facts": {
+        "kind": "response",
+        "status": 200,
+        "duration_ms": 10000,
+        "header": "current",
+        "retry_after": false,
+        "challenge": false,
+        "body": "unread",
+        "user_id": null,
+        "error_code": null
+      },
+      "verdict": "inconclusive",
+      "reason": "not_inspected"
     }
   ]
 }

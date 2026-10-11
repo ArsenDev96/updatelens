@@ -762,7 +762,7 @@ function endMarkerText( attempt: SiteCheckAttempt ): string | null {
 				'updatelens'
 			);
 		case 'not_read':
-			return __( 'page too large to inspect', 'updatelens' );
+			return __( 'page not fully inspected', 'updatelens' );
 		default:
 			return null;
 	}
@@ -796,7 +796,7 @@ function bodyText( attempt: SiteCheckAttempt ): string | null {
 		case 'empty':
 			return __( 'empty response', 'updatelens' );
 		case 'not_read':
-			return __( 'response too large to inspect', 'updatelens' );
+			return __( 'response not fully inspected', 'updatelens' );
 		default:
 			return null;
 	}
@@ -1273,9 +1273,15 @@ function inconclusiveText( side: SiteCheckSide | undefined ): string {
 				'updatelens'
 			);
 		case 'network_error':
-			return __( 'a network error prevented a response.', 'updatelens' );
+			return __(
+				'no response could be observed, for example because of a network error or because the browser was suspended.',
+				'updatelens'
+			);
 		case 'not_inspected':
-			return __( 'the response was too large to inspect.', 'updatelens' );
+			return __(
+				'the response could not be fully inspected (too large, or not received completely within the time limit).',
+				'updatelens'
+			);
 		default:
 			return __( 'it gave no reliable result.', 'updatelens' );
 	}

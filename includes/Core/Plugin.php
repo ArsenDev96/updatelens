@@ -97,7 +97,9 @@ final class Plugin {
 		}
 
 		// Update analysis is single-site only in v0.1. Sites activated before the
-		// schema existed get it here, since activation does not run again.
+		// schema existed get it here, since activation does not run again. While
+		// the schema is not installed (a failed install is retried at most every
+		// Schema::RETRY_AFTER_SECONDS), updates are not observed and run as usual.
 		if ( ! is_multisite() && Schema::maybe_upgrade() ) {
 			( new PluginUpdateTracker( PluginUpdateAnalyzer::create() ) )->register();
 

@@ -275,8 +275,14 @@ export function classifyRestBody( text: string | null ): RestBody {
 	};
 }
 
-/** How one attempt ended without a readable response. */
-export type AttemptFailure = 'timeout' | 'network_error' | 'cancelled';
+/**
+ * Why an attempt's request was stopped: its time limit (`timeout`), its time
+ * limit noticed late because the page was suspended (`interrupted`: whether
+ * a response arrived in time is unknown, so it is reported as a network
+ * error, never as a timeout), a network error, or the caller (`cancelled`).
+ */
+export type AttemptFailure =
+	'timeout' | 'interrupted' | 'network_error' | 'cancelled';
 
 /** Request options for one attempt. */
 export interface AttemptRequest {
@@ -295,6 +301,33 @@ export class CancelledError extends Error {
 	}
 }
 
+/**
+ * Read a response body after its status and headers arrived. A body that
+ * cannot be read to its end (the attempt's time limit ran out while it was
+ * still arriving, or the connection broke off) was not inspected: the status
+ * and headers stay what was observed and the body is `unread`, never a
+ * timeout, a network error or an incomplete page.
+ *
+ * @param request Attempt request.
+ * @param read    Reads the body.
+ * @param unread  The result for a body that was not read to its end.
+ * @throws CancelledError When the caller cancelled.
+ */
+async function readBody< T >(
+	request: AttemptRequest,
+	read: () => Promise< T >,
+	unread: T
+): Promise< T > {
+	try {
+		return await read();
+	} catch {
+		if ( request.aborted() === 'cancelled' ) {
+			throw new CancelledError();
+		}
+		return unread;
+	}
+}
+
 const duration = ( request: AttemptRequest, started: number ) =>
 	Math.min(
 		MAX_DURATION_MS,
@@ -302,7 +335,8 @@ const duration = ( request: AttemptRequest, started: number ) =>
 	);
 
 /**
- * The facts of an attempt that ended in an error.
+ * The facts of an attempt that ended before its response arrived: a
+ * `timeout` only when the attempt's time limit ran out on time.
  *
  * @param request Attempt request.
  * @param started Start time.
@@ -365,7 +399,11 @@ export async function observeHome(
 			response.headers.get( HEADER ),
 			issued.session
 		);
-		const endMarker = await scanEndMarker( response.body, issued.session );
+		const endMarker = await readBody(
+			request,
+			() => scanEndMarker( response.body, issued.session ),
+			'unread'
+		);
 
 		return {
 			kind: 'response',
@@ -424,7 +462,11 @@ export async function observeRest(
 			issued.session
 		);
 		const body = classifyRestBody(
-			await readRestText( response.body, MAX_REST_BYTES )
+			await readBody(
+				request,
+				() => readRestText( response.body, MAX_REST_BYTES ),
+				null
+			)
 		);
 
 		return {

@@ -109,10 +109,11 @@ final class AdminPage {
 				array( $this, 'render_settings' )
 			);
 
-			// Recreate the analyses table if it went missing, and create the
-			// monitoring baseline if activation did not (e.g. sites upgraded from a
-			// version without it). Checked only when the History screen loads.
-			add_action( 'load-' . $this->hook_suffix, array( Schema::class, 'repair' ) );
+			// Install the analyses table again if it is missing or incomplete
+			// (retrying a failed install at once), and create the monitoring
+			// baseline if activation did not (e.g. sites upgraded from a version
+			// without it). Checked only when the History screen loads.
+			add_action( 'load-' . $this->hook_suffix, array( Schema::class, 'recover' ) );
 			add_action( 'load-' . $this->hook_suffix, array( $this, 'ensure_baseline' ) );
 		}
 	}

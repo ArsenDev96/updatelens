@@ -621,7 +621,30 @@ final class ResponseClassifierTest extends TestCase {
 			)
 		);
 
+		// A body still arriving when the attempt's time limit ran out (B1).
+		$slow    = F::home(
+			array(
+				'end_marker'  => 'unread',
+				'duration_ms' => 10000,
+			)
+		);
+		$slow500 = F::home(
+			array(
+				'status'      => 500,
+				'end_marker'  => 'unread',
+				'duration_ms' => 10000,
+			)
+		);
+		// A time limit noticed late (suspended page): reported as a network error.
+		$late = F::no_response( 'network_error', 60000 );
+
 		return array(
+			'slow body twice'                   => array( array( $slow, $slow ), 'inconclusive', 'not_inspected' ),
+			'slow body then pass'               => array( array( $slow, $pass ), 'pass', null ),
+			'slow body then timeout'            => array( array( $slow, $timeout ), 'inconclusive', 'unconfirmed' ),
+			'HTTP 500 with a slow body twice'   => array( array( $slow500, $slow500 ), 'fail', 'server_error' ),
+			'late time limit then timeout'      => array( array( $late, $timeout ), 'inconclusive', 'unconfirmed' ),
+			'late time limit twice'             => array( array( $late, $late ), 'inconclusive', 'network_error' ),
 			'one pass'                          => array( array( $pass ), 'pass', null ),
 			'one failure (retry never ran)'     => array( array( $fail500 ), 'inconclusive', 'unconfirmed' ),
 			'one redirect'                      => array( array( $redirect ), 'inconclusive', 'unconfirmed' ),

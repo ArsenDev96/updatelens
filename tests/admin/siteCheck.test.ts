@@ -122,6 +122,40 @@ const hang = ( init?: RequestInit ) =>
 		);
 	} );
 
+/**
+ * A response whose status and headers arrived but whose body stops after its
+ * first chunk until the request is aborted (a slow, still downloading page).
+ *
+ * @param init    Request options (the attempt's signal).
+ * @param options Status.
+ */
+function stalled( init?: RequestInit, options: { status?: number } = {} ) {
+	return new Response(
+		new ReadableStream< Uint8Array >( {
+			start( controller ) {
+				controller.enqueue(
+					new TextEncoder().encode( '<!doctype html><html><body>' )
+				);
+				init?.signal?.addEventListener( 'abort', () =>
+					controller.error(
+						new DOMException(
+							'The operation was aborted.',
+							'AbortError'
+						)
+					)
+				);
+			},
+		} ),
+		{
+			status: options.status ?? 200,
+			headers: {
+				'Content-Type': 'text/html',
+				'X-UpdateLens-Check': HOME,
+			},
+		}
+	);
+}
+
 type Handler = ( init?: RequestInit ) => Response | Promise< Response >;
 
 /**
@@ -537,7 +571,7 @@ describe( 'runSiteChecks: homepage observations', () => {
 		] );
 	} );
 
-	it( 'treats a body that breaks off as a network error', async () => {
+	it( 'keeps the response when its body breaks off (unread, not a network error)', async () => {
 		const broken = () =>
 			new Response(
 				new ReadableStream< Uint8Array >( {
@@ -549,9 +583,135 @@ describe( 'runSiteChecks: homepage observations', () => {
 			);
 		const { attempts } = await homeFacts( [ broken ] );
 		expect( attempts[ 0 ] ).toEqual( {
-			kind: 'network_error',
+			kind: 'response',
+			status: 200,
 			duration_ms: 0,
+			header: 'current',
+			end_marker: 'unread',
+			retry_after: false,
+			challenge: false,
 		} );
+	} );
+
+	it( 'a verified page whose body is still arriving at the time limit is unread, never a timeout', async () => {
+		const { result, attempts } = await homeFacts( [ stalled ] );
+
+		expect( attempts ).toEqual( [
+			{
+				kind: 'response',
+				status: 200,
+				duration_ms: 10000,
+				header: 'current',
+				end_marker: 'unread',
+				retry_after: false,
+				challenge: false,
+			},
+			{
+				kind: 'response',
+				status: 200,
+				duration_ms: 10000,
+				header: 'current',
+				end_marker: 'unread',
+				retry_after: false,
+				challenge: false,
+			},
+		] );
+		expect( result.checks.home ).toMatchObject( { status: 'reported' } );
+		expect( result.checks.rest ).toMatchObject( { verdict: 'pass' } );
+	} );
+
+	it( 'an HTTP 500 whose body is still arriving stays an observed HTTP 500', async () => {
+		const { attempts } = await homeFacts( [
+			( init ) => stalled( init, { status: 500 } ),
+		] );
+		expect( attempts[ 0 ] ).toMatchObject( {
+			kind: 'response',
+			status: 500,
+			header: 'current',
+			end_marker: 'unread',
+		} );
+	} );
+
+	it( 'retries after a body that did not arrive in time and passes when the retry is complete', async () => {
+		const { result, attempts, srv } = await homeFacts( [
+			stalled,
+			() => page(),
+		] );
+		expect( srv.counts.home ).toBe( 2 );
+		expect(
+			attempts.map( ( a ) => ( a as { end_marker: string } ).end_marker )
+		).toEqual( [ 'unread', 'current' ] );
+		expect( result.checks.home ).toMatchObject( {
+			status: 'reported',
+			verdict: 'pass',
+		} );
+	} );
+
+	it( 'a time limit noticed late (suspended page) is not a timeout', async () => {
+		const srv = server( {
+			home: [
+				( init ) => {
+					// The computer sleeps for a minute right after the request.
+					vi.setSystemTime( Date.now() + 60000 );
+					return hang( init );
+				},
+				() => page(),
+			],
+		} );
+		const result = await run( srv );
+		const attempts = reportOf( srv, 'home' )!.report.attempts;
+
+		expect( attempts[ 0 ] ).toEqual( {
+			kind: 'network_error',
+			duration_ms: 60000,
+		} );
+		expect( attempts[ 1 ] ).toMatchObject( {
+			status: 200,
+			end_marker: 'current',
+		} );
+		expect( result.checks.home ).toMatchObject( { verdict: 'pass' } );
+	} );
+
+	it( 'a response that arrived while the page was suspended is still used', async () => {
+		const srv = server( {
+			home: [
+				() => {
+					vi.setSystemTime( Date.now() + 60000 );
+					// Delivered when the page wakes, after the late time limit.
+					return new Promise< Response >( ( resolve ) =>
+						setTimeout( () => resolve( page() ), 10000 )
+					);
+				},
+			],
+		} );
+		const result = await run( srv );
+
+		expect( srv.counts.home ).toBe( 1 );
+		expect( reportOf( srv, 'home' )!.report.attempts ).toEqual( [
+			expect.objectContaining( {
+				kind: 'response',
+				status: 200,
+				end_marker: 'current',
+			} ),
+		] );
+		expect( result.checks.home ).toMatchObject( { verdict: 'pass' } );
+	} );
+
+	it( 'a late time limit within the tolerance is still a timeout', async () => {
+		const srv = server( {
+			home: [
+				( init ) => {
+					// Background tabs: timers run up to about a second late.
+					vi.setSystemTime( Date.now() + 1500 );
+					return hang( init );
+				},
+			],
+		} );
+		await run( srv );
+		expect( reportOf( srv, 'home' )!.report.attempts ).toEqual( [
+			{ kind: 'timeout', duration_ms: 11500 },
+			{ kind: 'timeout', duration_ms: 11500 },
+		] );
 	} );
 
 	it( 'retries once after a failure and stops when the retry passes', async () => {
@@ -707,6 +867,40 @@ describe( 'runSiteChecks: REST observations', () => {
 		expect( result.checks.rest ).toMatchObject( {
 			status: 'reported',
 			verdict: 'fail',
+		} );
+	} );
+
+	it( 'a REST body still arriving at the time limit is unread, never a timeout', async () => {
+		const slow = ( init?: RequestInit ) =>
+			new Response(
+				new ReadableStream< Uint8Array >( {
+					start( controller ) {
+						controller.enqueue(
+							new TextEncoder().encode( '{"id":' )
+						);
+						init?.signal?.addEventListener( 'abort', () =>
+							controller.error(
+								new DOMException(
+									'The operation was aborted.',
+									'AbortError'
+								)
+							)
+						);
+					},
+				} ),
+				{ headers: { 'X-UpdateLens-Check': REST } }
+			);
+		const { attempts } = await restFacts( [ slow ] );
+		expect( attempts[ 0 ] ).toEqual( {
+			kind: 'response',
+			status: 200,
+			duration_ms: 10000,
+			header: 'current',
+			retry_after: false,
+			challenge: false,
+			body: 'unread',
+			user_id: null,
+			error_code: null,
 		} );
 	} );
 
@@ -1214,6 +1408,27 @@ describe( 'runSiteChecks: cancellation', () => {
 			.filter( ( call ) => call.url !== AJAX )
 			.map( ( call ) => call.init!.signal! );
 		expect( signals.every( ( signal ) => signal.aborted ) ).toBe( true );
+	} );
+
+	it( 'cancels while a body is still arriving: nothing is reported', async () => {
+		const srv = server( { home: [ stalled ], rest: [ stalled ] } );
+		const controller = new AbortController();
+		const promise = runSiteChecks( SETTINGS, {
+			purpose: 'before',
+			fetch: srv.fetch,
+			location: LOCATION,
+			signal: controller.signal,
+		} );
+		await vi.advanceTimersByTimeAsync( 3000 );
+		controller.abort();
+		const result = await promise;
+
+		expect( result.checks ).toEqual( {
+			home: { check: 'home', status: 'cancelled' },
+			rest: { check: 'rest', status: 'cancelled' },
+		} );
+		expect( srv.reports ).toHaveLength( 0 );
+		expect( vi.getTimerCount() ).toBe( 0 );
 	} );
 
 	it( 'cancels during the retry delay', async () => {

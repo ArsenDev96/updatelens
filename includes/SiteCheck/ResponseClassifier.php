@@ -53,7 +53,8 @@ final class ResponseClassifier {
 
 	/**
 	 * Browser fact values for the homepage end-of-page marker: as FACT_MARKERS,
-	 * plus `unread` when the page was too large to inspect.
+	 * plus `unread` when the page was not inspected (too large, or its body not
+	 * received completely within the time limit).
 	 */
 	const FACT_END_MARKERS = array( 'current', 'absent', 'other', 'unread' );
 

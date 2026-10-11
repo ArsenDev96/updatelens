@@ -111,6 +111,19 @@ export interface RunResult {
 /** Margin kept before the session's expiry when deciding to report. */
 export const EXPIRY_MARGIN_MS = 2000;
 
+/**
+ * How late an attempt's time limit may be noticed and still count as a
+ * timeout. Browsers delay timers of background tabs (Chrome aligns them to
+ * whole seconds); later means the page was suspended.
+ */
+export const LATE_TIMER_TOLERANCE_MS = 2000;
+
+/**
+ * After a time limit noticed late: how long a response that arrived while
+ * the page was suspended may still be delivered before the attempt stops.
+ */
+export const LATE_TIMER_GRACE_MS = 1000;
+
 const SERVER_CODE = /^[a-z_]{1,40}$/;
 const VERDICTS: ServerVerdict[] = [
 	'pass',
@@ -355,7 +368,10 @@ async function runCheck(
 }
 
 /**
- * One attempt with its own timeout, aborted with the run.
+ * One attempt with its own time limit, aborted with the run. The limit
+ * covers the whole request; once the status and headers arrived, running
+ * out of time while the body is still arriving leaves the body `unread`
+ * (observe.ts), never a timeout.
  *
  * @param issued  Issued check.
  * @param context Run context.
@@ -374,7 +390,21 @@ async function attempt(
 		controller.abort();
 	};
 	const onCancel = () => abort( 'cancelled' );
-	const timer = setTimeout( () => abort( 'timeout' ), context.run.timeoutMs );
+	const started = context.now();
+	let timer = setTimeout( () => {
+		if (
+			context.now() - started <=
+			context.run.timeoutMs + LATE_TIMER_TOLERANCE_MS
+		) {
+			abort( 'timeout' );
+			return;
+		}
+		// The time limit was noticed late: the page was suspended (a
+		// sleeping computer, a frozen or background tab), so whether the
+		// response arrived in time is unknown. Let what arrived meanwhile be
+		// delivered first, then stop without claiming a timeout.
+		timer = setTimeout( () => abort( 'interrupted' ), LATE_TIMER_GRACE_MS );
+	}, context.run.timeoutMs );
 	context.signal.addEventListener( 'abort', onCancel );
 
 	const request: AttemptRequest = {

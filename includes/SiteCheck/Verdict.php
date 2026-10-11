@@ -18,8 +18,8 @@ defined( 'ABSPATH' ) || exit;
  *                   page, unexpected REST response). A result fails only when
  *                   both attempts failed. A failure is what the browser
  *                   observed, never proof of downtime or of its cause: two
- *                   `timeout`s mean no response arrived within the time
- *                   limit twice; a 5xx or 404 may come from a proxy or CDN
+ *                   `timeout`s mean no response (status and headers)
+ *                   arrived within the time limit twice; a 5xx or 404 may come from a proxy or CDN
  *                   (the attempt's origin says whether WordPress was
  *                   verified).
  * - `redirect`:     the homepage redirected (the target is not visible to
@@ -69,7 +69,8 @@ final class Verdict {
 
 	/**
 	 * A verified 2xx response the browser could not inspect (larger than its
-	 * size limit), so completeness or the user is unknown.
+	 * size limit, or its body not received completely within the attempt's
+	 * time limit), so completeness or the user is unknown.
 	 */
 	const NOT_INSPECTED = 'not_inspected';
 

@@ -72,6 +72,23 @@ final class CheckComparatorTest extends TestCase {
 				),
 				F::home(),
 			),
+			// Verified responses whose bodies were still arriving at the time limit.
+			'slow'       => array(
+				F::home(
+					array(
+						'end_marker'  => 'unread',
+						'duration_ms' => 10000,
+					)
+				),
+				F::home(
+					array(
+						'end_marker'  => 'unread',
+						'duration_ms' => 10000,
+					)
+				),
+			),
+			// Time limits noticed late (suspended page), reported as network errors.
+			'suspended'  => array( F::no_response( 'network_error', 60000 ), F::no_response( 'network_error', 60000 ) ),
 		);
 
 		return $runs[ $name ];
@@ -174,6 +191,9 @@ final class CheckComparatorTest extends TestCase {
 			array( 'cache', '500', 'before_inconclusive' ),
 			array( 'pass', 'cache', 'after_inconclusive' ),
 			array( 'pass', 'flaky', 'after_inconclusive' ),
+			array( 'pass', 'slow', 'after_inconclusive' ),
+			array( 'pass', 'suspended', 'after_inconclusive' ),
+			array( 'slow', 'pass', 'before_inconclusive' ),
 			array( 'flaky', 'pass', 'before_inconclusive' ),
 			array( 'redirect', 'redirect', 'redirected_both' ),
 		);

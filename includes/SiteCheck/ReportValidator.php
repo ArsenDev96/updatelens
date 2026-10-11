@@ -28,11 +28,12 @@ defined( 'ABSPATH' ) || exit;
  * - no readable response: `{"kind":"redirect"|"timeout"|"network_error","duration_ms":int}`
  * - homepage response: `kind` "response", `status` (200–599),
  *   `duration_ms`, `header` ("current" | "absent" | "other"),
- *   `end_marker` (the same, or "unread" when the page was too large to
- *   inspect), `retry_after` and `challenge` (booleans).
+ *   `end_marker` (the same, or "unread" when the page was not inspected:
+ *   larger than the browser's limit, or its body not received completely
+ *   within the attempt's time limit), `retry_after` and `challenge` (booleans).
  * - REST response: the same without `end_marker`, plus `body`
  *   ("json_object" | "json_other" | "json_after_output" | "invalid_json" |
- *   "empty" | "unread" when too large to inspect), `user_id` (int, the `id` of a JSON object, else null) and
+ *   "empty" | "unread" when not inspected, as for `end_marker`), `user_id` (int, the `id` of a JSON object, else null) and
  *   `error_code` (the string `code` of a WordPress error object, else null).
  */
 final class ReportValidator {

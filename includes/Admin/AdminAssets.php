@@ -23,7 +23,8 @@ defined( 'ABSPATH' ) || exit;
  *
  * Production builds only: there is no development-server mode, no other origin
  * and no filter that could point the screen elsewhere. The script is an ES
- * module that uses the WordPress-provided `wp.apiFetch` and `wp.i18n`.
+ * module that uses the WordPress-provided React (`React`, `wp.element`),
+ * `wp.apiFetch` and `wp.i18n`; it bundles no copy of React.
  *
  * The same build has a second entry, the update follow-up script, loaded on
  * the WordPress screens that update plugins through `updates.js`.
@@ -51,10 +52,13 @@ final class AdminAssets {
 	const ENTRY = 'src/admin/main.tsx';
 
 	/**
-	 * WordPress-provided script packages the build maps its imports to
-	 * (WP_GLOBALS in vite.config.ts).
+	 * WordPress-provided scripts the build maps its imports to (WP_GLOBALS and
+	 * WP_SCRIPT_HANDLES in vite.config.ts): React itself (`react`, the global
+	 * the classic JSX transform calls), `wp-element` (createRoot; loads
+	 * `react-dom`), `wp-api-fetch` and `wp-i18n`. All are registered since
+	 * WordPress 5.0; `react-jsx-runtime` (6.6+) is deliberately not needed.
 	 */
-	const DEPENDENCIES = array( 'wp-api-fetch', 'wp-i18n' );
+	const DEPENDENCIES = array( 'react', 'wp-element', 'wp-api-fetch', 'wp-i18n' );
 
 	/**
 	 * Script handle of the update follow-up script.

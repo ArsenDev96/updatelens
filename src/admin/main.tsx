@@ -1,5 +1,7 @@
 import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+// WordPress's React (vite.config.ts WP_GLOBALS): wp.element's createRoot is
+// React DOM's, through WordPress's client entry point.
+import { createRoot } from '@wordpress/element';
 
 import App from './App';
 import './index.css';

@@ -37,6 +37,18 @@ final class AdminAssetsTest extends TestCase {
 	}
 
 	/**
+	 * The admin app runs on WordPress's React: it depends on the `react` and
+	 * `wp-element` scripts (with `wp-api-fetch` and `wp-i18n`), all registered
+	 * since WordPress 5.0, and never on `react-jsx-runtime` (registered only
+	 * since 6.6; the minimum is 6.2). tests/admin/build.test.ts checks the
+	 * same list against the globals the build maps its imports to.
+	 */
+	public function test_dependencies_are_wordpress_scripts() {
+		$this->assertSame( array( 'react', 'wp-element', 'wp-api-fetch', 'wp-i18n' ), AdminAssets::DEPENDENCIES );
+		$this->assertNotContains( 'react-jsx-runtime', AdminAssets::DEPENDENCIES );
+	}
+
+	/**
 	 * The built script and its styles, relative to the build directory.
 	 */
 	public function test_entry_files() {

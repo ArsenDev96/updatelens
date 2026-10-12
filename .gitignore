@@ -36,6 +36,9 @@ npm-debug.log*
 .env.*
 !.env.example
 
+# Local session hand-off notes (never part of the plugin)
+/prompt
+
 # Editors / IDEs
 .vscode/*
 !.vscode/extensions.json

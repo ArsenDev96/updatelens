@@ -98,7 +98,9 @@ docs/                    REST API reference, private-beta guide and release chec
 ### How the pieces connect
 
 - PHP renders the admin page shell with a `#updatelens-root` element; React mounts into it.
-- React calls the plugin's REST API through `@wordpress/api-fetch`, which WordPress provides as `wp.apiFetch` with the REST nonce already configured. `@wordpress/i18n` is likewise taken from WordPress (`wp.i18n`) so translations work. React itself is bundled.
+- React calls the plugin's REST API through `@wordpress/api-fetch`, which WordPress provides as `wp.apiFetch` with the REST nonce already configured. `@wordpress/i18n` is likewise taken from WordPress (`wp.i18n`) so translations work.
+- React itself is WordPress's, never bundled (WordPress.org guideline 13). Vite maps `react` to the global `React` and `@wordpress/element` to `wp.element` (`WP_GLOBALS` in `vite.config.ts`); the app script depends on the `react`, `wp-element`, `wp-api-fetch` and `wp-i18n` handles (`AdminAssets::DEPENDENCIES`). The root is created with `wp.element.createRoot()`. JSX uses the classic transform (`React.createElement`): the automatic transform imports `react/jsx-runtime`, whose `react-jsx-runtime` handle exists only since WordPress 6.6 (the minimum is 6.2), and bundling it would ship part of React again.
+- Checking that no second React is bundled: `npm run build` fails if any module of `react`, `react-dom` or `scheduler` reaches the output (`updatelens:no-bundled-react`), and `npm test` (`tests/admin/build.test.ts`) checks the handles against `WP_GLOBALS`, the imported React APIs against React 18.2, and the built bundle's source map (`assets/admin/dist/assets/*.js.map`, not shipped) for packages other than `clsx` and `tailwind-merge`. To inspect sizes per package, run `npx source-map-explorer <bundle>.js <bundle>.js.map` from outside the project.
 - All CSS (including Tailwind's Preflight) is prefixed with `#updatelens-root` at build time, so it cannot restyle the rest of wp-admin. Components that portal outside the root (dialogs, popovers) must be given a container inside it.
 
 ## License

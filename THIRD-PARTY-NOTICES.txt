@@ -9,18 +9,6 @@ reproduced below and applies to each component with its copyright notice.
 Bundled in the admin app (assets/admin/dist/assets/*.js)
 --------------------------------------------------------
 
-React 18.3.1 (react, including react/jsx-runtime)
-  Copyright (c) Facebook, Inc. and its affiliates.
-  https://github.com/facebook/react
-
-React DOM 18.3.1 (react-dom)
-  Copyright (c) Facebook, Inc. and its affiliates.
-  https://github.com/facebook/react
-
-Scheduler 0.23.2 (scheduler, a dependency of react-dom)
-  Copyright (c) Facebook, Inc. and its affiliates.
-  https://github.com/facebook/react
-
 clsx 2.1.1
   Copyright (c) Luke Edwards <luke.edwards05@gmail.com> (lukeed.com)
   https://github.com/lukeed/clsx
@@ -56,8 +44,10 @@ Composer autoloader (vendor/autoload.php, vendor/composer/)
   https://github.com/composer/composer
   Its license is also included as vendor/composer/LICENSE.
 
-Not distributed: WordPress packages such as @wordpress/api-fetch and
-@wordpress/i18n are provided by WordPress itself and are not bundled. Build
+Not distributed: React, React DOM and WordPress packages such as
+@wordpress/element, @wordpress/api-fetch and @wordpress/i18n are provided by
+WordPress itself (its react, wp-element, wp-api-fetch and wp-i18n scripts)
+and are not bundled. Build
 tools (Vite, Babel, Terser, TypeScript and others) are used only to build the
 admin app and are not part of the plugin.
 

@@ -7,16 +7,62 @@ import externals from 'vite-plugin-external';
 
 /**
  * WordPress-provided script packages. Imports of these are mapped to the
- * `wp.*` globals instead of being bundled, so WordPress supplies them (with
- * its REST nonce middleware and loaded translations). Each one must also be
- * listed as a script dependency in includes/Admin/AdminPage.php.
+ * globals WordPress's scripts define instead of being bundled, so WordPress
+ * supplies them (React, its REST nonce middleware, loaded translations).
+ * Each global's script handle (WP_SCRIPT_HANDLES) must also be listed in
+ * Admin\AdminAssets::DEPENDENCIES (tests/admin/build.test.ts checks both).
  *
- * React is intentionally bundled rather than taken from WordPress, so the
- * admin app does not depend on the React version of the host WordPress.
+ * React is WordPress's (`react`: React 18.2 in WordPress 6.2, 18.3 later),
+ * never a second copy. The root is created with `wp.element.createRoot()`,
+ * which loads `react-dom`. JSX uses the classic transform
+ * (`React.createElement`): the automatic one imports `react/jsx-runtime`,
+ * whose script handle (`react-jsx-runtime`) WordPress registers only since
+ * 6.6, and bundling it would ship part of React again.
  */
-const WP_GLOBALS: Record< string, string > = {
+export const WP_GLOBALS: Record< string, string > = {
+	react: 'React',
 	'@wordpress/api-fetch': 'wp.apiFetch',
+	'@wordpress/element': 'wp.element',
 	'@wordpress/i18n': 'wp.i18n',
+};
+
+/**
+ * Script handle that defines each global in WP_GLOBALS.
+ */
+export const WP_SCRIPT_HANDLES: Record< string, string > = {
+	React: 'react',
+	'wp.apiFetch': 'wp-api-fetch',
+	'wp.element': 'wp-element',
+	'wp.i18n': 'wp-i18n',
+};
+
+/**
+ * Packages that must never end up in the build: WordPress provides React
+ * and React DOM (with Scheduler) to every admin screen.
+ */
+export const NEVER_BUNDLED =
+	/[\\/]node_modules[\\/](?:react|react-dom|scheduler)[\\/]/;
+
+const noBundledReact: Plugin = {
+	name: 'updatelens:no-bundled-react',
+	apply: 'build',
+	generateBundle( _options, bundle ) {
+		for ( const output of Object.values( bundle ) ) {
+			if ( output.type !== 'chunk' ) {
+				continue;
+			}
+			const bundled = output.moduleIds.filter( ( id ) =>
+				NEVER_BUNDLED.test( id )
+			);
+			if ( bundled.length ) {
+				this.error(
+					`${ output.fileName } bundles ${ bundled.join(
+						', '
+					) }; use WordPress's React (WP_GLOBALS).`
+				);
+			}
+		}
+	},
 };
 
 const wpExternals: Plugin = {
@@ -48,16 +94,18 @@ export default defineConfig( {
 			outDir: 'assets/admin/dist',
 		} ),
 		wpExternals,
+		noBundledReact,
 		externalGlobals( WP_GLOBALS ),
 		externals( { development: { externals: WP_GLOBALS } } ),
 		react( {
 			// Babel instead of esbuild strips TypeScript and JSX, because esbuild
 			// drops the `translators:` comments that translate.wordpress.org
-			// extracts from the built bundle.
+			// extracts from the built bundle. Classic JSX: see WP_GLOBALS.
+			jsxRuntime: 'classic',
 			babel: {
 				presets: [
 					'@babel/preset-typescript',
-					[ '@babel/preset-react', { runtime: 'automatic' } ],
+					[ '@babel/preset-react', { runtime: 'classic' } ],
 				],
 			},
 		} ),

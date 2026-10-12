@@ -122,13 +122,22 @@ final class UnreadReports {
 	}
 
 	/**
-	 * Remove the origin and every user's watermark. Used on uninstall
-	 * (deactivation keeps them).
+	 * Remove the origin of the current site. Used on uninstall (deactivation
+	 * keeps it).
 	 *
 	 * @return void
 	 */
 	public static function uninstall() {
 		delete_option( self::ORIGIN_OPTION );
+	}
+
+	/**
+	 * Remove every user's watermark (user meta is shared by all sites of a
+	 * network). Used on uninstall (deactivation keeps them).
+	 *
+	 * @return void
+	 */
+	public static function uninstall_users() {
 		delete_metadata( 'user', 0, self::USER_META, '', true );
 	}
 

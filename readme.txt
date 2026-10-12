@@ -58,7 +58,7 @@ What UpdateLens stores:
 
 Deleting a WordPress user does not remove their user ID from UpdateLens's history.
 
-Deactivating UpdateLens keeps all of this. Deleting it from the Plugins screen removes the table, options, transients and user meta listed above (sessions held in a persistent object cache expire on their own within 2 minutes). Multisite is not supported: activating UpdateLens on a network site creates an empty history table and a version option there, and deleting the plugin cleans up only the main site.
+Deactivating UpdateLens keeps all of this. Deleting it from the Plugins screen removes the table, options, transients and user meta listed above (sessions held in a persistent object cache expire on their own within 2 minutes). Multisite is not supported: activating UpdateLens on a network site creates an empty history table and a version option there. Deleting the plugin removes UpdateLens's data from every site of the network.
 
 = Source code and build =
 

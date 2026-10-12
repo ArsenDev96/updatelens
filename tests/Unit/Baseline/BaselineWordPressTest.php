@@ -12,6 +12,7 @@ use RuntimeException;
 use UpdateLens\Baseline\MonitoringBaseline;
 use UpdateLens\Admin\UnreadReports;
 use UpdateLens\Core\Deactivator;
+use UpdateLens\Core\Uninstaller;
 use UpdateLens\Storage\Schema;
 
 /**
@@ -150,6 +151,89 @@ final class BaselineWordPressTest extends TestCase {
 			),
 			$GLOBALS['updatelens_test']['usermeta']
 		);
+	}
+
+	/**
+	 * Multisite: every site's table and options go (also sites without any
+	 * UpdateLens data), other data stays, the user meta is removed once and
+	 * the main site is current again afterwards.
+	 */
+	public function test_uninstall_cleans_every_site_of_a_network() {
+		$GLOBALS['updatelens_test']['multisite']    = true;
+		$GLOBALS['updatelens_test']['sites']        = array( 1, 2, 3 );
+		$GLOBALS['updatelens_test']['options']      = array(
+			Schema::VERSION_OPTION => '7',
+			'blogname'             => 'Main',
+		);
+		$GLOBALS['updatelens_test']['site_options'] = array(
+			2 => array(
+				Schema::VERSION_OPTION       => '7',
+				Schema::RETRY_OPTION         => '1',
+				MonitoringBaseline::OPTION   => '{}',
+				UnreadReports::ORIGIN_OPTION => '0',
+				'updatelens_site_checks'     => 'enabled',
+				'blogname'                   => 'Second',
+			),
+			// Site 3 never had UpdateLens.
+			3 => array( 'blogname' => 'Third' ),
+		);
+		update_user_meta( 1, UnreadReports::USER_META, '7' );
+		update_user_meta( 2, 'updatelens_site_check_starts', '[1]' );
+		update_user_meta( 2, 'unrelated_meta', 'kept' );
+
+		define( 'WP_UNINSTALL_PLUGIN', 'updatelens/updatelens.php' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress core constant.
+		require dirname( __DIR__, 3 ) . '/uninstall.php';
+
+		$this->assertSame( array( 'blogname' => 'Main' ), $GLOBALS['updatelens_test']['options'] );
+		$this->assertSame( array( 'blogname' => 'Second' ), $GLOBALS['updatelens_test']['site_options'][2] );
+		$this->assertSame( array( 'blogname' => 'Third' ), $GLOBALS['updatelens_test']['site_options'][3] );
+		$this->assertSame( 1, $GLOBALS['updatelens_test']['current_site'] );
+		$this->assertSame( 'wp_', $GLOBALS['wpdb']->prefix );
+		$this->assertSame( array(), $GLOBALS['updatelens_test']['switched'] );
+
+		// Each site: its own table, baselines and the activity record, claims and session transients.
+		$queries = array();
+		foreach ( array( 'wp_', 'wp_2_', 'wp_3_' ) as $prefix ) {
+			$queries[] = 'DROP TABLE IF EXISTS ' . $prefix . 'updatelens_analyses';
+			$queries[] = 'DELETE FROM ' . $prefix . 'options WHERE option_name LIKE updatelens\_site\_check\_baseline\_% OR option_name = updatelens_update_activity';
+			$queries[] = 'DELETE FROM ' . $prefix . 'options WHERE option_name LIKE updatelens\_site\_check\_claim\_% OR option_name LIKE \_transient\_updatelens\_sc\_% OR option_name LIKE \_transient\_timeout\_updatelens\_sc\_%';
+		}
+		$this->assertSame( $queries, $GLOBALS['updatelens_test']['queries'] );
+
+		// User meta is shared by the network: removed once, not per site.
+		$this->assertSame( array( UnreadReports::USER_META, 'updatelens_site_check_starts' ), $GLOBALS['updatelens_test']['meta_deletes'] );
+		$this->assertSame(
+			array(
+				1 => array(),
+				2 => array( 'unrelated_meta' => 'kept' ),
+			),
+			$GLOBALS['updatelens_test']['usermeta']
+		);
+	}
+
+	/**
+	 * Large networks are read SITE_BATCH IDs at a time, with the runtime
+	 * cache emptied after each batch.
+	 */
+	public function test_uninstall_reads_large_networks_in_batches() {
+		$GLOBALS['updatelens_test']['multisite'] = true;
+		$GLOBALS['updatelens_test']['sites']     = range( 1, 2 * Uninstaller::SITE_BATCH + 5 );
+
+		define( 'WP_UNINSTALL_PLUGIN', 'updatelens/updatelens.php' ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- WordPress core constant.
+		require dirname( __DIR__, 3 ) . '/uninstall.php';
+
+		$this->assertSame( array( 0, 100, 200 ), array_column( $GLOBALS['updatelens_test']['site_queries'], 'offset' ) );
+		foreach ( $GLOBALS['updatelens_test']['site_queries'] as $query ) {
+			$this->assertSame( 'ids', $query['fields'] );
+			$this->assertSame( Uninstaller::SITE_BATCH, $query['number'] );
+			$this->assertSame( 'id', $query['orderby'] );
+		}
+		$this->assertSame( array( 1, 1, 1 ), $GLOBALS['updatelens_test']['cache_flushes'] );
+
+		$drops = preg_grep( '/^DROP TABLE/', $GLOBALS['updatelens_test']['queries'] );
+		$this->assertCount( 205, $drops );
+		$this->assertSame( 'DROP TABLE IF EXISTS wp_205_updatelens_analyses', end( $drops ) );
+		$this->assertCount( 2, $GLOBALS['updatelens_test']['meta_deletes'] );
 	}
 
 	/**

@@ -30,7 +30,7 @@ Project status (version 0.2.0, schema 7, both unchanged since the 0.2.0 work): S
 - Prefer standard WordPress APIs (`register_rest_route`, `$wpdb`, `dbDelta`, options, transients, `wp_*` functions) over custom framework layers. No ORM.
 - `Core\Plugin` is a thin composition root: it wires hooks and delegates. Keep it small.
 - Namespace layout (`UpdateLens\`, PSR-4 from `includes/`):
-  - `Core/` – bootstrap, activation, deactivation
+  - `Core/` – bootstrap, activation, deactivation, uninstall (`Uninstaller`, called by `uninstall.php`: on Multisite every site of every network, read `SITE_BATCH` IDs at a time with `switch_to_blog()`; user meta once)
   - `Admin/` – wp-admin screens, asset loading and the menu count of new reports (`UnreadReports`)
   - `Rest/` – REST controllers
   - `Snapshot/` – capture safe state; `Diff/` – compare snapshots

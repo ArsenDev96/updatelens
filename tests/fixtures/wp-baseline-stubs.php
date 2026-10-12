@@ -12,18 +12,21 @@
 define( 'UPDATELENS_FILE', '/srv/wp-content/plugins/updatelens/updatelens.php' );
 
 $GLOBALS['updatelens_test'] = array(
-	'options'  => array(),
-	'autoload' => array(),
-	'plugins'  => array(),
-	'active'   => array(),
-	'caps'     => array( 'manage_options' ),
-	'queries'  => array(),
-	'routes'   => array(),
-	'usermeta' => array(),
-	'filters'  => array(),
+	'options'      => array(),
+	'autoload'     => array(),
+	'plugins'      => array(),
+	'active'       => array(),
+	'caps'         => array( 'manage_options' ),
+	'queries'      => array(),
+	'routes'       => array(),
+	'usermeta'     => array(),
+	'filters'      => array(),
 	// Option names whose update_option() fails like a database error.
-	'failing'  => array(),
-	'writes'   => 0,
+	'failing'      => array(),
+	'writes'       => 0,
+	'sites'        => array(),
+	// Current site (Multisite stand-ins).
+	'current_site' => 1,
 );
 
 function get_option( $name, $default_value = false ) {
@@ -79,6 +82,7 @@ function update_user_meta( $user_id, $key, $value ) {
 }
 
 function delete_metadata( $meta_type, $object_id, $meta_key, $meta_value = '', $delete_all = false ) {
+	$GLOBALS['updatelens_test']['meta_deletes'][] = $meta_key;
 	foreach ( $GLOBALS['updatelens_test']['usermeta'] as $user_id => $meta ) {
 		if ( $delete_all || (int) $user_id === (int) $object_id ) {
 			unset( $GLOBALS['updatelens_test']['usermeta'][ $user_id ][ $meta_key ] );
@@ -118,6 +122,50 @@ function rest_authorization_required_code() {
 
 function is_multisite() {
 	return ! empty( $GLOBALS['updatelens_test']['multisite'] );
+}
+
+// Multisite: the site IDs in `sites`; each site's options live in
+// `site_options` while another site is current.
+function get_sites( $args = array() ) {
+	$GLOBALS['updatelens_test']['site_queries'][] = $args;
+
+	return array_slice( $GLOBALS['updatelens_test']['sites'], $args['offset'], $args['number'] );
+}
+
+function switch_to_blog( $site_id ) {
+	global $wpdb;
+
+	$GLOBALS['updatelens_test']['switched'][] = array( $GLOBALS['updatelens_test']['current_site'], $wpdb->prefix );
+	$GLOBALS['updatelens_test']['site_options'][ $GLOBALS['updatelens_test']['current_site'] ] = $GLOBALS['updatelens_test']['options'];
+	$GLOBALS['updatelens_test']['options']      = $GLOBALS['updatelens_test']['site_options'][ $site_id ] ?? array();
+	$GLOBALS['updatelens_test']['current_site'] = $site_id;
+	$wpdb->prefix                               = 1 === $site_id ? 'wp_' : 'wp_' . $site_id . '_';
+	$wpdb->options                              = $wpdb->prefix . 'options';
+
+	return true;
+}
+
+function restore_current_blog() {
+	global $wpdb;
+
+	list( $site_id, $prefix ) = array_pop( $GLOBALS['updatelens_test']['switched'] );
+	$GLOBALS['updatelens_test']['site_options'][ $GLOBALS['updatelens_test']['current_site'] ] = $GLOBALS['updatelens_test']['options'];
+	$GLOBALS['updatelens_test']['options']      = $GLOBALS['updatelens_test']['site_options'][ $site_id ];
+	$GLOBALS['updatelens_test']['current_site'] = $site_id;
+	$wpdb->prefix                               = $prefix;
+	$wpdb->options                              = $prefix . 'options';
+
+	return true;
+}
+
+function wp_cache_supports( $feature ) {
+	return 'flush_runtime' === $feature;
+}
+
+function wp_cache_flush_runtime() {
+	$GLOBALS['updatelens_test']['cache_flushes'][] = $GLOBALS['updatelens_test']['current_site'];
+
+	return true;
 }
 
 function register_rest_route( $route_namespace, $route, $args = array() ) {

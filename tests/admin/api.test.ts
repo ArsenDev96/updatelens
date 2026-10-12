@@ -70,6 +70,8 @@ describe( 'toApiError', () => {
 		[ new Response( null, { status: 403 } ), 'forbidden' ],
 		[ new Response( null, { status: 404 } ), 'not_found' ],
 		[ restError( 'updatelens_reports_unavailable', 500 ), 'failed' ],
+		[ restError( 'updatelens_report_too_large', 500 ), 'too_large' ],
+		[ new Response( null, { status: 500 } ), 'failed' ],
 		[ { code: 'fetch_error', message: 'offline' }, 'failed' ],
 		[ 'boom', 'failed' ],
 		[ null, 'failed' ],

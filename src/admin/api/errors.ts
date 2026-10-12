@@ -1,7 +1,7 @@
 /**
  * Kinds of failure the UI distinguishes. Server messages are never shown.
  */
-export type ApiErrorKind = 'not_found' | 'forbidden' | 'failed';
+export type ApiErrorKind = 'not_found' | 'forbidden' | 'too_large' | 'failed';
 
 export class ApiError extends Error {
 	readonly kind: ApiErrorKind;
@@ -58,6 +58,11 @@ export function toApiError( error: unknown ): ApiError {
 	}
 	if ( status === 401 || status === 403 || code === 'rest_forbidden' ) {
 		return new ApiError( 'forbidden', status );
+	}
+	// A report whose stored details would not fit in the memory a request may
+	// use (`ReportTooLargeException`): retrying does not help.
+	if ( code === 'updatelens_report_too_large' ) {
+		return new ApiError( 'too_large', status );
 	}
 	return new ApiError( 'failed', status );
 }

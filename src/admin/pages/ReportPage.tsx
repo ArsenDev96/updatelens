@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 import { getAnalysis } from '../api/analyses';
+import type { ApiError } from '../api/errors';
 import { AppLink } from '../components/AppLink';
 import {
 	findingListKind,
@@ -29,6 +30,7 @@ import { Versions } from '../components/Versions';
 import { Icon, type IconName } from '../components/Icon';
 import {
 	usePendingRefresh,
+	type ManualRefresh,
 	type PendingRefresh,
 } from '../hooks/use-pending-refresh';
 import { useRequest } from '../hooks/use-request';
@@ -48,6 +50,7 @@ import {
 	phaseNote,
 	providerLabel,
 	reportNotice,
+	reportTooLargeText,
 	settleOutcomeText,
 	type ReportNotice,
 	type Tone,
@@ -83,10 +86,10 @@ export function ReportPage( {
 	const load = useCallback( () => getAnalysis( id ), [ id ] );
 	const [ request, reload ] = useRequest( load );
 	const history: Route = { view: 'history', page: route.page };
-	// A newer report read in the background while results were pending. It
-	// replaces the loaded one in place (the report stays mounted, so the
-	// selected phase, expanded findings and focus are kept), and only for
-	// the load it was read for.
+	// A newer report read in the background while results were pending, or by
+	// Refresh. It replaces the loaded one in place (the report stays mounted,
+	// so the selected phase, expanded findings and focus are kept), and only
+	// for the load it was read for.
 	const loaded = request.status === 'ready' ? request.data : null;
 	const [ latest, setLatest ] = useState< {
 		base: AnalysisReport;
@@ -132,10 +135,19 @@ export function ReportPage( {
 					route={ route }
 					href={ href }
 					onNavigate={ onNavigate }
-					onRefresh={ reload }
+					refresh={ refresh.manual }
 					pendingRefresh={ refresh }
 					focusHeading={ focusHeading }
 				/>
+			) }
+			{ report !== null && refresh.manual.status !== 'idle' && (
+				// Present from the first Refresh on, so its result is announced.
+				<p role="status" className="sr-only">
+					{ refresh.manual.status === 'refreshing' &&
+						__( 'Refreshing report…', 'updatelens' ) }
+					{ refresh.manual.status === 'done' &&
+						__( 'Report refreshed.', 'updatelens' ) }
+				</p>
 			) }
 		</div>
 	);
@@ -146,16 +158,39 @@ function Report( {
 	route,
 	href,
 	onNavigate,
-	onRefresh,
+	refresh,
 	pendingRefresh,
 	focusHeading,
 }: Omit< ReportPageProps, 'route' > & {
 	report: AnalysisReport;
 	route: ReportRoute;
-	onRefresh: () => void;
+	refresh: ManualRefresh;
 	pendingRefresh: PendingRefresh;
 } ) {
 	const heading = useRef< HTMLHeadingElement >( null );
+	// An open, failed, expired or otherwise incomplete analysis explains the
+	// results (and offers Refresh while open) before them. A completed one
+	// needs no status line: the header badge says so, and how the observation
+	// ended is in the technical details.
+	const notice = reportNotice( report );
+	const showStatus = notice.open || notice.tone !== 'positive';
+	// A refresh that completes the analysis removes the status line with its
+	// button: if it had focus, focus moves to the title instead of being lost.
+	const statusFocused = useRef( false );
+	useEffect( () => {
+		if ( ! showStatus && statusFocused.current ) {
+			statusFocused.current = false;
+			if (
+				document.activeElement === null ||
+				document.activeElement === document.body
+			) {
+				heading.current?.focus();
+			}
+		}
+	}, [ showStatus ] );
+	const onStatusFocus = () => {
+		statusFocused.current = true;
+	};
 	// Counts come from the summaries only; computed once per loaded report.
 	const counts = useMemo(
 		() => reportChangeCounts( report.phases ),
@@ -249,18 +284,13 @@ function Report( {
 				href={ href }
 				onNavigate={ onNavigate }
 				onSelectPhase={ selectPhase }
-				onRefresh={ onRefresh }
+				notice={ showStatus ? notice : null }
+				refresh={ refresh }
+				onStatusFocus={ onStatusFocus }
 				onClearItem={ () => onNavigate( at( { item: null } ), true ) }
 			/>
 		);
 	}
-
-	// An open, failed, expired or otherwise incomplete analysis explains the
-	// results (and offers Refresh) before them. A completed one needs no
-	// status section: the header badge says so, and how the observation ended
-	// is in the technical details.
-	const notice = reportNotice( report );
-	const showStatus = notice.open || notice.tone !== 'positive';
 
 	return (
 		<article
@@ -269,7 +299,11 @@ function Report( {
 		>
 			<ReportHeader report={ report } heading={ heading } />
 			{ showStatus && (
-				<StatusLine notice={ notice } onRefresh={ onRefresh } />
+				<StatusLine
+					notice={ notice }
+					refresh={ refresh }
+					onFocus={ onStatusFocus }
+				/>
 			) }
 			{ selected && (
 				<PhaseTabs
@@ -342,7 +376,9 @@ function Report( {
  * @param props.href          Link target of a route.
  * @param props.onNavigate    In-app navigation.
  * @param props.onSelectPhase Selects a phase (keeps the signal).
- * @param props.onRefresh     Reloads the report (open analyses).
+ * @param props.notice        Status line, if shown.
+ * @param props.refresh       Refresh of the report (open analyses).
+ * @param props.onStatusFocus Notes that focus is in the status line.
  * @param props.onClearItem   Removes the located item from the URL.
  */
 function RefinedSignalView( {
@@ -357,7 +393,9 @@ function RefinedSignalView( {
 	href,
 	onNavigate,
 	onSelectPhase,
-	onRefresh,
+	notice,
+	refresh,
+	onStatusFocus,
 	onClearItem,
 }: {
 	report: AnalysisReport;
@@ -371,10 +409,11 @@ function RefinedSignalView( {
 	href: ( route: Route ) => string;
 	onNavigate: ( route: Route, replace?: boolean ) => void;
 	onSelectPhase: ( phase: PhaseKey ) => void;
-	onRefresh: () => void;
+	notice: ReportNotice | null;
+	refresh: ManualRefresh;
+	onStatusFocus: () => void;
 	onClearItem: () => void;
 } ) {
-	const notice = reportNotice( report );
 	const located = useMemo(
 		() => ( item === null ? null : locate( report, signal, item ) ),
 		[ report, signal, item ]
@@ -451,8 +490,12 @@ function RefinedSignalView( {
 						</p>
 					</div>
 				</header>
-				{ ( notice.open || notice.tone !== 'positive' ) && (
-					<StatusLine notice={ notice } onRefresh={ onRefresh } />
+				{ notice && (
+					<StatusLine
+						notice={ notice }
+						refresh={ refresh }
+						onFocus={ onStatusFocus }
+					/>
 				) }
 				{ located && (
 					<LocatedItem
@@ -660,23 +703,30 @@ function ReportHeader( {
 }
 
 /**
- * The analysis status on the overview: one restrained line with an icon,
- * and Refresh while the analysis is open.
+ * The analysis status: one restrained line with an icon, and Refresh while
+ * the analysis is open. Refresh reads the report again in place; while it
+ * runs the button stays focusable (`aria-disabled`), and a failure is
+ * reported here while the report shown stays.
  *
- * @param props           Props.
- * @param props.notice    Report notice.
- * @param props.onRefresh Reloads the report (open analyses).
+ * @param props         Props.
+ * @param props.notice  Report notice.
+ * @param props.refresh Refresh of the report (open analyses).
+ * @param props.onFocus Notes that focus is inside.
  */
 function StatusLine( {
 	notice,
-	onRefresh,
+	refresh,
+	onFocus,
 }: {
 	notice: ReportNotice;
-	onRefresh: () => void;
+	refresh: ManualRefresh;
+	onFocus: () => void;
 } ) {
+	const refreshing = refresh.status === 'refreshing';
 	return (
 		<section
 			aria-label={ __( 'Analysis status', 'updatelens' ) }
+			onFocus={ onFocus }
 			className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border bg-card/70 px-4 py-3"
 		>
 			<div className="flex min-w-0 flex-1 basis-64 gap-3">
@@ -697,12 +747,52 @@ function StatusLine( {
 				</div>
 			</div>
 			{ notice.open && (
-				<Button variant="outline" onClick={ onRefresh }>
-					<Icon name="progress" className="size-4" />
-					{ __( 'Refresh', 'updatelens' ) }
+				<Button
+					variant="outline"
+					aria-disabled={ refreshing }
+					onClick={ () => {
+						if ( ! refreshing ) {
+							refresh.refresh();
+						}
+					} }
+				>
+					<Icon
+						name="progress"
+						className={ cn(
+							'size-4',
+							refreshing && 'motion-safe:animate-spin'
+						) }
+					/>
+					{ refreshing
+						? __( 'Refreshing…', 'updatelens' )
+						: __( 'Refresh', 'updatelens' ) }
 				</Button>
 			) }
+			{ refresh.status === 'failed' && refresh.error && (
+				<p
+					role="alert"
+					className="basis-full text-sm font-medium leading-relaxed text-slate-800"
+				>
+					{ refreshErrorText( refresh.error ) }
+				</p>
+			) }
 		</section>
+	);
+}
+
+/**
+ * Why Refresh failed, in fixed words (never the server's message). The
+ * report shown is the one loaded before.
+ *
+ * @param error Failure.
+ */
+function refreshErrorText( error: ApiError ): string {
+	if ( error.kind === 'too_large' ) {
+		return reportTooLargeText();
+	}
+	return __(
+		"The report couldn't be refreshed. The details shown may be out of date. Try again.",
+		'updatelens'
 	);
 }
 

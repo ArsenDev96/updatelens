@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getAnalysis } from '../api/analyses';
+import { toApiError, type ApiError } from '../api/errors';
 import type { AnalysisReport } from '../types/api';
 
 /** Delay between two background reads while results are pending. */
@@ -25,11 +26,28 @@ export type PendingRefreshState = 'off' | 'auto' | 'stopped';
 
 export interface PendingRefresh {
 	state: PendingRefreshState;
-	/** A read is in flight. */
+	/** A read is in flight (a background read or a manual refresh). */
 	checking: boolean;
 	/** Reads now and starts a new run. */
 	refreshNow: () => void;
 }
+
+/**
+ * The report's Refresh button: `idle` until first used, then `refreshing`,
+ * `done` or `failed` (with the error) for the latest refresh.
+ */
+export interface ManualRefresh {
+	status: 'idle' | 'refreshing' | 'done' | 'failed';
+	error: ApiError | null;
+	/** Reads the report again; ignored while a refresh is running. */
+	refresh: () => void;
+}
+
+export interface ReportRefresh extends PendingRefresh {
+	manual: ManualRefresh;
+}
+
+const ignore = () => {};
 
 /**
  * Whether a report has results that can still arrive: the API says a site
@@ -45,15 +63,21 @@ export function hasPendingResults( report: AnalysisReport ): boolean {
 }
 
 /**
- * Re-reads a report through the existing analysis API while it has pending
- * results, so an open report shows them when they arrive.
+ * Re-reads a report through the existing analysis API, in place: in the
+ * background while it has pending results, so an open report shows them
+ * when they arrive, and when the administrator asks for it (`manual`).
  *
- * Bounded: one read at a time, every PENDING_REFRESH_INTERVAL_MS, none while
- * the document is hidden (the next read runs when it is visible again), and
- * the run stops when nothing is pending any more, the view unmounts, the
- * report changes, after PENDING_REFRESH_MAX_REQUESTS reads or after
- * PENDING_REFRESH_MAX_FAILURES failed reads in a row. Failed reads keep the
- * current report and are not shown.
+ * Background reads are bounded: one read at a time, every
+ * PENDING_REFRESH_INTERVAL_MS, none while the document is hidden (the next
+ * read runs when it is visible again), and the run stops when nothing is
+ * pending any more, the view unmounts, the report changes, after
+ * PENDING_REFRESH_MAX_REQUESTS reads or after PENDING_REFRESH_MAX_FAILURES
+ * failed reads in a row. Failed background reads keep the current report and
+ * are not shown; a failed manual refresh keeps it too and reports its error.
+ *
+ * Reads never overlap: a manual refresh waits for a background read in
+ * flight and then reads, and the background waits a full interval after a
+ * manual read.
  *
  * @param id       Analysis ID.
  * @param report   Current report, null while loading.
@@ -63,20 +87,49 @@ export function usePendingRefresh(
 	id: number,
 	report: AnalysisReport | null,
 	onUpdate: ( report: AnalysisReport ) => void
-): PendingRefresh {
+): ReportRefresh {
 	const pending = report !== null && hasPendingResults( report );
 	const [ run, setRun ] = useState( 0 );
 	const [ stopped, setStopped ] = useState< {
 		id: number;
 		run: number;
 	} | null >( null );
-	const [ checking, setChecking ] = useState( false );
+	const [ reads, setReads ] = useState( 0 );
+	const [ manual, setManual ] = useState< {
+		status: ManualRefresh[ 'status' ];
+		error: ApiError | null;
+	} >( { status: 'idle', error: null } );
 	const update = useRef( onUpdate );
 	const immediate = useRef( false );
+	// The read in flight, background or manual.
+	const busy = useRef< Promise< AnalysisReport > | null >( null );
+	const manualRunning = useRef( false );
+	const mounted = useRef( true );
 
 	useEffect( () => {
 		update.current = onUpdate;
 	} );
+
+	useEffect( () => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, [] );
+
+	const read = useCallback( () => {
+		const next = getAnalysis( id );
+		busy.current = next;
+		setReads( ( n ) => n + 1 );
+		const done = () => {
+			if ( busy.current === next ) {
+				busy.current = null;
+			}
+			setReads( ( n ) => n - 1 );
+		};
+		next.then( done, done );
+		return next;
+	}, [ id ] );
 
 	useEffect( () => {
 		if ( ! pending ) {
@@ -101,9 +154,18 @@ export function usePendingRefresh(
 				deferred = true;
 				return;
 			}
+			// A manual refresh is reading: it is this read; the next one
+			// follows a full interval after it.
+			if ( busy.current !== null ) {
+				busy.current.then( ignore, ignore ).then( () => {
+					if ( active && timer === undefined ) {
+						schedule( PENDING_REFRESH_INTERVAL_MS );
+					}
+				} );
+				return;
+			}
 			inFlight = true;
-			setChecking( true );
-			getAnalysis( id )
+			read()
 				.then(
 					( next ) => {
 						failures = 0;
@@ -118,7 +180,6 @@ export function usePendingRefresh(
 				.finally( () => {
 					inFlight = false;
 					requests++;
-					setChecking( false );
 					if ( ! active ) {
 						return;
 					}
@@ -150,12 +211,43 @@ export function usePendingRefresh(
 			window.clearTimeout( timer );
 			document.removeEventListener( 'visibilitychange', onVisibility );
 		};
-	}, [ id, pending, run ] );
+	}, [ id, pending, run, read ] );
 
 	const refreshNow = useCallback( () => {
 		immediate.current = true;
 		setRun( ( n ) => n + 1 );
 	}, [] );
+
+	const refresh = useCallback( () => {
+		if ( manualRunning.current ) {
+			return;
+		}
+		manualRunning.current = true;
+		setManual( { status: 'refreshing', error: null } );
+		// After a background read in flight, never alongside it.
+		( busy.current ?? Promise.resolve( null ) )
+			.then( ignore, ignore )
+			.then( read )
+			.then(
+				( next ) => {
+					if ( mounted.current ) {
+						update.current( next );
+						setManual( { status: 'done', error: null } );
+					}
+				},
+				( error: unknown ) => {
+					if ( mounted.current ) {
+						setManual( {
+							status: 'failed',
+							error: toApiError( error ),
+						} );
+					}
+				}
+			)
+			.finally( () => {
+				manualRunning.current = false;
+			} );
+	}, [ read ] );
 
 	let state: PendingRefreshState = 'off';
 	if ( pending ) {
@@ -165,5 +257,10 @@ export function usePendingRefresh(
 				: 'auto';
 	}
 
-	return { state, checking: pending && checking, refreshNow };
+	return {
+		state,
+		checking: pending && reads > 0,
+		refreshNow,
+		manual: { ...manual, refresh },
+	};
 }

@@ -101,6 +101,17 @@ export const PHASE_KEYS: PhaseKey[] = [
 	'final',
 ];
 
+/**
+ * A report refused because loading it would exceed the request's memory
+ * budget (`updatelens_report_too_large`). Retrying does not help.
+ */
+export function reportTooLargeText(): string {
+	return __(
+		"This report is too large to load with the site's current PHP memory limit. The analysis is still stored, but its details cannot be displayed.",
+		'updatelens'
+	);
+}
+
 export function phaseLabel( phase: PhaseKey ): string {
 	switch ( phase ) {
 		case 'during_update':

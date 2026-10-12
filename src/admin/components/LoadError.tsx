@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 
 import type { ApiError } from '../api/errors';
+import { reportTooLargeText } from '../utils/labels';
 
 interface LoadErrorProps {
 	error: ApiError;
@@ -38,6 +39,8 @@ export function LoadError( {
 			);
 	} else if ( error.kind === 'not_found' ) {
 		text = __( 'This analysis no longer exists.', 'updatelens' );
+	} else if ( error.kind === 'too_large' ) {
+		text = reportTooLargeText();
 	}
 
 	return (

@@ -35,8 +35,9 @@ interface SessionStore {
 	public function put( $key, $value, $ttl );
 
 	/**
-	 * Remove a value; true only for the one caller that removed it, so
-	 * concurrent claims of one entry have a single winner.
+	 * Use a value up and remove it; true only for the one caller that
+	 * claimed it, ever, so concurrent and repeated claims of one entry have
+	 * a single winner. A failed claim is false.
 	 *
 	 * @param string $key Key.
 	 * @return bool

@@ -27,9 +27,9 @@ defined( 'ABSPATH' ) || exit;
  *    look the session up (read-only). Only a live session of that check
  *    turns on the verification marker.
  * 3. report(): the owner's browser submits the attempts once, with the
- *    secret. The session is claimed (removed) before the result is built,
- *    so replays and concurrent submissions are rejected; an invalid report
- *    does not use the session up.
+ *    secret. The session is claimed (used up and removed, SessionStore)
+ *    before the result is built, so replays and concurrent submissions are
+ *    rejected; an invalid report does not use the session up.
  *
  * Any storage problem (eviction, unreadable record, failed write) makes a
  * session unavailable: no marker, no accepted result, never a pass.

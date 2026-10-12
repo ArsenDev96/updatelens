@@ -1,5 +1,7 @@
 # UpdateLens Private Beta 2
 
+> Historical: this guide describes Beta 2. It predates site checks, the Settings screen and the current menu; for what UpdateLens stores today and what deleting it removes, see "Privacy and stored data" in `readme.txt`.
+
 Version `0.2.0-beta.2`. Thank you for trying UpdateLens before its first release.
 
 UpdateLens observes what changes around WordPress plugin updates. When you update one plugin from wp-admin, it records which **options** (including autoload state and size), which **WP-Cron events** and which **Action Scheduler actions** changed, and shows a report under **Tools → UpdateLens**.

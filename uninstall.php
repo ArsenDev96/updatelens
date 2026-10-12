@@ -2,11 +2,18 @@
 /**
  * Uninstall handler.
  *
- * Runs when the plugin is deleted from the Plugins screen: drops the analyses
- * table and removes the schema version and monitoring baseline options,
- * the site check opt-in, the per-user site check start times and the site
- * check baselines and session claims. Site check sessions are transients
- * that expire within two minutes. Deactivation keeps all of them.
+ * Runs when the plugin is deleted from the Plugins screen. Removes, for the
+ * site it runs on: the analyses table; the options `updatelens_db_version`,
+ * `updatelens_db_upgrade_retry_at`, `updatelens_monitoring_baseline`,
+ * `updatelens_unread_origin_id`, `updatelens_site_checks` and
+ * `updatelens_update_activity`; the site check baselines and session claims;
+ * site check session transients left in the options table. For every user:
+ * the user meta `updatelens_last_seen_analysis_id` and
+ * `updatelens_site_check_starts`. Deactivation keeps all of them.
+ *
+ * Multisite: only the table and schema version of the site it runs on (the
+ * main site) are removed; sites where UpdateLens was activated individually
+ * keep theirs (an analyses table that Multisite never fills).
  *
  * @package UpdateLens
  */

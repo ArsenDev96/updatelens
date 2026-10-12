@@ -136,8 +136,8 @@ final class BaselineWordPressTest extends TestCase {
 				'DROP TABLE IF EXISTS wp_updatelens_analyses',
 				// Site check baselines: UpdateLens's own option rows only.
 				'DELETE FROM wp_options WHERE option_name LIKE updatelens\_site\_check\_baseline\_% OR option_name = updatelens_update_activity',
-				// Site check session claims.
-				'DELETE FROM wp_options WHERE option_name LIKE updatelens\_site\_check\_claim\_%',
+				// Site check session claims and session transients left in the table.
+				'DELETE FROM wp_options WHERE option_name LIKE updatelens\_site\_check\_claim\_% OR option_name LIKE \_transient\_updatelens\_sc\_% OR option_name LIKE \_transient\_timeout\_updatelens\_sc\_%',
 			),
 			$GLOBALS['updatelens_test']['queries']
 		);

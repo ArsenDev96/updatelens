@@ -69,7 +69,7 @@ COMPOSER_BIN="docker run --rm -v $PWD/release/updatelens:/app -w /app composer c
 
 ```text
 updatelens.php           Plugin header, constants, autoloader, activation hooks
-uninstall.php            Data cleanup on plugin deletion (analyses table, options incl. the monitoring baseline)
+uninstall.php            Data cleanup on plugin deletion (analyses table, options, session transients, user meta; see readme.txt)
 includes/                PHP, PSR-4 namespace UpdateLens\
   Core/                  Plugin (hook wiring), Activator, Deactivator
   Admin/                 Top-level UpdateLens screen (admin.php?page=updatelens) and the production asset loader

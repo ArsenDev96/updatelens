@@ -121,7 +121,10 @@ final class TransientSessionStore implements SessionStore {
 	}
 
 	/**
-	 * Remove every claim row. Used on uninstall.
+	 * Remove every claim row and every session transient left in the options
+	 * table (an expired transient stays there until WordPress's daily
+	 * cleanup; with a persistent object cache sessions are not in the table
+	 * and expire within CheckSession::TTL). Used on uninstall.
 	 *
 	 * @return void
 	 */
@@ -129,6 +132,6 @@ final class TransientSessionStore implements SessionStore {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- UpdateLens's own rows, never cached.
-		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE option_name LIKE %s', $wpdb->options, $wpdb->esc_like( self::CLAIM_PREFIX ) . '%' ) );
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s', $wpdb->options, $wpdb->esc_like( self::CLAIM_PREFIX ) . '%', $wpdb->esc_like( '_transient_' . CheckSession::STORAGE_PREFIX ) . '%', $wpdb->esc_like( '_transient_timeout_' . CheckSession::STORAGE_PREFIX ) . '%' ) );
 	}
 }

@@ -125,7 +125,8 @@ final class TransientSessionStoreTest extends TestCase {
 	}
 
 	/**
-	 * Sessions stay transients; uninstall removes every claim row.
+	 * Sessions stay transients; uninstall removes every claim row and the
+	 * session transients left in the options table, nothing else.
 	 */
 	public function test_transients_and_uninstall() {
 		$store = $this->store();
@@ -141,7 +142,7 @@ final class TransientSessionStoreTest extends TestCase {
 			$GLOBALS['updatelens_test_transient_calls']
 		);
 		$this->assertSame(
-			array( array( 'DELETE FROM %i WHERE option_name LIKE %s', array( 'wp_options', 'updatelens\_site\_check\_claim\_%' ) ) ),
+			array( array( 'DELETE FROM %i WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s', array( 'wp_options', 'updatelens\_site\_check\_claim\_%', '\_transient\_updatelens\_sc\_%', '\_transient\_timeout\_updatelens\_sc\_%' ) ) ),
 			$this->wpdb->prepared
 		);
 	}

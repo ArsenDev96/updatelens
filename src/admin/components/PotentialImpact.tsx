@@ -761,7 +761,7 @@ function FindingGroupItem( {
 					{ more > 0 && (
 						<span>
 							{ sprintf(
-								/* translators: %s: number of further option names or hooks. */
+								/* translators: %s: number of further items (option names, hooks or instances). */
 								_n(
 									'and %s more',
 									'and %s more',
@@ -1488,7 +1488,7 @@ function CronInstances( {
 			{ instances.length > shown.length && (
 				<span className="block text-muted-foreground">
 					{ sprintf(
-						/* translators: %s: number of further instances. */
+						/* translators: %s: number of further items (option names, hooks or instances). */
 						_n(
 							'and %s more',
 							'and %s more',

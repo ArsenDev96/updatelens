@@ -2,11 +2,11 @@
 
 Maintainer notes for packaging and running UpdateLens private betas. The tester-facing guide is [private-beta.md](private-beta.md).
 
-## WordPress.org releases (0.2.0 and later)
+## WordPress.org releases (0.3.0 and later)
 
 The private-beta notes below still apply to packaging and testing. For a WordPress.org release, additionally:
 
-- Use a plain `X.Y.Z` version (the Stable tag may contain only numbers and periods). `0.2.0` sorts above `0.2.0-beta.2`, so beta sites can upgrade.
+- Use a plain `X.Y.Z` version (the Stable tag may contain only numbers and periods). `0.3.0`, the first public release, sorts above the `0.2.0-beta.N` builds, so beta sites can upgrade.
 - Run the official Plugin Check plugin against the exact release ZIP on a native, disposable WordPress site (all categories). Do not rely on WordPress Playground for this: its PHPCS checks can fail silently and report a false "No errors found". Plugin Repo errors block submission.
 - Validate `readme.txt` with the official readme validator (https://wordpress.org/plugins/developers/readme-validator/).
 - The release runtime loads only the production build; the dev-server helper in `dev/` and generated `languages/` files are never shipped. Third-party code that ships is listed in `THIRD-PARTY-NOTICES.txt`; update it when dependencies change.
@@ -68,7 +68,7 @@ Beta 2 (`0.2.0-beta.2`) was exercised on:
 | —         | 7.4    | —         | Unit tests, PHPCS (PHPCompatibilityWP 7.4+), `php -l`; no WordPress runtime                                                                                                                                                                                                             |
 | —         | 8.4.26 | —         | `php -l`                                                                                                                                                                                                                                                                                |
 
-Known tooling issue (not a product bug): `npm run i18n` does not extract the admin app's strings from the TypeScript sources, so `languages/updatelens.pot` misses them. Strings are wrapped for translation; only extraction is affected.
+`npm run i18n` extracts the admin app's strings from the built bundle (not the TypeScript sources, which it excludes), like translate.wordpress.org; it needs WP-CLI as `wp`. It must finish without warnings: a string used with two different `translators:` comments is reported and only one comment survives.
 
 PHP 8.4 deprecated implicitly nullable parameters (`callable $x = null`). They emit a deprecation notice whenever the class is loaded (on every request with `WP_DEBUG`), so always write `?callable $x = null`. Check with `php -l` on the newest PHP: compile-time deprecations show up there.
 

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       UpdateLens
  * Description:       Observe what changes around WordPress plugin updates, including options, autoload data, WP-Cron events and Action Scheduler actions.
- * Version:           0.2.0
+ * Version:           0.3.0
  * Requires at least: 6.2
  * Requires PHP:      7.4
  * Author:            Arsen Manukyan
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'UPDATELENS_VERSION', '0.2.0' );
+define( 'UPDATELENS_VERSION', '0.3.0' );
 define( 'UPDATELENS_FILE', __FILE__ );
 define( 'UPDATELENS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'UPDATELENS_URL', plugin_dir_url( __FILE__ ) );

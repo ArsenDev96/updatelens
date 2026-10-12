@@ -147,6 +147,22 @@ final class FrontendMarker {
 	}
 
 	/**
+	 * Mark the current admin-ajax response `no-store, private` (UpdateLens's
+	 * Ajax endpoints: their responses carry sessions, markers or the state of
+	 * this user's analyses). admin-ajax sends its no-cache headers again when
+	 * the response ends; the filter keeps no-store, private there (WordPress
+	 * before 6.8 omits both).
+	 *
+	 * @return void
+	 */
+	public static function send_no_store() {
+		add_filter( 'nocache_headers', array( self::class, 'no_store_headers' ) );
+		if ( ! headers_sent() ) {
+			header( 'Cache-Control: ' . self::CACHE_CONTROL );
+		}
+	}
+
+	/**
 	 * `nocache_headers` filter for site check responses: WordPress 6.2's
 	 * no-cache headers lack `no-store, private`, and WordPress may send them
 	 * again after UpdateLens has (the Ajax die handler, the REST server).

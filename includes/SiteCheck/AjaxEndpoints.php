@@ -392,12 +392,7 @@ final class AjaxEndpoints {
 	 * @return string Login-session fingerprint.
 	 */
 	private function authorize() {
-		// admin-ajax sends no-cache headers again when the response ends; the
-		// filter keeps no-store, private there (WordPress 6.2 omits both).
-		add_filter( 'nocache_headers', array( FrontendMarker::class, 'no_store_headers' ) );
-		if ( ! headers_sent() ) {
-			header( 'Cache-Control: ' . FrontendMarker::CACHE_CONTROL );
-		}
+		FrontendMarker::send_no_store();
 		if ( false === check_ajax_referer( self::NONCE_ACTION, false, false ) ) {
 			self::error( 'invalid_nonce' );
 		}

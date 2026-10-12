@@ -3,6 +3,7 @@
 Endpoints for analysis history, reports, the monitoring start (all read-only) and the one setting (site checks), namespace `updatelens/v1`. The admin app calls them through `wp.apiFetch` (cookie authentication + `wp_rest` nonce).
 
 - **Permission:** `manage_options` (`Core\Plugin::CAPABILITY`) on every route. Not logged in → `401 rest_forbidden`; logged in without the capability → `403 rest_forbidden`.
+- **Never cached:** every response of these routes, errors included, is `Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private` (`RestNoStoreResponses`; WordPress itself sends `no-store, private` for signed-in REST requests only since 6.8).
 - **Single site only.** The analysis, baseline and settings routes are not registered on Multisite.
 - **Read-only reports.** Only `POST /updatelens/v1/settings` changes anything. Before every history or report read, analyses past their settle deadline are expired (`completed`, `settle_outcome: "expired"`, no settled snapshot), and the analyses table is recreated if it is missing. Nothing else is changed.
 - **Errors:** if storage cannot be read (or the table cannot be recreated): `500 updatelens_reports_unavailable` with a generic message. Database errors are never part of a response. A single report whose stored diffs would not fit in the request's memory (measured before they are read, `AnalysisReports::BYTES_PER_STORED_BYTE` per stored byte) is refused with `500 updatelens_report_too_large` instead of a PHP fatal error; the history and other reports are unaffected.

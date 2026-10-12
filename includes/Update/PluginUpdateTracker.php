@@ -8,6 +8,7 @@
 namespace UpdateLens\Update;
 
 use Throwable;
+use UpdateLens\SiteCheck\FrontendMarker;
 use UpdateLens\SiteCheck\Settings;
 use UpdateLens\SiteCheck\UpdateActivity;
 
@@ -305,6 +306,8 @@ final class PluginUpdateTracker {
 	 * @return void
 	 */
 	public function on_follow_up() {
+		// The response names this user's analyses: never kept by a cache.
+		FrontendMarker::send_no_store();
 		if ( false === check_ajax_referer( FollowUpRequest::NONCE_ACTION, false, false ) ) {
 			wp_send_json_error( array( 'code' => 'invalid_nonce' ), 403 );
 		}

@@ -11,6 +11,7 @@ use UpdateLens\Admin\AdminAssets;
 use UpdateLens\Admin\AdminPage;
 use UpdateLens\Rest\AnalysesController;
 use UpdateLens\Rest\BaselineController;
+use UpdateLens\Rest\NoStoreResponses;
 use UpdateLens\Rest\SettingsController;
 use UpdateLens\Rest\StatusController;
 use UpdateLens\SiteCheck\AjaxEndpoints;
@@ -84,6 +85,7 @@ final class Plugin {
 		}
 
 		add_action( 'rest_api_init', array( $this, 'register_rest_routes' ) );
+		add_filter( 'rest_post_dispatch', array( NoStoreResponses::class, 'on_rest_post_dispatch' ), 10, 3 );
 
 		// Site checks (opt-in; single site only). BEFORE baselines are collected
 		// in the background on the Plugins and Updates screens only.

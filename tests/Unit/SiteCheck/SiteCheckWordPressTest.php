@@ -10,6 +10,7 @@ namespace UpdateLens\Tests\Unit\SiteCheck;
 use PHPUnit\Framework\TestCase;
 use UpdateLens\Core\Plugin;
 use UpdateLens\Admin\AdminAssets;
+use UpdateLens\Rest\NoStoreResponses;
 use UpdateLens\SiteCheck\AjaxEndpoints;
 use UpdateLens\SiteCheck\BaselinePage;
 use UpdateLens\SiteCheck\Baselines;
@@ -576,7 +577,75 @@ final class SiteCheckWordPressTest extends TestCase {
 		$hooks = array_column( $GLOBALS['updatelens_test']['actions'], 0 );
 
 		$this->assertNotContains( 'send_headers', $hooks );
-		$this->assertNotContains( 'rest_post_dispatch', $hooks );
+		// Only the no-store filter of UpdateLens's own REST routes, never the marker.
+		$this->assertSame(
+			array( array( 'rest_post_dispatch', array( NoStoreResponses::class, 'on_rest_post_dispatch' ), 10 ) ),
+			array_values(
+				array_filter(
+					$GLOBALS['updatelens_test']['actions'],
+					static function ( $action ) {
+						return 'rest_post_dispatch' === $action[0];
+					}
+				)
+			)
+		);
+	}
+
+	/**
+	 * Every response of UpdateLens's REST routes is no-store, private (also
+	 * where WordPress sends its no-cache headers after the response's own).
+	 */
+	public function test_own_rest_responses_are_never_stored() {
+		$filter = array( 'nocache_headers', array( FrontendMarker::class, 'no_store_headers' ), 10 );
+		$GLOBALS['updatelens_test']['options']['updatelens_db_version'] = Schema::VERSION;
+		Plugin::boot();
+		$this->assertContains( array( 'rest_post_dispatch', array( NoStoreResponses::class, 'on_rest_post_dispatch' ), 10 ), $GLOBALS['updatelens_test']['actions'] );
+
+		foreach ( array( '/wp/v2/users/me', '/updatelens/v10/status', '/updatelens', '/x/updatelens/v1' ) as $route ) {
+			$GLOBALS['updatelens_test']['actions'] = array();
+			$response                              = new \WP_REST_Response();
+			$this->assertSame( $response, NoStoreResponses::on_rest_post_dispatch( $response, null, new \WP_REST_Request( $route ) ), $route );
+			$this->assertSame( array(), $response->headers, $route );
+			$this->assertNotContains( $filter, $GLOBALS['updatelens_test']['actions'], $route );
+		}
+		foreach ( array( '/updatelens/v1', '/updatelens/v1/analyses', '/updatelens/v1/analyses/7', '/updatelens/v1/settings' ) as $route ) {
+			$GLOBALS['updatelens_test']['actions'] = array();
+			$response                              = new \WP_REST_Response();
+			$this->assertSame( $response, NoStoreResponses::on_rest_post_dispatch( $response, null, new \WP_REST_Request( $route ) ), $route );
+			$this->assertSame( array( 'Cache-Control' => FrontendMarker::CACHE_CONTROL ), $response->headers, $route );
+			$this->assertContains( $filter, $GLOBALS['updatelens_test']['actions'], $route );
+		}
+		$this->assertSame( 'not a response', NoStoreResponses::on_rest_post_dispatch( 'not a response', null, new \WP_REST_Request( '/updatelens/v1/analyses' ) ) );
+	}
+
+	/**
+	 * Follow-up responses are no-store, private whatever they answer (the
+	 * rejected ones included).
+	 */
+	public function test_follow_up_responses_are_never_stored() {
+		$filter  = array( 'nocache_headers', array( FrontendMarker::class, 'no_store_headers' ), 10 );
+		$respond = function () {
+			$GLOBALS['updatelens_test']['actions'] = array();
+			$site                                  = new FakeSite( array(), 1760090000 );
+			try {
+				( new PluginUpdateTracker( $site->request(), $this->activity, new SiteCheckAfter( $site->repository, $this->activity, 'microtime' ) ) )->on_follow_up();
+			} catch ( \UpdateLensTestJsonResponse $response ) {
+				return $response->status;
+			}
+			$this->fail( 'No response.' );
+		};
+
+		$_POST = array( 'plugins' => array( 'acme/acme.php' ) );
+		$this->assertNull( $respond() );
+		$this->assertContains( $filter, $GLOBALS['updatelens_test']['actions'], 'Answered.' );
+
+		$_POST = array( 'plugins' => array( '../x' ) );
+		$this->assertSame( 400, $respond() );
+		$this->assertContains( $filter, $GLOBALS['updatelens_test']['actions'], 'Invalid request.' );
+
+		$GLOBALS['updatelens_test']['nonce_valid'] = false;
+		$this->assertSame( 403, $respond() );
+		$this->assertContains( $filter, $GLOBALS['updatelens_test']['actions'], 'Invalid nonce.' );
 	}
 
 	/**

@@ -10,9 +10,12 @@ namespace UpdateLens\Tests\Unit\Report;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use UpdateLens\Report\AnalysisReports;
+use UpdateLens\Report\ReportTooLargeException;
 use UpdateLens\Report\UnavailableReason;
 use UpdateLens\Snapshot\ActionSchedulerUnavailableException;
 use UpdateLens\Snapshot\MalformedActionSchedulerStateException;
+use UpdateLens\Snapshot\MemoryBudget;
+use UpdateLens\Storage\AnalysisRepository;
 use UpdateLens\Storage\OptionsDiffCodec;
 use UpdateLens\Tests\Support\ActionSchedulerFixture;
 use UpdateLens\Tests\Support\CronFixture;
@@ -541,6 +544,67 @@ final class AnalysisReportsTest extends TestCase {
 
 		$this->assertNull( $this->reports()->report( 2 ) );
 		$this->assertNull( $this->reports()->report( 0 ) );
+	}
+
+	/**
+	 * A report whose stored diffs would not fit in the request's memory is
+	 * refused before its row is read; up to the estimate it is read.
+	 */
+	public function test_report_too_large_for_memory() {
+		$this->completed_update();
+		$needed = $this->site->repository->find_report_bytes( 1 ) * AnalysisReports::BYTES_PER_STORED_BYTE;
+		$this->assertGreaterThan( 0, $needed );
+
+		$this->assertNotNull( $this->reports_with_free( $needed )->report( 1 ) );
+		$this->assertSame( 1, $this->site->repository->report_reads );
+
+		try {
+			$this->reports_with_free( $needed - 1 )->report( 1 );
+			$this->fail( 'Expected ReportTooLargeException.' );
+		} catch ( ReportTooLargeException $e ) {
+			$this->assertSame( 1, $this->site->repository->report_reads, 'The row is never read.' );
+			$this->assertStringNotContainsString( self::FAKE_SECRET, $e->getMessage() );
+		}
+
+		$this->assertNull( $this->reports_with_free( 0 )->report( 2 ), 'A missing report is not measured against memory.' );
+	}
+
+	/**
+	 * The stored size counts the nine phase diff columns, nothing else.
+	 */
+	public function test_report_bytes_count_the_diffs() {
+		$this->completed_update();
+		$row      = $this->site->repository->rows[1];
+		$expected = 0;
+		foreach ( array_keys( AnalysisRepository::HISTORY_DIFFS ) as $column ) {
+			$expected += null === $row[ $column ] ? 0 : strlen( $row[ $column ] );
+		}
+
+		$this->assertSame( $expected, $this->site->repository->find_report_bytes( 1 ) );
+		$this->assertNull( $this->site->repository->find_report_bytes( 2 ) );
+	}
+
+	/**
+	 * Reports in a request with exactly $free bytes to spare above the
+	 * reserve (64 MiB limit).
+	 *
+	 * @param int|float $free Bytes free.
+	 * @return AnalysisReports
+	 */
+	private function reports_with_free( $free ) {
+		return new AnalysisReports(
+			$this->site->repository,
+			$this->site->request(),
+			static function () {
+				return true;
+			},
+			new MemoryBudget(
+				64 * 1048576,
+				static function () use ( $free ) {
+					return 64 * 1048576 - MemoryBudget::RESERVE_BYTES - $free;
+				}
+			)
+		);
 	}
 
 	/**

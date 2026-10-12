@@ -12,13 +12,14 @@ use UpdateLens\Snapshot\ActionSchedulerArgsHasher;
 use UpdateLens\Snapshot\ActionSchedulerScheduleParser;
 use UpdateLens\Snapshot\ActionSchedulerSnapshotBuilder;
 use UpdateLens\Snapshot\ActionSchedulerSnapshotProvider;
+use UpdateLens\Snapshot\ActionSchedulerUnavailableException;
 use UpdateLens\Snapshot\MalformedActionSchedulerStateException;
 use UpdateLens\Tests\Support\ActionSchedulerFixture as AS_Fixture;
 
 /**
  * With an initialized Action Scheduler and its database store: the batch
  * query never returns an over-long `schedule` (one corrupt row must not
- * exhaust memory), with the same result as reading it; the count for
+ * exhaust memory), with the same result as reading it; the measurement for
  * ObservationBudget reads no actions.
  *
  * @runTestsInSeparateProcesses
@@ -100,16 +101,76 @@ final class ActionSchedulerSnapshotProviderReadTest extends TestCase {
 	}
 
 	/**
-	 * The count reads one number for the active statuses and releases $wpdb's copy.
+	 * One aggregate statement measures the active actions and their schedule
+	 * bytes beyond SCHEDULE_BYTES (over-long schedules count as empty, like
+	 * the batch query returns them) and releases $wpdb's copy.
 	 */
-	public function test_count_active() {
-		$GLOBALS['wpdb']->vars[] = '30001';
+	public function test_measure_active() {
+		$GLOBALS['wpdb']->row = array(
+			'actions' => '30001',
+			'extra'   => '0',
+			'most'    => '0',
+		);
 
-		$this->assertSame( 30001, $this->provider()->count_active() );
+		$this->assertSame(
+			array(
+				'actions'                    => 30001,
+				'extra_schedule_bytes'       => 0,
+				'batch_extra_schedule_bytes' => 0,
+			),
+			$this->provider()->measure_active()
+		);
 
-		$count = end( $GLOBALS['wpdb']->prepared );
-		$this->assertSame( 'SELECT COUNT(*) FROM %i WHERE status IN ( %s, %s )', $count[0] );
-		$this->assertSame( array( 'wp_actionscheduler_actions', 'pending', 'in-progress' ), $count[1] );
+		$measure = end( $GLOBALS['wpdb']->prepared );
+		$this->assertStringContainsString( 'COUNT(*) AS actions, COALESCE(SUM(extra), 0) AS extra, COALESCE(MAX(extra), 0) AS most', $measure[0] );
+		$this->assertStringContainsString( 'CASE WHEN LENGTH(schedule) > %d THEN 0 WHEN LENGTH(schedule) > %d THEN LENGTH(schedule) - %d ELSE 0 END AS extra', $measure[0] );
+		$this->assertStringContainsString( 'FROM %i WHERE status IN ( %s, %s )', $measure[0] );
+		$this->assertSame(
+			array( ActionSchedulerScheduleParser::MAX_LENGTH, ActionSchedulerSnapshotProvider::SCHEDULE_BYTES, ActionSchedulerSnapshotProvider::SCHEDULE_BYTES, 'wp_actionscheduler_actions', 'pending', 'in-progress' ),
+			$measure[1]
+		);
 		$this->assertSame( 1, $GLOBALS['wpdb']->flushes );
+	}
+
+	/**
+	 * A batch holds at most BATCH_SIZE times the most extra bytes of one row,
+	 * and never more than all of them.
+	 */
+	public function test_measure_bounds_one_batch() {
+		$GLOBALS['wpdb']->row = array(
+			'actions' => '2001',
+			'extra'   => '127874000',
+			'most'    => '63937',
+		);
+		$this->assertSame(
+			array(
+				'actions'                    => 2001,
+				'extra_schedule_bytes'       => 127874000,
+				'batch_extra_schedule_bytes' => ActionSchedulerSnapshotProvider::BATCH_SIZE * 63937,
+			),
+			$this->provider()->measure_active()
+		);
+
+		$GLOBALS['wpdb']->vars = array( 'wp_actionscheduler_actions', 'wp_actionscheduler_groups' );
+		$GLOBALS['wpdb']->row  = array(
+			'actions' => '600',
+			'extra'   => '64000',
+			'most'    => '63000',
+		);
+		$this->assertSame( 64000, $this->provider()->measure_active()['batch_extra_schedule_bytes'], 'One long schedule among many.' );
+	}
+
+	/**
+	 * Without a row nothing is read; a database error throws instead of
+	 * estimating nothing.
+	 */
+	public function test_measure_without_a_row_or_with_an_error() {
+		$GLOBALS['wpdb']->row = null;
+		$this->assertSame( 0, $this->provider()->measure_active()['actions'] );
+
+		$GLOBALS['wpdb']->vars       = array( 'wp_actionscheduler_actions', 'wp_actionscheduler_groups' );
+		$GLOBALS['wpdb']->last_error = 'Lost connection';
+		$this->expectException( ActionSchedulerUnavailableException::class );
+		$this->provider()->measure_active();
 	}
 }

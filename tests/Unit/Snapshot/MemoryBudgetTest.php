@@ -47,6 +47,7 @@ final class MemoryBudgetTest extends TestCase {
 		$this->assertSame( 0, MemoryBudget::bytes( '' ) );
 		$this->assertSame( 0, MemoryBudget::bytes( 'lots' ) );
 		$this->assertSame( 0, MemoryBudget::bytes( false ) );
+		$this->assertSame( 0, MemoryBudget::bytes( array( '128M' ) ) );
 	}
 
 	/**
@@ -77,7 +78,7 @@ final class MemoryBudgetTest extends TestCase {
 	}
 
 	/**
-	 * Without a limit everything is allowed.
+	 * An unlimited budget (only ever constructed explicitly) allows everything.
 	 */
 	public function test_unlimited() {
 		$budget = self::budget( 0, PHP_INT_MAX );
@@ -88,15 +89,66 @@ final class MemoryBudgetTest extends TestCase {
 	}
 
 	/**
-	 * The running request's budget reads its limit.
+	 * A finite PHP limit is used as it is, whatever WP_MAX_MEMORY_LIMIT says.
+	 */
+	public function test_effective_limit_of_a_finite_php_limit() {
+		$this->assertSame( 128 * self::MIB, MemoryBudget::effective_limit( '128M', '256M' ) );
+		$this->assertSame( 128 * self::MIB, MemoryBudget::effective_limit( '128M', null ) );
+		$this->assertSame( 2048 * self::MIB, MemoryBudget::effective_limit( '2G', '256M' ) );
+		$this->assertSame( 64 * self::MIB, MemoryBudget::effective_limit( '64M', '-1' ) );
+	}
+
+	/**
+	 * Without a PHP limit, a finite WP_MAX_MEMORY_LIMIT is the ceiling; an
+	 * undefined, invalid or unlimited one gives the 256 MiB fallback. An
+	 * unreadable PHP limit is treated like none. Never unlimited.
+	 */
+	public function test_effective_limit_without_a_php_limit() {
+		$this->assertSame( 256 * self::MIB, MemoryBudget::UNLIMITED_FALLBACK_BYTES );
+
+		$this->assertSame( 512 * self::MIB, MemoryBudget::effective_limit( '-1', '512M' ) );
+		$this->assertSame( 256 * self::MIB, MemoryBudget::effective_limit( '-1', '256M' ) );
+		$this->assertSame( 96 * self::MIB, MemoryBudget::effective_limit( '-1', '96M' ) );
+		$this->assertSame( 134217728, MemoryBudget::effective_limit( '-1', 134217728 ), 'An integer constant.' );
+
+		foreach ( array( null, '-1', -1, '', 'lots', '0', '1.5G', false, array() ) as $i => $wp_max ) {
+			$this->assertSame( MemoryBudget::UNLIMITED_FALLBACK_BYTES, MemoryBudget::effective_limit( '-1', $wp_max ), "WP_MAX_MEMORY_LIMIT case $i" );
+		}
+		foreach ( array( '', 'lots', false, '0', '-2' ) as $i => $php ) {
+			$this->assertSame( MemoryBudget::UNLIMITED_FALLBACK_BYTES, MemoryBudget::effective_limit( $php, null ), "memory_limit case $i" );
+		}
+	}
+
+	/**
+	 * The fallback ceiling counts the request's own usage and keeps the
+	 * reserve, like a real limit: a request that already uses 143 MiB has
+	 * about 87 MiB left, not gigabytes.
+	 */
+	public function test_ceiling_counts_the_usage() {
+		$budget = self::budget( MemoryBudget::effective_limit( '-1', null ), 143 * self::MIB );
+		$left   = 256 * self::MIB - 143 * self::MIB - 0.1 * 256 * self::MIB;
+
+		$this->assertTrue( $budget->is_limited() );
+		$this->assertTrue( $budget->allows( $left ) );
+		$this->assertFalse( $budget->allows( $left + 1 ) );
+		$this->assertFalse( $budget->allows( 1024 * self::MIB ) );
+		$this->assertFalse( self::budget( MemoryBudget::effective_limit( '-1', null ), 300 * self::MIB )->allows( 0 ), 'Usage already past the ceiling.' );
+	}
+
+	/**
+	 * The running request's budget reads its limit; without one it is still
+	 * limited (WP_MAX_MEMORY_LIMIT is not defined in unit tests: the fallback).
 	 */
 	public function test_from_php() {
 		$previous = ini_get( 'memory_limit' );
 		ini_set( 'memory_limit', '-1' ); // phpcs:ignore WordPress.PHP.IniSet.memory_limit_Disallowed -- Test.
-		$this->assertFalse( MemoryBudget::from_php()->is_limited() );
-		ini_set( 'memory_limit', '2048M' ); // phpcs:ignore WordPress.PHP.IniSet.memory_limit_Disallowed -- Test.
+		$this->assertFalse( defined( 'WP_MAX_MEMORY_LIMIT' ) );
 		$this->assertTrue( MemoryBudget::from_php()->is_limited() );
 		$this->assertTrue( MemoryBudget::from_php()->allows( self::MIB ) );
+		$this->assertFalse( MemoryBudget::from_php()->allows( MemoryBudget::UNLIMITED_FALLBACK_BYTES ) );
+		ini_set( 'memory_limit', '2048M' ); // phpcs:ignore WordPress.PHP.IniSet.memory_limit_Disallowed -- Test.
+		$this->assertTrue( MemoryBudget::from_php()->is_limited() );
+		$this->assertTrue( MemoryBudget::from_php()->allows( 1024 * self::MIB ) );
 		ini_set( 'memory_limit', $previous ); // phpcs:ignore WordPress.PHP.IniSet.memory_limit_Disallowed -- Test.
 	}
 }

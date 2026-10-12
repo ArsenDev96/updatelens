@@ -12,6 +12,7 @@ use UpdateLens\Core\Plugin;
 use UpdateLens\Report\AnalysisReadModel;
 use UpdateLens\Report\AnalysisReports;
 use UpdateLens\Report\PotentialImpact;
+use UpdateLens\Report\ReportTooLargeException;
 use UpdateLens\Report\SiteCheckReport;
 use UpdateLens\Report\UnavailableReason;
 use UpdateLens\SiteCheck\AfterReason;
@@ -590,7 +591,9 @@ final class AnalysesController extends WP_REST_Controller {
 
 	/**
 	 * Run a read. Database errors go to the PHP error log only, never into the
-	 * response; any failure becomes a generic error.
+	 * response; any failure becomes a generic error. A report too large for
+	 * the request's memory is refused before it is read
+	 * (`updatelens_report_too_large`), never a fatal error.
 	 *
 	 * @param callable $read Receives AnalysisReports.
 	 * @return mixed|WP_Error
@@ -601,6 +604,12 @@ final class AnalysesController extends WP_REST_Controller {
 		$show_errors = $wpdb->hide_errors();
 		try {
 			return $read( call_user_func( $this->reports ) );
+		} catch ( ReportTooLargeException $e ) {
+			return new WP_Error(
+				'updatelens_report_too_large',
+				__( 'This UpdateLens report is too large to load with the memory available.', 'updatelens' ),
+				array( 'status' => 500 )
+			);
 		} catch ( Throwable $e ) {
 			return new WP_Error(
 				'updatelens_reports_unavailable',

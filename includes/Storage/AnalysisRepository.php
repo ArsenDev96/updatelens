@@ -380,6 +380,34 @@ class AnalysisRepository {
 	}
 
 	/**
+	 * Stored size of one analysis's phase diffs (the HISTORY_DIFFS columns),
+	 * in bytes, measured by the database without reading them: the report
+	 * read's memory preflight (AnalysisReports::report()).
+	 *
+	 * @param int $id Analysis ID.
+	 * @return int|null Null if there is no such analysis.
+	 * @throws RuntimeException If the query fails.
+	 */
+	public function find_report_bytes( $id ) {
+		$wpdb = $this->wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table; must not be cached.
+		$bytes = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT COALESCE(LENGTH(options_during_update_diff), 0) + COALESCE(LENGTH(options_post_update_diff), 0) + COALESCE(LENGTH(options_final_diff), 0)
+					+ COALESCE(LENGTH(cron_during_update_diff), 0) + COALESCE(LENGTH(cron_post_update_diff), 0) + COALESCE(LENGTH(cron_final_diff), 0)
+					+ COALESCE(LENGTH(action_scheduler_during_update_diff), 0) + COALESCE(LENGTH(action_scheduler_post_update_diff), 0) + COALESCE(LENGTH(action_scheduler_final_diff), 0)
+				FROM %i WHERE id = %d',
+				$this->table,
+				(int) $id
+			)
+		);
+		$this->assert_no_error();
+		$wpdb->flush();
+
+		return null === $bytes ? null : (int) $bytes;
+	}
+
+	/**
 	 * One analysis for a report (REPORT_COLUMNS: no snapshots), by primary key.
 	 *
 	 * @param int $id Analysis ID.

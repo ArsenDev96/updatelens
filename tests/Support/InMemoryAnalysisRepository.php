@@ -378,6 +378,35 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	}
 
 	/**
+	 * Number of find_report() calls.
+	 *
+	 * @var int
+	 */
+	public $report_reads = 0;
+
+	/**
+	 * Stored size of the phase diffs (the HISTORY_DIFFS columns).
+	 *
+	 * @param int $id ID.
+	 * @return int|null
+	 * @throws RuntimeException On failure.
+	 */
+	public function find_report_bytes( $id ) {
+		if ( $this->fail_reads ) {
+			throw new RuntimeException( 'read failed' );
+		}
+		if ( ! isset( $this->rows[ $id ] ) ) {
+			return null;
+		}
+		$bytes = 0;
+		foreach ( array_keys( AnalysisRepository::HISTORY_DIFFS ) as $column ) {
+			$bytes += isset( $this->rows[ $id ][ $column ] ) ? strlen( (string) $this->rows[ $id ][ $column ] ) : 0;
+		}
+
+		return $bytes;
+	}
+
+	/**
 	 * Row projected like REPORT_COLUMNS.
 	 *
 	 * @param int $id ID.
@@ -385,6 +414,7 @@ final class InMemoryAnalysisRepository extends AnalysisRepository {
 	 * @throws RuntimeException On failure.
 	 */
 	public function find_report( $id ) {
+		++$this->report_reads;
 		if ( $this->fail_reads ) {
 			throw new RuntimeException( 'read failed' );
 		}

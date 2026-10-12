@@ -47,7 +47,9 @@ defined( 'ABSPATH' ) || exit;
  * (longtext): a schedule longer than ActionSchedulerScheduleParser::MAX_LENGTH
  * is invalid anyway, so the query returns it as an empty string, which the
  * parser rejects the same way, instead of reading the whole value (one
- * corrupt row could otherwise exhaust memory during an update).
+ * corrupt row could otherwise exhaust memory during an update). Schedules up
+ * to that length are read whole; measure_active() tells ObservationBudget
+ * how many bytes they add before any is read.
  */
 final class ActionSchedulerSnapshotProvider {
 
@@ -74,11 +76,17 @@ final class ActionSchedulerSnapshotProvider {
 	/**
 	 * Largest row a batch is budgeted for (ObservationBudget), in bytes: hook
 	 * and args (191 bytes each), extended_args (8,000), the group slug (255),
-	 * status and date, and a schedule of up to 1 KiB (Action Scheduler's
-	 * schedule objects serialize to a few hundred bytes; longer ones are
-	 * read only up to ActionSchedulerScheduleParser::MAX_LENGTH).
+	 * status and date, and a schedule of up to SCHEDULE_BYTES. Longer
+	 * schedules are read up to ActionSchedulerScheduleParser::MAX_LENGTH and
+	 * measured separately (measure_active()).
 	 */
 	const MAX_ROW_BYTES = 10240;
+
+	/**
+	 * Schedule bytes per row included in MAX_ROW_BYTES. Action Scheduler's
+	 * schedule objects serialize to 40 (async) to about 800 bytes (cron).
+	 */
+	const SCHEDULE_BYTES = 1024;
 
 	/**
 	 * Action Scheduler's actions table, without the site prefix.
@@ -139,38 +147,62 @@ final class ActionSchedulerSnapshotProvider {
 	}
 
 	/**
-	 * Number of active actions a snapshot would read (an estimate for
-	 * ObservationBudget), counted without reading them; 0 when no snapshot can
-	 * be taken (capture() then reports why, without reading actions).
+	 * Size of what a snapshot would read (an estimate for ObservationBudget),
+	 * measured by the database in one statement without reading any action:
+	 * the number of active actions, the schedule bytes beyond SCHEDULE_BYTES
+	 * per row that the batch query returns (`extra_schedule_bytes`; schedules
+	 * over ActionSchedulerScheduleParser::MAX_LENGTH are returned empty), and
+	 * at most how many of them one batch can hold
+	 * (`batch_extra_schedule_bytes`: BATCH_SIZE times the most of one row, or
+	 * all of them if less). All 0 when no snapshot can be taken (capture()
+	 * then reports why, without reading actions).
 	 *
-	 * @return int
-	 * @throws ActionSchedulerUnavailableException If the count fails.
+	 * @return array{actions: int, extra_schedule_bytes: int, batch_extra_schedule_bytes: int}
+	 * @throws ActionSchedulerUnavailableException If the query fails.
 	 */
-	public function count_active() {
+	public function measure_active() {
 		global $wpdb;
 
+		$measured = array(
+			'actions'                    => 0,
+			'extra_schedule_bytes'       => 0,
+			'batch_extra_schedule_bytes' => 0,
+		);
 		try {
 			$this->assert_available();
 		} catch ( ActionSchedulerUnavailableException $e ) {
 			if ( ActionSchedulerUnavailableException::READ_FAILED === $e->get_reason() ) {
 				throw $e;
 			}
-			return 0;
+			return $measured;
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only count of a third-party table; must reflect the current state.
-		$count = $wpdb->get_var(
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only aggregate of a third-party table; must reflect the current state.
+		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT COUNT(*) FROM %i WHERE status IN ( %s, %s )',
+				'SELECT COUNT(*) AS actions, COALESCE(SUM(extra), 0) AS extra, COALESCE(MAX(extra), 0) AS most
+				FROM ( SELECT CASE WHEN LENGTH(schedule) > %d THEN 0 WHEN LENGTH(schedule) > %d THEN LENGTH(schedule) - %d ELSE 0 END AS extra
+				FROM %i WHERE status IN ( %s, %s ) ) AS active',
+				ActionSchedulerScheduleParser::MAX_LENGTH,
+				self::SCHEDULE_BYTES,
+				self::SCHEDULE_BYTES,
 				$wpdb->prefix . self::ACTIONS_TABLE,
 				ActionSchedulerActionRecord::STATUS_PENDING,
 				ActionSchedulerActionRecord::STATUS_IN_PROGRESS
-			)
+			),
+			ARRAY_A
 		);
 		self::assert_no_error();
 		$wpdb->flush();
+		if ( ! is_array( $row ) ) {
+			return $measured;
+		}
 
-		return (int) $count;
+		$measured['actions']                    = (int) $row['actions'];
+		$measured['extra_schedule_bytes']       = (int) $row['extra'];
+		$measured['batch_extra_schedule_bytes'] = min( $measured['extra_schedule_bytes'], min( $measured['actions'], self::BATCH_SIZE ) * (int) $row['most'] );
+
+		return $measured;
 	}
 
 	/**

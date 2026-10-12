@@ -266,7 +266,7 @@ final class PluginUpdateAnalyzer {
 				MemoryBudget::from_php(),
 				array( $provider, 'count_options' ),
 				array( $cron_provider, 'stored_bytes' ),
-				array( $action_scheduler_provider, 'count_active' )
+				array( $action_scheduler_provider, 'measure_active' )
 			);
 			return $budget->plan( $stage );
 		};

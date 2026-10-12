@@ -23,6 +23,15 @@ defined( 'ABSPATH' ) || exit;
  * larger) covers estimation error and allocator granularity: PHP reserves
  * memory in 2 MiB chunks, and estimates are averages measured on real
  * requests.
+ *
+ * Without a PHP memory limit (`-1`) observations are still bounded
+ * (effective_limit()): by WP_MAX_MEMORY_LIMIT, WordPress's ceiling for
+ * admin requests, if it is finite, else by UNLIMITED_FALLBACK_BYTES. A
+ * request without a limit could otherwise allocate gigabytes, and its
+ * snapshots would no longer fit in a database statement. Usage counts
+ * against that ceiling like against a real limit. A lower limit outside PHP
+ * (a container or process memory cap) cannot be seen from here: the budget
+ * guarantees nothing beyond what PHP reports.
  */
 final class MemoryBudget {
 
@@ -30,6 +39,13 @@ final class MemoryBudget {
 	 * Smallest reserve kept free, in bytes.
 	 */
 	const RESERVE_BYTES = 16777216;
+
+	/**
+	 * Ceiling when PHP has no memory limit and WP_MAX_MEMORY_LIMIT is not
+	 * finite either, in bytes: WordPress's own default for WP_MAX_MEMORY_LIMIT
+	 * (256 MiB).
+	 */
+	const UNLIMITED_FALLBACK_BYTES = 268435456;
 
 	/**
 	 * Reserve kept free as a share of the limit, if larger.
@@ -68,11 +84,30 @@ final class MemoryBudget {
 	 */
 	public static function from_php() {
 		return new self(
-			self::bytes( ini_get( 'memory_limit' ) ),
+			self::effective_limit( ini_get( 'memory_limit' ), defined( 'WP_MAX_MEMORY_LIMIT' ) ? WP_MAX_MEMORY_LIMIT : null ),
 			static function () {
 				return memory_get_usage( true );
 			}
 		);
+	}
+
+	/**
+	 * The limit observations are budgeted against: PHP's `memory_limit`;
+	 * without one (or an unreadable one), WP_MAX_MEMORY_LIMIT if it is a
+	 * finite size, else UNLIMITED_FALLBACK_BYTES. Never unlimited.
+	 *
+	 * @param mixed $memory_limit        PHP's `memory_limit` ini value.
+	 * @param mixed $wp_max_memory_limit WP_MAX_MEMORY_LIMIT, or null when undefined.
+	 * @return int Bytes.
+	 */
+	public static function effective_limit( $memory_limit, $wp_max_memory_limit ) {
+		$limit = self::bytes( $memory_limit );
+		if ( $limit > 0 ) {
+			return $limit;
+		}
+		$ceiling = self::bytes( $wp_max_memory_limit );
+
+		return $ceiling > 0 ? $ceiling : self::UNLIMITED_FALLBACK_BYTES;
 	}
 
 	/**
@@ -82,6 +117,9 @@ final class MemoryBudget {
 	 * @return int Bytes; 0 when unlimited or unreadable.
 	 */
 	public static function bytes( $value ) {
+		if ( ! is_scalar( $value ) ) {
+			return 0;
+		}
 		$value = trim( (string) $value );
 		if ( 1 !== preg_match( '/^(\d+)\s*([kmg]?)$/i', $value, $matches ) ) {
 			return 0;

@@ -5,7 +5,7 @@ Endpoints for analysis history, reports, the monitoring start (all read-only) an
 - **Permission:** `manage_options` (`Core\Plugin::CAPABILITY`) on every route. Not logged in → `401 rest_forbidden`; logged in without the capability → `403 rest_forbidden`.
 - **Single site only.** The analysis, baseline and settings routes are not registered on Multisite.
 - **Read-only reports.** Only `POST /updatelens/v1/settings` changes anything. Before every history or report read, analyses past their settle deadline are expired (`completed`, `settle_outcome: "expired"`, no settled snapshot), and the analyses table is recreated if it is missing. Nothing else is changed.
-- **Errors:** if storage cannot be read (or the table cannot be recreated): `500 updatelens_reports_unavailable` with a generic message. Database errors are never part of a response.
+- **Errors:** if storage cannot be read (or the table cannot be recreated): `500 updatelens_reports_unavailable` with a generic message. Database errors are never part of a response. A single report whose stored diffs would not fit in the request's memory (measured before they are read, `AnalysisReports::BYTES_PER_STORED_BYTE` per stored byte) is refused with `500 updatelens_report_too_large` instead of a PHP fatal error; the history and other reports are unaffected.
 - **Types:** IDs, counts, byte sizes and deltas are JSON integers; flags are booleans. Timestamps are UTC ISO 8601 (`2026-10-05T17:46:23Z`) or `null`, never site-local time.
 - **Wording:** phases describe _when_ changes were observed, not what caused them.
 

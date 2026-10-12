@@ -20,7 +20,7 @@ defined( 'ABSPATH' ) || exit;
  * metadata and asks the MemoryBudget, before anything large is allocated
  * (plan()). Nothing large is read to decide: the options are counted, the
  * stored `cron` option is measured with SQL (`LENGTH()`), and the active
- * actions are counted.
+ * actions are counted and their schedules measured with SQL.
  *
  * Options decide whether the observation happens at all (see
  * PluginUpdateAnalyzer); WP-Cron and Action Scheduler are independent
@@ -104,9 +104,25 @@ final class ObservationBudget {
 	/**
 	 * The Action Scheduler capture's working set per row of a batch, in
 	 * bytes: a row of at most MAX_ROW_BYTES read through $wpdb. A batch holds
-	 * at most BATCH_SIZE rows (fewer when there are fewer actions).
+	 * at most BATCH_SIZE rows (fewer when there are fewer actions), plus the
+	 * longest schedules' bytes beyond ActionSchedulerSnapshotProvider::SCHEDULE_BYTES
+	 * (`batch_extra_schedule_bytes`, also VALUE_READ_FACTOR times; measured
+	 * about 2).
 	 */
 	const ACTION_READ_BYTES = OptionsSnapshotProvider::VALUE_READ_FACTOR * ActionSchedulerSnapshotProvider::MAX_ROW_BYTES;
+
+	/**
+	 * Memory each stage needs per schedule byte beyond
+	 * ActionSchedulerSnapshotProvider::SCHEDULE_BYTES (`extra_schedule_bytes`),
+	 * in bytes, on top of BYTES_PER_ACTION: a valid cron schedule keeps its
+	 * expression in the record, snapshot, stored statement (escaped) and diffs.
+	 * Ordinary schedules have no extra bytes. Measured on real updates with
+	 * 500 to 2,000 cron schedules of 8 to 64 KB, beyond BYTES_PER_ACTION and
+	 * the batch read: at most 9.4 (PHP 8.1) / 9.3 (PHP 7.4) in the update
+	 * request (BEFORE and IMMEDIATE), 7.8 / 8.7 at SETTLED; plus about a
+	 * third.
+	 */
+	const BYTES_PER_EXTRA_SCHEDULE_BYTE = 13;
 
 	/**
 	 * Memory available to the request.
@@ -130,12 +146,13 @@ final class ObservationBudget {
 	private $cron_bytes;
 
 	/**
-	 * Returns the number of active Action Scheduler actions (0 when Action
+	 * Returns the size of the active Action Scheduler actions
+	 * (ActionSchedulerSnapshotProvider::measure_active(); all 0 when Action
 	 * Scheduler is not available to snapshots).
 	 *
 	 * @var callable|null
 	 */
-	private $count_actions;
+	private $measure_actions;
 
 	/**
 	 * Constructor.
@@ -143,22 +160,23 @@ final class ObservationBudget {
 	 * @param MemoryBudget  $memory        Memory available to the request.
 	 * @param callable      $count_options Returns the number of options a snapshot may keep.
 	 * @param callable|null $cron_bytes    Returns the stored size of the `cron` option. Null: no WP-Cron observation.
-	 * @param callable|null $count_actions Returns the number of active actions. Null: no Action Scheduler observation.
+	 * @param callable|null $measure_actions Returns the size of the active actions (measure_active()). Null: no Action Scheduler observation.
 	 */
-	public function __construct( MemoryBudget $memory, callable $count_options, ?callable $cron_bytes = null, ?callable $count_actions = null ) {
-		$this->memory        = $memory;
-		$this->count_options = $count_options;
-		$this->cron_bytes    = $cron_bytes;
-		$this->count_actions = $count_actions;
+	public function __construct( MemoryBudget $memory, callable $count_options, ?callable $cron_bytes = null, ?callable $measure_actions = null ) {
+		$this->memory          = $memory;
+		$this->count_options   = $count_options;
+		$this->cron_bytes      = $cron_bytes;
+		$this->measure_actions = $measure_actions;
 	}
 
 	/**
 	 * Which signals a stage may observe: OPTIONS, CRON and ACTION_SCHEDULER
 	 * => bool. Options first (if they do not fit, nothing does), then WP-Cron
 	 * and Action Scheduler, each only if it fits together with what was
-	 * already planned. With no memory limit, everything fits (and nothing is
-	 * counted). Whatever cannot be measured does not fit: an estimate is
-	 * required.
+	 * already planned. With an unlimited MemoryBudget everything fits (and
+	 * nothing is counted); the running request's budget is never unlimited
+	 * (MemoryBudget::effective_limit()). Whatever cannot be measured does not
+	 * fit: an estimate is required.
 	 *
 	 * @param string $stage BEFORE, IMMEDIATE or SETTLED.
 	 * @return array<string, bool>
@@ -182,10 +200,13 @@ final class ObservationBudget {
 		}
 
 		$cron_bytes = self::measure( $this->cron_bytes );
-		$actions    = self::measure( $this->count_actions );
+		$actions    = self::measure_actions( $this->measure_actions );
 		$signals    = array(
 			self::CRON             => null === $cron_bytes ? null : (float) $cron_bytes * self::BYTES_PER_CRON_BYTE[ $stage ],
-			self::ACTION_SCHEDULER => null === $actions ? null : (float) $actions * self::BYTES_PER_ACTION[ $stage ] + min( $actions, ActionSchedulerSnapshotProvider::BATCH_SIZE ) * self::ACTION_READ_BYTES,
+			self::ACTION_SCHEDULER => null === $actions ? null : (float) $actions['actions'] * self::BYTES_PER_ACTION[ $stage ]
+				+ (float) $actions['extra_schedule_bytes'] * self::BYTES_PER_EXTRA_SCHEDULE_BYTE
+				+ min( $actions['actions'], ActionSchedulerSnapshotProvider::BATCH_SIZE ) * self::ACTION_READ_BYTES
+				+ (float) $actions['batch_extra_schedule_bytes'] * OptionsSnapshotProvider::VALUE_READ_FACTOR,
 		);
 		foreach ( $signals as $signal => $more ) {
 			$plan[ $signal ] = null !== $more && $this->memory->allows( $needed + $more );
@@ -223,5 +244,34 @@ final class ObservationBudget {
 		} catch ( Throwable $e ) {
 			return null;
 		}
+	}
+
+	/**
+	 * The size of the active actions.
+	 *
+	 * @param callable|null $measure Returns ActionSchedulerSnapshotProvider::measure_active(); null when not observed.
+	 * @return array{actions: int, extra_schedule_bytes: int, batch_extra_schedule_bytes: int}|null Null when it cannot be measured.
+	 */
+	private static function measure_actions( $measure ) {
+		if ( null === $measure ) {
+			return null;
+		}
+		try {
+			$measured = call_user_func( $measure );
+		} catch ( Throwable $e ) {
+			return null;
+		}
+		if ( ! is_array( $measured ) ) {
+			return null;
+		}
+		$sizes = array();
+		foreach ( array( 'actions', 'extra_schedule_bytes', 'batch_extra_schedule_bytes' ) as $key ) {
+			if ( ! isset( $measured[ $key ] ) || ! is_int( $measured[ $key ] ) ) {
+				return null;
+			}
+			$sizes[ $key ] = max( 0, $measured[ $key ] );
+		}
+
+		return $sizes;
 	}
 }

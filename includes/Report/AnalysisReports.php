@@ -8,6 +8,7 @@
 namespace UpdateLens\Report;
 
 use RuntimeException;
+use UpdateLens\Snapshot\MemoryBudget;
 use UpdateLens\Storage\AnalysisRepository;
 use UpdateLens\Storage\Schema;
 use UpdateLens\Update\PluginUpdateAnalyzer;
@@ -33,6 +34,14 @@ final class AnalysisReports {
 	 * Maximum history page size.
 	 */
 	const MAX_PER_PAGE = 100;
+
+	/**
+	 * Memory a report read needs per byte of its stored phase diffs, in
+	 * bytes: the decoded diffs, Potential Impact and the JSON response.
+	 * Measured on real report reads of 12.5 and 20.4 MB of stored diffs: at
+	 * most 9.7 (PHP 8.1) / 9.6 (PHP 7.4), plus about a third.
+	 */
+	const BYTES_PER_STORED_BYTE = 13;
 
 	/**
 	 * Analysis storage.
@@ -63,17 +72,26 @@ final class AnalysisReports {
 	private $read_model;
 
 	/**
+	 * Memory available to the request, or null for the running request's.
+	 *
+	 * @var MemoryBudget|null
+	 */
+	private $memory;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param AnalysisRepository   $repository    Analysis storage.
 	 * @param PluginUpdateAnalyzer $analyzer      Lifecycle, for expiring overdue analyses.
 	 * @param callable             $ensure_schema Returns whether the analyses table exists, creating it if needed.
+	 * @param MemoryBudget|null    $memory        Memory available to the request; null: the running request's.
 	 */
-	public function __construct( AnalysisRepository $repository, PluginUpdateAnalyzer $analyzer, callable $ensure_schema ) {
+	public function __construct( AnalysisRepository $repository, PluginUpdateAnalyzer $analyzer, callable $ensure_schema, ?MemoryBudget $memory = null ) {
 		$this->repository    = $repository;
 		$this->analyzer      = $analyzer;
 		$this->ensure_schema = $ensure_schema;
 		$this->read_model    = new AnalysisReadModel();
+		$this->memory        = $memory;
 	}
 
 	/**
@@ -121,12 +139,28 @@ final class AnalysisReports {
 	/**
 	 * One full report.
 	 *
+	 * Decoding a report holds every stored phase diff at once, as arrays, and
+	 * then its JSON response: far more than the stored bytes, and more than
+	 * any one observation request held. A request that cannot afford it
+	 * (BYTES_PER_STORED_BYTE times the stored diffs, measured in SQL before
+	 * anything is read) fails with ReportTooLargeException instead of
+	 * running out of memory, which would be a fatal error.
+	 *
 	 * @param int $id Analysis ID.
 	 * @return array<string, mixed>|null Null if there is no such analysis.
-	 * @throws RuntimeException If the analysis cannot be read.
+	 * @throws ReportTooLargeException If the report does not fit in memory (other read failures: RuntimeException).
 	 */
 	public function report( $id ) {
 		$this->maintain();
+
+		$bytes = $this->repository->find_report_bytes( (int) $id );
+		if ( null === $bytes ) {
+			return null;
+		}
+		$memory = null === $this->memory ? MemoryBudget::from_php() : $this->memory;
+		if ( ! $memory->allows( (float) $bytes * self::BYTES_PER_STORED_BYTE ) ) {
+			throw new ReportTooLargeException();
+		}
 
 		$row = $this->repository->find_report( (int) $id );
 

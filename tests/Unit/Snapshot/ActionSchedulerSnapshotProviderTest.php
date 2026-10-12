@@ -48,7 +48,14 @@ final class ActionSchedulerSnapshotProviderTest extends TestCase {
 	 * ObservationBudget's estimate: no Action Scheduler, nothing to capture
 	 * (capture() reports why), and nothing is queried.
 	 */
-	public function test_count_without_action_scheduler() {
-		$this->assertSame( 0, $this->provider()->count_active() );
+	public function test_measure_without_action_scheduler() {
+		$this->assertSame(
+			array(
+				'actions'                    => 0,
+				'extra_schedule_bytes'       => 0,
+				'batch_extra_schedule_bytes' => 0,
+			),
+			$this->provider()->measure_active()
+		);
 	}
 }

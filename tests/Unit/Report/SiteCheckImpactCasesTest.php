@@ -268,6 +268,40 @@ final class SiteCheckImpactCasesTest extends TestCase {
 				),
 				self::LATER,
 			),
+			'home_cross_origin'     => array(
+				'The homepage is on another origin than wp-admin (www); REST passed at both.',
+				$row(
+					array(
+						'home' => 'cross_origin',
+						'rest' => $passing['rest'],
+					),
+					array( 'rest' => $after_ok['rest'] )
+				),
+				self::LATER,
+			),
+			'rest_cross_origin'     => array(
+				'The REST API is on another origin than wp-admin; the homepage passed at both.',
+				$row(
+					array(
+						'home' => $passing['home'],
+						'rest' => 'cross_origin',
+					),
+					array( 'home' => $after_ok['home'] )
+				),
+				self::LATER,
+			),
+			'both_cross_origin'     => array(
+				'Homepage and REST API on another origin than wp-admin: no AFTER run started.',
+				$row(
+					array(
+						'home' => 'cross_origin',
+						'rest' => 'cross_origin',
+					),
+					array(),
+					array( 'site_check_after_started_at' => null )
+				),
+				self::LATER,
+			),
 			'historical'            => array(
 				'Recorded before site checks existed (no site check columns).',
 				array(

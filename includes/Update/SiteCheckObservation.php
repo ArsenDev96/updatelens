@@ -64,7 +64,8 @@ final class SiteCheckObservation {
 
 	/**
 	 * Context of the update request: function (): array{enabled: bool,
-	 * login: string|null, targets: array<string, string>}.
+	 * login: string|null, targets: array<string, string>, unsupported?: string[]}
+	 * (`unsupported`: checks whose target is on another origin than wp-admin).
 	 *
 	 * @var callable
 	 */
@@ -98,7 +99,8 @@ final class SiteCheckObservation {
 
 	/**
 	 * Observation on the running site: the opt-in, the request's WordPress
-	 * login session and the check targets, read when an update starts.
+	 * login session, the check targets and which of them are on another
+	 * origin than wp-admin, read when an update starts.
 	 *
 	 * @return self
 	 */
@@ -114,11 +116,13 @@ final class SiteCheckObservation {
 				}
 				$hasher = ContextHasher::from_wordpress();
 				$token  = wp_get_session_token();
+				$urls   = AjaxEndpoints::target_urls();
 
 				return array(
-					'enabled' => true,
-					'login'   => is_string( $token ) && '' !== $token ? $hasher->session( $token ) : null,
-					'targets' => array_map( array( $hasher, 'target' ), AjaxEndpoints::target_urls() ),
+					'enabled'     => true,
+					'login'       => is_string( $token ) && '' !== $token ? $hasher->session( $token ) : null,
+					'targets'     => array_map( array( $hasher, 'target' ), $urls ),
+					'unsupported' => AjaxEndpoints::unsupported_checks( $urls ),
 				);
 			},
 			Baselines::from_wordpress()
@@ -143,9 +147,17 @@ final class SiteCheckObservation {
 			if ( empty( $context['login'] ) || (int) $user_id < 1 ) {
 				return self::reasons( BeforeReason::NO_LOGIN_SESSION );
 			}
-			$selection = $this->baselines->for_update( (int) $user_id, (string) $context['login'], (array) $context['targets'], $activity );
+			$selection   = $this->baselines->for_update( (int) $user_id, (string) $context['login'], (array) $context['targets'], $activity );
+			$unsupported = isset( $context['unsupported'] ) ? (array) $context['unsupported'] : array();
 		} catch ( Throwable $e ) {
 			return self::reasons( BeforeReason::SELECTION_FAILED );
+		}
+		foreach ( $unsupported as $check ) {
+			// The browser cannot run this check from wp-admin: never a baseline, whatever is stored.
+			$selection[ $check ] = array(
+				'result' => null,
+				'reason' => BeforeReason::CROSS_ORIGIN,
+			);
 		}
 
 		$columns = array();

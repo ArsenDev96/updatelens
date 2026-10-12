@@ -16,21 +16,24 @@ defined( 'ABSPATH' ) || exit;
  *
  * 1. `disabled`: site checks were not enabled.
  * 2. `no_login_session`: the update request had no WordPress login session.
- * 3. `update_order_unknown`: this update could not be recorded in the
+ * 3. `cross_origin`: the check's target is on another origin (scheme,
+ *    host or port) than wp-admin (TargetOrigin), so the browser cannot run
+ *    it from the update screens; no baseline is ever taken for it.
+ * 4. `update_order_unknown`: this update could not be recorded in the
  *    updater activity ledger (UpdateActivity).
- * 4. `overlapping_update`: another update was running when this one began.
- * 5. `missing`: no baseline for this administrator, login session and check
+ * 5. `overlapping_update`: another update was running when this one began.
+ * 6. `missing`: no baseline for this administrator, login session and check
  *    (also: a baseline of another login session is never looked up).
- * 6. `corrupt`: the stored baseline could not be read.
- * 7. `definition_changed` / `target_changed`: another check definition
+ * 7. `corrupt`: the stored baseline could not be read.
+ * 8. `definition_changed` / `target_changed`: another check definition
  *    version or site address.
- * 8. `not_completed_before_update`: the baseline report was accepted after
+ * 9. `not_completed_before_update`: the baseline report was accepted after
  *    this update began (never attached afterwards).
- * 9. `expired`: completed more than Baselines::MAX_AGE_SECONDS before.
- * 10. `taken_during_update`: the baseline run started while an update ran.
- * 11. `update_order_unknown`: the ledger was missing or unreadable before
+ * 10. `expired`: completed more than Baselines::MAX_AGE_SECONDS before.
+ * 11. `taken_during_update`: the baseline run started while an update ran.
+ * 12. `update_order_unknown`: the ledger was missing or unreadable before
  *     this update, so updates since the baseline cannot be ruled out.
- * 12. `intervening_update`: another update started or ended between the
+ * 13. `intervening_update`: another update started or ended between the
  *     baseline run and this update (including one this baseline was used
  *     for, and updates by other administrators).
  *
@@ -43,6 +46,7 @@ final class BeforeReason {
 
 	const DISABLED                    = 'disabled';
 	const NO_LOGIN_SESSION            = 'no_login_session';
+	const CROSS_ORIGIN                = 'cross_origin';
 	const UPDATE_ORDER_UNKNOWN        = 'update_order_unknown';
 	const OVERLAPPING_UPDATE          = 'overlapping_update';
 	const MISSING                     = 'missing';
@@ -65,6 +69,7 @@ final class BeforeReason {
 	const STORED = array(
 		self::DISABLED,
 		self::NO_LOGIN_SESSION,
+		self::CROSS_ORIGIN,
 		self::UPDATE_ORDER_UNKNOWN,
 		self::OVERLAPPING_UPDATE,
 		self::MISSING,

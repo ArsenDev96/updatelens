@@ -22,6 +22,12 @@ $GLOBALS['updatelens_test'] = array(
 	'maintenance' => false,
 	'updates'     => array( 'akismet/akismet.php' => (object) array( 'Name' => 'Akismet' ) ),
 	'filters'     => array(),
+	// URL bases of the home, REST and admin stand-ins below.
+	'urls'        => array(
+		'home'  => 'https://example.com',
+		'rest'  => 'https://example.com/wp-json/',
+		'admin' => 'https://example.com/wp-admin/',
+	),
 );
 
 define( 'UPDATELENS_FILE', '/srv/wp-content/plugins/updatelens/updatelens.php' );
@@ -103,11 +109,11 @@ function wp_unslash( $value ) {
 }
 
 function home_url( $path = '' ) {
-	return 'https://example.com' . $path;
+	return $GLOBALS['updatelens_test']['urls']['home'] . $path;
 }
 
 function rest_url( $path = '' ) {
-	return 'https://example.com/wp-json/' . $path;
+	return $GLOBALS['updatelens_test']['urls']['rest'] . $path;
 }
 
 function add_query_arg( $key, $value, $url ) {
@@ -127,7 +133,7 @@ function nocache_headers() {
 }
 
 function admin_url( $path = '' ) {
-	return 'https://example.com/wp-admin/' . $path;
+	return $GLOBALS['updatelens_test']['urls']['admin'] . $path;
 }
 
 function wp_is_maintenance_mode() {

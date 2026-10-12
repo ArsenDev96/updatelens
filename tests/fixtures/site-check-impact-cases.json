@@ -2611,6 +2611,272 @@
         "findings": []
       }
     },
+    "home_cross_origin": {
+      "description": "The homepage is on another origin than wp-admin (www); REST passed at both.",
+      "site_checks": {
+        "status": "partial",
+        "checks": {
+          "home": {
+            "state": "not_run",
+            "reason": "baseline_missing",
+            "before": {
+              "available": false,
+              "reason": "cross_origin",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "age_seconds": null
+            },
+            "after": {
+              "available": false,
+              "reason": "no_baseline",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "delay_seconds": null
+            }
+          },
+          "rest": {
+            "state": "passed_both",
+            "reason": null,
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "body": "expected_user",
+                    "error_code": null,
+                    "duration_ms": 182,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:53:25Z",
+              "completed_at": "2025-10-10T09:53:25Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "body": "expected_user",
+                    "error_code": null,
+                    "duration_ms": 182,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "delay_seconds": 3
+            }
+          }
+        }
+      },
+      "potential_impact_site_checks": {
+        "status": "evaluated",
+        "checks": {
+          "home": {
+            "status": "not_applicable",
+            "state": "not_run",
+            "change": null,
+            "reason": "cross_origin",
+            "finding_count": null
+          },
+          "rest": {
+            "status": "evaluated",
+            "state": "passed_both",
+            "change": null,
+            "reason": null,
+            "finding_count": 0
+          }
+        },
+        "findings": []
+      }
+    },
+    "rest_cross_origin": {
+      "description": "The REST API is on another origin than wp-admin; the homepage passed at both.",
+      "site_checks": {
+        "status": "partial",
+        "checks": {
+          "home": {
+            "state": "passed_both",
+            "reason": null,
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "end_marker": "current",
+                    "duration_ms": 284,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:53:25Z",
+              "completed_at": "2025-10-10T09:53:25Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "end_marker": "current",
+                    "duration_ms": 284,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "delay_seconds": 3
+            }
+          },
+          "rest": {
+            "state": "not_run",
+            "reason": "baseline_missing",
+            "before": {
+              "available": false,
+              "reason": "cross_origin",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "age_seconds": null
+            },
+            "after": {
+              "available": false,
+              "reason": "no_baseline",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "delay_seconds": null
+            }
+          }
+        }
+      },
+      "potential_impact_site_checks": {
+        "status": "evaluated",
+        "checks": {
+          "home": {
+            "status": "evaluated",
+            "state": "passed_both",
+            "change": null,
+            "reason": null,
+            "finding_count": 0
+          },
+          "rest": {
+            "status": "not_applicable",
+            "state": "not_run",
+            "change": null,
+            "reason": "cross_origin",
+            "finding_count": null
+          }
+        },
+        "findings": []
+      }
+    },
+    "both_cross_origin": {
+      "description": "Homepage and REST API on another origin than wp-admin: no AFTER run started.",
+      "site_checks": {
+        "status": "unavailable",
+        "checks": {
+          "home": {
+            "state": "not_run",
+            "reason": "baseline_missing",
+            "before": {
+              "available": false,
+              "reason": "cross_origin",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "age_seconds": null
+            },
+            "after": {
+              "available": false,
+              "reason": "no_baseline",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "delay_seconds": null
+            }
+          },
+          "rest": {
+            "state": "not_run",
+            "reason": "baseline_missing",
+            "before": {
+              "available": false,
+              "reason": "cross_origin",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "age_seconds": null
+            },
+            "after": {
+              "available": false,
+              "reason": "no_baseline",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "delay_seconds": null
+            }
+          }
+        }
+      },
+      "potential_impact_site_checks": {
+        "status": "not_applicable",
+        "checks": {
+          "home": {
+            "status": "not_applicable",
+            "state": "not_run",
+            "change": null,
+            "reason": "cross_origin",
+            "finding_count": null
+          },
+          "rest": {
+            "status": "not_applicable",
+            "state": "not_run",
+            "change": null,
+            "reason": "cross_origin",
+            "finding_count": null
+          }
+        },
+        "findings": []
+      }
+    },
     "historical": {
       "description": "Recorded before site checks existed (no site check columns).",
       "site_checks": {

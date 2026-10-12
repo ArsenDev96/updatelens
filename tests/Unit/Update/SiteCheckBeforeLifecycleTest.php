@@ -579,6 +579,54 @@ final class SiteCheckBeforeLifecycleTest extends TestCase {
 	}
 
 	/**
+	 * A check whose target is on another origin than wp-admin is recorded as
+	 * `cross_origin`, whatever is stored for it; the other check is selected
+	 * on its own. Turned off or without a login session, those reasons come
+	 * first.
+	 */
+	public function test_checks_on_other_origins() {
+		$this->baseline( 'home' );
+		$this->baseline( 'rest' );
+		$this->site->time += 5;
+
+		$this->context['unsupported'] = array( 'home' );
+		$this->assertSame(
+			array(
+				'home' => 'cross_origin',
+				'rest' => 'attached:pass',
+			),
+			$this->before( $this->update() ),
+			'A stored homepage baseline is never attached.'
+		);
+
+		$this->site->time += 5;
+		$this->baseline( 'home' );
+		$this->site->time            += 5;
+		$this->context['unsupported'] = array( 'rest' );
+		$this->assertSame(
+			array(
+				'home' => 'attached:pass',
+				'rest' => 'cross_origin',
+			),
+			$this->before( $this->update() )
+		);
+
+		$this->site->time            += 5;
+		$this->context['unsupported'] = array( 'home', 'rest' );
+		$id                           = $this->update();
+		$this->assertSame( array( 'cross_origin', 'cross_origin' ), array_values( $this->before( $id ) ) );
+		$this->assertNull( $this->site->repository->rows[ $id ]['site_check_home_before'] );
+
+		$this->context['enabled'] = false;
+		$this->assertSame( array( 'disabled', 'disabled' ), array_values( $this->before( $this->update() ) ) );
+		$this->context['enabled'] = true;
+		$this->context['login']   = null;
+		$request                  = $this->site->request();
+		$request->update_starting( 'm/m.php', array(), 7, $this->activity->begin( $this->activity->new_token() ) );
+		$this->assertSame( array( 'no_login_session', 'no_login_session' ), array_values( $this->before( 5 ) ) );
+	}
+
+	/**
 	 * An unreadable ledger cannot prove the order: nothing is attached.
 	 */
 	public function test_unreadable_ledger() {

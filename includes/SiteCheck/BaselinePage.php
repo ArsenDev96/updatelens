@@ -18,11 +18,13 @@ defined( 'ABSPATH' ) || exit;
  *
  * Only on the Plugins and Updates screens, only for users who may update
  * plugins, with the opt-in on (Settings), outside maintenance mode, with a
- * WordPress login session and only while at least one plugin other than
- * UpdateLens has an update available. Every other admin page loads nothing
- * and sends no site check request. The start endpoint repeats the update
- * and freshness checks (AjaxEndpoints), so a page that stays open after
- * the last update was installed starts no further baselines.
+ * WordPress login session, only while at least one plugin other than
+ * UpdateLens has an update available and only if at least one check's
+ * target is on wp-admin's origin (TargetOrigin; a check on another origin
+ * gets AjaxEndpoints::UNSUPPORTED_REFRESH_IN). Every other admin page loads
+ * nothing and sends no site check request. The start endpoint repeats the
+ * update, freshness and origin checks (AjaxEndpoints), so a page that stays
+ * open after the last update was installed starts no further baselines.
  */
 final class BaselinePage {
 
@@ -95,9 +97,15 @@ final class BaselinePage {
 			return null;
 		}
 
+		$urls        = AjaxEndpoints::target_urls();
+		$unsupported = AjaxEndpoints::unsupported_checks( $urls );
+		if ( count( $unsupported ) === count( $urls ) ) {
+			// No check can run from this admin page's origin: nothing to load.
+			return null;
+		}
 		try {
 			$hasher  = null === $hasher ? ContextHasher::from_wordpress() : $hasher;
-			$targets = array_map( array( $hasher, 'target' ), AjaxEndpoints::target_urls() );
+			$targets = array_map( array( $hasher, 'target' ), $urls );
 			$login   = $hasher->session( $token );
 		} catch ( InvalidArgumentException $e ) {
 			return null;
@@ -112,7 +120,7 @@ final class BaselinePage {
 			'schedule' => array(
 				'refresh_after'       => Baselines::REFRESH_AFTER_SECONDS,
 				'retry_after_failure' => Baselines::RETRY_AFTER_FAILURE_SECONDS,
-				'refresh_in'          => Baselines::refresh_in( $baselines->readiness( get_current_user_id(), $login, $targets, $activity->quiet_generation() ) ),
+				'refresh_in'          => AjaxEndpoints::without_unsupported( Baselines::refresh_in( $baselines->readiness( get_current_user_id(), $login, $targets, $activity->quiet_generation() ) ), $unsupported ),
 			),
 		);
 	}

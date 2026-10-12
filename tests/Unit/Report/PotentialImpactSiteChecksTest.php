@@ -607,6 +607,45 @@ final class PotentialImpactSiteChecksTest extends TestCase {
 	}
 
 	/**
+	 * A check whose target is on another origin than wp-admin cannot run on
+	 * this site: not applicable (never passed, never a finding), and the
+	 * other check is evaluated on its own.
+	 */
+	public function test_checks_on_other_origins_are_not_applicable() {
+		$one = self::evaluate(
+			self::row(
+				array(
+					'home' => 'cross_origin',
+					'rest' => F::before( 'rest', array( F::rest() ) ),
+				),
+				array( 'rest' => F::after( 'rest', array( F::rest() ) ) )
+			)
+		);
+		$this->assertSame( 'evaluated', $one['status'] );
+		$this->assertSame(
+			array(
+				'home' => array( 'not_applicable', 'not_run', 'cross_origin', null ),
+				'rest' => array( 'evaluated', 'passed_both', null, 0 ),
+			),
+			self::checks( $one )
+		);
+		$this->assertSame( array(), $one['findings'] );
+
+		$both = self::evaluate(
+			self::row(
+				array(
+					'home' => 'cross_origin',
+					'rest' => 'cross_origin',
+				),
+				array(),
+				array( SiteCheckAfter::STARTED_AT => null )
+			)
+		);
+		$this->assertSame( 'not_applicable', $both['status'] );
+		$this->assertSame( array( 'not_applicable', 'not_run', 'cross_origin', null ), self::checks( $both )['rest'] );
+	}
+
+	/**
 	 * Unexpected problems are never "not applicable": a stored baseline that
 	 * cannot be read, an AFTER run that never started.
 	 */

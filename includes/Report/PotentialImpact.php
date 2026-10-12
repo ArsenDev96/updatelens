@@ -159,11 +159,12 @@ final class PotentialImpact {
 
 	/**
 	 * Reasons of a check that was not part of this analysis at all: site
-	 * checks were turned off for the update, or the analysis was recorded
-	 * before UpdateLens had them. Such a check is `not_applicable`, never an
-	 * incomplete evaluation.
+	 * checks were turned off for the update, the check's target is on another
+	 * origin than wp-admin (the browser cannot run it on this site), or the
+	 * analysis was recorded before UpdateLens had them. Such a check is
+	 * `not_applicable`, never an incomplete evaluation and never a pass.
 	 */
-	const SITE_CHECK_NOT_USED = array( BeforeReason::DISABLED, BeforeReason::NOT_CAPTURED, AfterReason::NOT_CAPTURED );
+	const SITE_CHECK_NOT_USED = array( BeforeReason::DISABLED, BeforeReason::CROSS_ORIGIN, BeforeReason::NOT_CAPTURED, AfterReason::NOT_CAPTURED );
 
 	/**
 	 * Rules per signal, in output order.
@@ -293,7 +294,8 @@ final class PotentialImpact {
 	 * Per check `status`: `evaluated` (compared; `finding_count` 0 or 1),
 	 * `pending` (the AFTER result may still arrive), `not_evaluated` (not
 	 * compared; `reason` says why) or `not_applicable` (site checks were off
-	 * for this update or not recorded yet; SITE_CHECK_NOT_USED). Overall:
+	 * for this update, the target is on another origin, or not recorded yet;
+	 * SITE_CHECK_NOT_USED). Overall:
 	 * `not_applicable` when no check applies, else `pending` while one is,
 	 * `evaluated` (every applicable check), `partial` (some) or
 	 * `not_evaluated` (none).

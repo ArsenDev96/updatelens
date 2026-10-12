@@ -26,12 +26,14 @@ defined( 'ABSPATH' ) || exit;
  *   one run's attempts (ReportValidator format) once.
  *
  * BEFORE runs keep baselines (Baselines). A `before` start opens sessions
- * only for the checks whose baseline is due, only while a plugin other than
+ * only for the checks whose baseline is due and whose target is on
+ * wp-admin's origin (TargetOrigin), only while a plugin other than
  * UpdateLens has an update available and only while no update is running;
  * otherwise it succeeds with `code` `not_needed` (`reason` `fresh`,
  * `no_updates` or `update_in_progress`), opens nothing and
  * does not count against the rate limit. `before` responses carry
- * `refresh_in` (seconds per check until its baseline is due). An accepted
+ * `refresh_in` (seconds per check until its baseline is due;
+ * UNSUPPORTED_REFRESH_IN for a check on another origin). An accepted
  * `before` report is stored as its check's baseline (`baseline`: `saved`,
  * or `superseded` when a run that started later is already stored); if it
  * cannot be stored, the report fails with `unavailable`.
@@ -70,6 +72,13 @@ final class AjaxEndpoints {
 	 * Nonce action (sent as `_ajax_nonce`).
 	 */
 	const NONCE_ACTION = 'updatelens_site_check';
+
+	/**
+	 * `refresh_in` of a check whose target is on another origin: it never
+	 * becomes due, so this is the longest delay the browser accepts
+	 * (`REFRESH_IN_BOUNDS` in `src/admin/site-check/contract.ts`).
+	 */
+	const UNSUPPORTED_REFRESH_IN = 3600;
 
 	/**
 	 * Capability required (the one that allows plugin updates).
@@ -168,6 +177,33 @@ final class AjaxEndpoints {
 	}
 
 	/**
+	 * Checks whose target is on another origin than wp-admin (TargetOrigin):
+	 * the browser cannot run them from this admin page.
+	 *
+	 * @param array<string, string> $urls Target URL per check (target_urls()).
+	 * @return string[] Check identifiers.
+	 */
+	public static function unsupported_checks( array $urls ) {
+		return TargetOrigin::unsupported( $urls, admin_url( 'admin-ajax.php' ) );
+	}
+
+	/**
+	 * `refresh_in` with every check that cannot run from this admin page set
+	 * to UNSUPPORTED_REFRESH_IN, so the browser does not ask for it again.
+	 *
+	 * @param array<string, int> $refresh_in  Seconds per check.
+	 * @param string[]           $unsupported Checks on another origin.
+	 * @return array<string, int>
+	 */
+	public static function without_unsupported( array $refresh_in, array $unsupported ) {
+		foreach ( $unsupported as $check ) {
+			$refresh_in[ $check ] = self::UNSUPPORTED_REFRESH_IN;
+		}
+
+		return $refresh_in;
+	}
+
+	/**
 	 * Register the actions (logged-in only).
 	 *
 	 * @return void
@@ -216,7 +252,8 @@ final class AjaxEndpoints {
 			$generation = $opened['generation'];
 			$targets    = array_intersect_key( $targets, array_flip( $opened['checks'] ) );
 		} elseif ( CheckSession::PURPOSE_BEFORE === $purpose ) {
-			$generation = $this->activity()->quiet_generation();
+			$generation  = $this->activity()->quiet_generation();
+			$unsupported = self::unsupported_checks( $urls );
 			if ( ! call_user_func( $this->has_updates ) ) {
 				self::not_needed( 'no_updates' );
 				return;
@@ -224,12 +261,13 @@ final class AjaxEndpoints {
 			if ( null === $generation ) {
 				// An update is running (or the order is unknown): a baseline taken
 				// now could never be attached, so none is started.
-				self::not_needed( 'update_in_progress', array_fill_keys( array_keys( CheckDefinition::VERSIONS ), Baselines::RETRY_AFTER_FAILURE_SECONDS ) );
+				self::not_needed( 'update_in_progress', self::without_unsupported( array_fill_keys( array_keys( CheckDefinition::VERSIONS ), Baselines::RETRY_AFTER_FAILURE_SECONDS ), $unsupported ) );
 				return;
 			}
 			$readiness  = $this->baselines()->readiness( $user, $login, $targets, $generation );
-			$refresh_in = Baselines::refresh_in( $readiness );
-			$due        = Baselines::due( $readiness );
+			$refresh_in = self::without_unsupported( Baselines::refresh_in( $readiness ), $unsupported );
+			// A check on another origin is never due: no session, no rate limit.
+			$due = array_values( array_diff( Baselines::due( $readiness ), $unsupported ) );
 			if ( array() === $due ) {
 				self::not_needed( 'fresh', $refresh_in );
 				return;

@@ -479,6 +479,72 @@ describe( 'Site checks in Potential Impact', () => {
 		).toBeInTheDocument();
 	} );
 
+	it( 'homepage on another origin: not supported, quiet, never passed; REST still compared', async () => {
+		const user = userEvent.setup();
+		await renderReport( withSiteChecks( COMPLETED, 'home_cross_origin' ) );
+
+		expect(
+			within( impact() ).getByText(
+				'No findings matched the completed observations.'
+			)
+		).toBeInTheDocument();
+		expect( incompleteTexts() ).toEqual( [] );
+		expect(
+			within( impact() ).getByText(
+				'Based on Net result and site checks'
+			)
+		).toBeInTheDocument();
+		const checked = await checkedRows( user );
+		expect( checked[ 'Homepage check' ] ).toBe(
+			'Not supported on this site · The homepage is on a different address than wp-admin (another scheme, host or port), so the browser cannot check it from the update screens. It was not checked and is not counted as passed.'
+		);
+		expect( checked[ 'REST API check' ] ).toMatch(
+			/^Passed at both observation points/
+		);
+		expect(
+			impact().querySelector( 'dd[data-category="not_applicable"]' )
+		).toHaveClass( 'text-slate-600' );
+		expect( impact().textContent ).not.toMatch( FORBIDDEN );
+	} );
+
+	it( 'REST API on another origin: the homepage is compared on its own', async () => {
+		const user = userEvent.setup();
+		await renderReport( withSiteChecks( COMPLETED, 'rest_cross_origin' ) );
+
+		expect( incompleteTexts() ).toEqual( [] );
+		const checked = await checkedRows( user );
+		expect( checked[ 'Homepage check' ] ).toMatch(
+			/^Passed at both observation points/
+		);
+		expect( checked[ 'REST API check' ] ).toBe(
+			'Not supported on this site · The REST API is on a different address than wp-admin (another scheme, host or port), so the browser cannot check it from the update screens. It was not checked and is not counted as passed.'
+		);
+	} );
+
+	it( 'both on another origin: one quiet row, no warning, no site check patterns', async () => {
+		const user = userEvent.setup();
+		await renderReport( withSiteChecks( COMPLETED, 'both_cross_origin' ) );
+
+		expect(
+			within( impact() ).getByText(
+				'No findings matched the completed observations.'
+			)
+		).toBeInTheDocument();
+		expect( incompleteTexts() ).toEqual( [] );
+		expect(
+			within( impact() ).getByText( 'Based on Net result' )
+		).toBeInTheDocument();
+		const checked = await checkedRows( user );
+		expect( checked[ 'Site checks' ] ).toBe(
+			'Not supported on this site · The homepage and the REST API are on a different address than wp-admin (another scheme, host or port), so the browser cannot check them from the update screens. They were not checked and are not counted as passed.'
+		);
+		expect( checked[ 'Homepage check' ] ).toBeUndefined();
+		expect( impact().querySelector( 'details' ) ).not.toHaveTextContent(
+			'Site checks: a homepage'
+		);
+		expect( impact().textContent ).not.toMatch( FORBIDDEN );
+	} );
+
 	it( 'historical report without site check data: quiet, not a failure', async () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'historical' ) );

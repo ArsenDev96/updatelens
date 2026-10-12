@@ -496,6 +496,33 @@ describe( 'createBaselineScheduler', () => {
 		expect( await scheduler.evaluate() ).toBe( 'ran' );
 	} );
 
+	it( 'a check on another origin (never due, 3600 s from PHP) never starts a run on its own', async () => {
+		const harness = deps( {
+			run: async ( signal ) => {
+				harness.runs.push( signal );
+				return result(
+					outcome( 'home', 'not_run', { error: 'not_issued' } ),
+					outcome( 'rest', 'reported', { verdict: 'pass' } ),
+					{ refreshIn: { home: 3600, rest: 0 } }
+				);
+			},
+		} );
+		const scheduler = createBaselineScheduler(
+			settings( { home: 3600, rest: 0 } ),
+			harness.deps
+		);
+
+		expect( await scheduler.evaluate() ).toBe( 'ran' );
+		expect( scheduler.dueAt().home ).toBe( 1760093600000 );
+		// The REST baseline is refreshed every five minutes; the homepage never asks.
+		vi.advanceTimersByTime( 299999 );
+		expect( await scheduler.evaluate() ).toBe( 'skipped' );
+		vi.advanceTimersByTime( 1 );
+		expect( await scheduler.evaluate() ).toBe( 'ran' );
+		expect( harness.runs ).toHaveLength( 2 );
+		expect( scheduler.dueAt().home ).toBe( 1760093900000 );
+	} );
+
 	it( 'never runs twice at once', async () => {
 		let finish: () => void = () => undefined;
 		const harness = deps( {

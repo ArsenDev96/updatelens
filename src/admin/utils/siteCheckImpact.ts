@@ -847,7 +847,7 @@ export function siteCheckCoverage(
 		case 'not_applicable':
 			return {
 				category: 'not_applicable',
-				...notUsedText( evaluation.reason ),
+				...notUsedText( evaluation.reason, check ),
 			};
 		default:
 			return {
@@ -959,12 +959,22 @@ function changedText(
 /**
  * Why site checks were not part of an update.
  *
- * @param reason `disabled` or `not_captured`.
+ * @param reason `disabled`, `cross_origin` or `not_captured`.
+ * @param check  The check, or null for both.
  */
-function notUsedText( reason: string | null ): {
+function notUsedText(
+	reason: string | null,
+	check: SiteCheckId | null
+): {
 	status: string;
 	detail: string | null;
 } {
+	if ( reason === 'cross_origin' ) {
+		return {
+			status: __( 'Not supported on this site', 'updatelens' ),
+			detail: crossOriginText( check ),
+		};
+	}
 	return reason === 'disabled'
 		? {
 				status: __( 'Not used', 'updatelens' ),
@@ -994,10 +1004,41 @@ export function siteChecksNotUsed(
 	if ( siteChecksApplicable( impact ) ) {
 		return null;
 	}
-	const disabled = SITE_CHECKS.some(
-		( check ) => impact.site_checks?.checks[ check ]?.reason === 'disabled'
+	const reasons = SITE_CHECKS.map(
+		( check ) => impact.site_checks?.checks[ check ]?.reason
 	);
-	return notUsedText( disabled ? 'disabled' : 'not_captured' );
+	if ( reasons.every( ( reason ) => reason === 'cross_origin' ) ) {
+		return notUsedText( 'cross_origin', null );
+	}
+	return notUsedText(
+		reasons.includes( 'disabled' ) ? 'disabled' : 'not_captured',
+		null
+	);
+}
+
+/**
+ * Why a check on another origin than wp-admin did not run.
+ *
+ * @param check The check, or null for both.
+ */
+function crossOriginText( check: SiteCheckId | null ): string {
+	switch ( check ) {
+		case 'home':
+			return __(
+				'The homepage is on a different address than wp-admin (another scheme, host or port), so the browser cannot check it from the update screens. It was not checked and is not counted as passed.',
+				'updatelens'
+			);
+		case 'rest':
+			return __(
+				'The REST API is on a different address than wp-admin (another scheme, host or port), so the browser cannot check it from the update screens. It was not checked and is not counted as passed.',
+				'updatelens'
+			);
+		default:
+			return __(
+				'The homepage and the REST API are on a different address than wp-admin (another scheme, host or port), so the browser cannot check them from the update screens. They were not checked and are not counted as passed.',
+				'updatelens'
+			);
+	}
 }
 
 /**

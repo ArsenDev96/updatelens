@@ -773,6 +773,87 @@ final class SiteCheckWordPressTest extends TestCase {
 	}
 
 	/**
+	 * A check whose target is on another origin than wp-admin can never run
+	 * in the browser: a `before` start opens no session for it and reports
+	 * it as not due for the longest delay; the other check runs as usual.
+	 * With both on other origins nothing opens and no start is counted.
+	 */
+	public function test_before_start_skips_checks_on_other_origins() {
+		$cases = array(
+			'homepage on www'          => array( array( 'home' => 'https://www.example.com' ), array( 'rest' ) ),
+			'REST on another host'     => array( array( 'rest' => 'https://api.example.com/wp-json/' ), array( 'home' ) ),
+			'homepage over http'       => array( array( 'home' => 'http://example.com' ), array( 'rest' ) ),
+			'REST on another port'     => array( array( 'rest' => 'https://example.com:8443/wp-json/' ), array( 'home' ) ),
+			'explicit default port'    => array( array( 'home' => 'https://example.com:443' ), array( 'home', 'rest' ) ),
+			'WordPress in a directory' => array( array( 'admin' => 'https://example.com/wp/wp-admin/' ), array( 'home', 'rest' ) ),
+		);
+		$urls  = $GLOBALS['updatelens_test']['urls'];
+		foreach ( $cases as $name => list( $changed, $opened ) ) {
+			$GLOBALS['updatelens_test']['urls'] = array_merge( $urls, $changed );
+			$this->store->values                = array();
+			$this->meta                         = array();
+
+			$response = $this->call( 'start', array( 'purpose' => 'before' ) );
+			$this->assertSame( 'started', $response['data']['code'], $name );
+			$this->assertSame( $opened, array_column( $response['data']['checks'], 'check' ), $name );
+			$this->assertCount( count( $opened ), $this->store->values, $name . ': one session per check that can run.' );
+			$this->assertCount( 1, json_decode( $this->meta[7], true ), $name . ': one start counted.' );
+			foreach ( array( 'home', 'rest' ) as $check ) {
+				$this->assertSame( in_array( $check, $opened, true ) ? 0 : 3600, $response['data']['refresh_in'][ $check ], $name . ': ' . $check );
+			}
+			$this->assertSame(
+				in_array( 'home', $opened, true ) ? 0 : 3600,
+				BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['schedule']['refresh_in']['home'],
+				$name
+			);
+		}
+
+		// Both on other origins: nothing to run, no session, nothing counted, no script.
+		$GLOBALS['updatelens_test']['urls'] = array(
+			'home'  => 'http://localhost:3000',
+			'rest'  => 'http://localhost:3000/wp-json/',
+			'admin' => 'http://localhost:8080/wp-admin/',
+		);
+		$this->store->values                = array();
+		$this->meta                         = array();
+		$this->assertSame(
+			array(
+				true,
+				array(
+					'code'       => 'not_needed',
+					'purpose'    => 'before',
+					'reason'     => 'fresh',
+					'refresh_in' => array(
+						'home' => 3600,
+						'rest' => 3600,
+					),
+				),
+				null,
+			),
+			array_values( $this->call( 'start', array( 'purpose' => 'before' ) ) )
+		);
+		$this->assertSame( array(), $this->store->values, 'No session was opened.' );
+		$this->assertSame( array(), $this->meta, 'No start was counted.' );
+		$this->assertNull( BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity ), 'No baseline script.' );
+
+		// While an update runs, a check on another origin is still never due.
+		$this->activity->begin( $this->activity->new_token() );
+		$GLOBALS['updatelens_test']['urls']['rest'] = 'http://localhost:8080/wp-json/';
+		$this->assertSame(
+			array(
+				'home' => 3600,
+				'rest' => 120,
+			),
+			$this->call( 'start', array( 'purpose' => 'before' ) )['data']['refresh_in']
+		);
+
+		// Site checks turned off: refused before anything else, as before.
+		$GLOBALS['updatelens_test']['options']['updatelens_site_checks'] = 'disabled';
+		$this->assertSame( array( false, array( 'code' => 'disabled' ), 403 ), array_values( $this->call( 'start', array( 'purpose' => 'before' ) ) ) );
+		$this->assertSame( array(), $this->meta );
+	}
+
+	/**
 	 * AFTER reports are not baselines; a BEFORE report that cannot be stored
 	 * fails (its session is used up).
 	 */

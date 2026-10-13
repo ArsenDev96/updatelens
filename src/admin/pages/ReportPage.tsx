@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 
 import { getAnalysis } from '../api/analyses';
 import type { ApiError } from '../api/errors';
+import { initialReport } from '../api/initial-data';
 import { AppLink } from '../components/AppLink';
 import {
 	findingListKind,
@@ -23,7 +24,12 @@ import {
 } from '../utils/highlight';
 import { LoadError } from '../components/LoadError';
 import { PhaseTabs } from '../components/PhaseTabs';
-import { ReportOverview } from '../components/ReportOverview';
+import { ReportGlance } from '../components/ReportGlance';
+import {
+	DEFAULT_VISIBLE_FINDINGS,
+	ReportOverview,
+} from '../components/ReportOverview';
+import { SiteResponseChecks } from '../components/SiteResponseChecks';
 import { SignalDetail } from '../components/SignalDetail';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
@@ -33,12 +39,14 @@ import {
 	type ManualRefresh,
 	type PendingRefresh,
 } from '../hooks/use-pending-refresh';
+import { usePageLoadFallback } from '../hooks/use-page-load-fallback';
 import { useRequest } from '../hooks/use-request';
 import type {
 	AnalysisReport,
 	ImpactFinding,
 	PhaseKey,
 	Provider,
+	SiteCheckId,
 } from '../types/api';
 import { reportChangeCounts } from '../utils/changes';
 import { formatCount, formatDateTime } from '../utils/format';
@@ -51,12 +59,18 @@ import {
 	providerLabel,
 	reportNotice,
 	reportTooLargeText,
+	requestFailureText,
 	settleOutcomeText,
 	type ReportNotice,
 	type Tone,
 } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
 import type { ReportRoute, Route, RouteItem } from '../utils/route';
+import {
+	siteCheckButtonId,
+	siteCheckFindingButtonId,
+	siteCheckViewKey,
+} from '../utils/siteChecks';
 import { TONE_ICON } from '../utils/tone';
 
 interface ReportPageProps {
@@ -68,6 +82,11 @@ interface ReportPageProps {
 	onNavigate: ( route: Route, replace?: boolean ) => void;
 	/** Move focus to the title once loaded (after in-app navigation). */
 	focusHeading: boolean;
+	/**
+	 * Whether this is the view the page was loaded for: then the report the
+	 * admin page printed is used (no REST needed). Default true.
+	 */
+	initialView?: boolean;
 }
 
 /**
@@ -81,10 +100,24 @@ export function ReportPage( {
 	href,
 	onNavigate,
 	focusHeading,
+	initialView = true,
 }: ReportPageProps ) {
 	const { id } = route;
-	const load = useCallback( () => getAnalysis( id ), [ id ] );
+	// Decided when the report opens: moving between its overview and signal
+	// pages (in-app navigation) never reads it again.
+	const [ fromPage ] = useState( initialView );
+	// The report the page was loaded with first; REST after in-app navigation.
+	const load = useCallback(
+		() => ( fromPage ? initialReport( id ) : null ) ?? getAnalysis( id ),
+		[ id, fromPage ]
+	);
 	const [ request, reload ] = useRequest( load );
+	// Opened in the app while REST fails: load the page again (it prints the
+	// report itself) instead of showing the error.
+	const reloading = usePageLoadFallback(
+		request.status === 'error' ? request.error : null,
+		! fromPage
+	);
 	const history: Route = { view: 'history', page: route.page };
 	// A newer report read in the background while results were pending, or by
 	// Refresh. It replaces the loaded one in place (the report stays mounted,
@@ -118,12 +151,14 @@ export function ReportPage( {
 					{ __( 'Update History', 'updatelens' ) }
 				</AppLink>
 			) }
-			{ request.status === 'loading' && <ReportSkeleton /> }
-			{ request.status === 'error' && (
+			{ ( request.status === 'loading' || reloading ) && (
+				<ReportSkeleton />
+			) }
+			{ request.status === 'error' && ! reloading && (
 				<LoadError
 					error={ request.error }
 					message={ __(
-						"This report couldn't be loaded. Try again.",
+						"This report couldn't be loaded.",
 						'updatelens'
 					) }
 					onRetry={ reload }
@@ -161,7 +196,7 @@ function Report( {
 	refresh,
 	pendingRefresh,
 	focusHeading,
-}: Omit< ReportPageProps, 'route' > & {
+}: Omit< ReportPageProps, 'route' | 'initialView' > & {
 	report: AnalysisReport;
 	route: ReportRoute;
 	refresh: ManualRefresh;
@@ -217,6 +252,25 @@ function Report( {
 	// The finding last opened from the overview (its index): back on the
 	// overview, focus returns to its link instead of the title.
 	const returnTo = useRef< number | null >( null );
+	// Site response checks and their Potential Impact findings link to each
+	// other: the target is expanded and receives focus.
+	const expand = ( key: string, visible: number, focus: string ) => {
+		if ( impactView.open[ key ] === undefined ) {
+			setImpactView( {
+				...impactView,
+				open: { ...impactView.open, [ key ]: visible },
+			} );
+		}
+		focusSoon( focus );
+	};
+	const showSiteCheck = ( check: SiteCheckId ) =>
+		expand( siteCheckViewKey( check ), 1, siteCheckButtonId( check ) );
+	const showSiteFinding = ( check: SiteCheckId ) =>
+		expand(
+			`site_check:${ check }`,
+			DEFAULT_VISIBLE_FINDINGS,
+			siteCheckFindingButtonId( check )
+		);
 
 	// After in-app navigation (also between overview and details), focus
 	// moves to the view's title. Switching phases keeps focus on the tab.
@@ -305,6 +359,20 @@ function Report( {
 					onFocus={ onStatusFocus }
 				/>
 			) }
+			<ReportGlance
+				report={ report }
+				counts={ counts }
+				onShowFinding={ showSiteFinding }
+			/>
+			{ /* Its own evidence, the same whatever phase is selected below. */ }
+			<SiteResponseChecks
+				siteChecks={ report.site_checks }
+				impact={ report.potential_impact.site_checks }
+				pendingRefresh={ pendingRefresh }
+				view={ impactView }
+				onViewChange={ setImpactView }
+				onShowFinding={ showSiteFinding }
+			/>
 			{ selected && (
 				<PhaseTabs
 					counts={ {
@@ -328,7 +396,7 @@ function Report( {
 						}
 						impact={ report.potential_impact }
 						siteChecks={ report.site_checks }
-						pendingRefresh={ pendingRefresh }
+						onShowSiteCheck={ showSiteCheck }
 						findingHref={ ( finding ) =>
 							href( findingRoute( finding ) )
 						}
@@ -671,29 +739,13 @@ function ReportHeader( {
 				<p className="mt-1.5 text-[1.0625rem] font-medium tabular-nums text-slate-800 [&>[aria-hidden=true]]:mx-0.5 [&>[aria-hidden=true]]:text-slate-400">
 					<Versions plugin={ report.plugin } />
 				</p>
-				{ ( updated || report.plugin.file ) && (
-					<p className="mt-1.5 flex flex-col gap-y-0.5 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2">
-						{ updated && (
-							<span>
-								{ sprintf(
-									/* translators: %s: date and time of the update. */
-									__( 'Updated %s', 'updatelens' ),
-									updated
-								) }
-							</span>
-						) }
-						{ updated && report.plugin.file && (
-							<span
-								aria-hidden="true"
-								className="hidden text-slate-300 sm:inline"
-							>
-								·
-							</span>
-						) }
-						{ report.plugin.file && (
-							<span className="break-all font-mono text-[13px]">
-								{ report.plugin.file }
-							</span>
+				{ /* The plugin file is in the technical details. */ }
+				{ updated && (
+					<p className="mt-1.5 text-sm text-muted-foreground">
+						{ sprintf(
+							/* translators: %s: date and time of the update. */
+							__( 'Updated %s', 'updatelens' ),
+							updated
 						) }
 					</p>
 				) }
@@ -790,10 +842,26 @@ function refreshErrorText( error: ApiError ): string {
 	if ( error.kind === 'too_large' ) {
 		return reportTooLargeText();
 	}
-	return __(
-		"The report couldn't be refreshed. The details shown may be out of date. Try again.",
+	const cause = requestFailureText( error );
+	const text = __(
+		"The report couldn't be refreshed. The details shown are from the last successful read.",
 		'updatelens'
 	);
+	return cause ? `${ text } ${ cause }` : text;
+}
+
+/**
+ * Focus an element once the view that expands it has rendered, and bring it
+ * into view.
+ *
+ * @param id Element id.
+ */
+function focusSoon( id: string ) {
+	setTimeout( () => {
+		const element = document.getElementById( id );
+		element?.focus( { preventScroll: true } );
+		element?.scrollIntoView?.( { block: 'center' } );
+	}, 0 );
 }
 
 const TONE_ICON_NAME: Record< Tone, IconName > = {
@@ -895,7 +963,7 @@ function TechnicalDetails( {
 		plain.push( [
 			__( 'Selected phase', 'updatelens' ),
 			sprintf(
-				/* translators: 1: observation phase, e.g. "Net result". 2: what the phase covers. */
+				/* translators: 1: a label, e.g. an observation phase ("Net result") or a check ("Homepage"). 2: what it says, e.g. "3 changes". */
 				__( '%1$s: %2$s', 'updatelens' ),
 				phaseLabel( phase ),
 				phaseNote( phase )

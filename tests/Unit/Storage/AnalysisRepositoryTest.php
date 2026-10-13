@@ -56,7 +56,8 @@ final class AnalysisRepositoryTest extends TestCase {
 	}
 
 	/**
-	 * The SELECT list is written out: metadata plus, per HISTORY_DIFFS column
+	 * The SELECT list is written out: metadata, the site check result columns
+	 * (for each item's site check comparison) plus, per HISTORY_DIFFS column
 	 * in order, a stored flag and a has-changes flag with a LIKE placeholder.
 	 */
 	public function test_history_query_selects_metadata_and_flags() {
@@ -69,7 +70,7 @@ final class AnalysisRepositoryTest extends TestCase {
 		}
 
 		$this->assertSame(
-			'SELECT ' . AnalysisRepository::REPORT_METADATA_COLUMNS . ', ' . implode( ', ', $flags ) . ' FROM %i ORDER BY id DESC LIMIT %d OFFSET %d',
+			'SELECT ' . AnalysisRepository::REPORT_METADATA_COLUMNS . ', ' . AnalysisRepository::SITE_CHECK_RESULT_COLUMNS . ', ' . implode( ', ', $flags ) . ' FROM %i ORDER BY id DESC LIMIT %d OFFSET %d',
 			$template
 		);
 	}
@@ -94,12 +95,17 @@ final class AnalysisRepositoryTest extends TestCase {
 	}
 
 	/**
-	 * History never reads diff JSON, snapshots, reasons, user IDs or stored messages.
+	 * History never reads diff JSON, snapshots, signal reasons, user IDs or
+	 * stored messages. Of the site check columns it reads only the result
+	 * facts and their fixed reason codes (no fingerprints, users or URLs are
+	 * stored there).
 	 */
 	public function test_history_query_reads_no_internals() {
 		list( $template ) = $this->history_query();
 
 		$selected = preg_replace( '/ FROM %i .*\z/', '', substr( $template, strlen( 'SELECT ' ) ) );
+		$selected = str_replace( AnalysisRepository::SITE_CHECK_RESULT_COLUMNS . ', ', '', $selected );
+		$template = str_replace( AnalysisRepository::SITE_CHECK_RESULT_COLUMNS, '', $template );
 		foreach ( explode( ', ', $selected ) as $expression ) {
 			$this->assertMatchesRegularExpression( '/\A([a-z_]+|[a-z_]+_diff (IS NOT NULL|NOT LIKE %s) AS has_(changes_)?[a-z_]+_diff)\z/', $expression );
 		}

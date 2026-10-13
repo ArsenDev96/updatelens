@@ -64,6 +64,9 @@ function deferred() {
 }
 
 const impact = () => screen.getByRole( 'region', { name: 'Potential impact' } );
+/** The site response checks section (pending results and their refresh). */
+const site = () =>
+	screen.getByRole( 'region', { name: 'Site response checks' } );
 const statusLine = () =>
 	screen.getByRole( 'region', { name: 'Analysis status' } );
 const refreshButton = () =>
@@ -201,7 +204,7 @@ describe( 'Refresh', () => {
 
 		const alert = await within( statusLine() ).findByRole( 'alert' );
 		expect( alert ).toHaveTextContent(
-			"The report couldn't be refreshed. The details shown may be out of date. Try again."
+			"The report couldn't be refreshed. The details shown are from the last successful read. The site's REST API returned an error (HTTP 500). Stored reports are not affected."
 		);
 		expect( document.body ).not.toHaveTextContent( 'Server says' );
 		expect( screen.queryByText( 'Refreshing report…' ) ).toBeNull();
@@ -296,7 +299,7 @@ describe( 'Refresh with pending site check results', () => {
 		await wait( PENDING_REFRESH_INTERVAL_MS );
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 2 );
 		expect(
-			within( impact() ).getByRole( 'button', { name: 'Check now' } )
+			within( site() ).getByRole( 'button', { name: 'Refresh results' } )
 		).toHaveAttribute( 'aria-disabled', 'true' );
 
 		const manual = deferred();
@@ -322,7 +325,9 @@ describe( 'Refresh with pending site check results', () => {
 		).toBeInTheDocument();
 		expect( screen.getByText( 'Report refreshed.' ) ).toBeInTheDocument();
 		expect(
-			within( impact() ).queryByRole( 'button', { name: 'Check now' } )
+			within( site() ).queryByRole( 'button', {
+				name: 'Refresh results',
+			} )
 		).toBeNull();
 
 		// Resolved: no further background reads.
@@ -340,7 +345,7 @@ describe( 'Refresh with pending site check results', () => {
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 2 );
 		// The background read now in flight is the manual one.
 		expect(
-			within( impact() ).getByRole( 'button', { name: 'Check now' } )
+			within( site() ).getByRole( 'button', { name: 'Refresh results' } )
 		).toHaveAttribute( 'aria-disabled', 'true' );
 
 		// Its turn comes, but the manual read is still in flight.
@@ -354,7 +359,7 @@ describe( 'Refresh with pending site check results', () => {
 		await wait( 1 );
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 3 );
 		// Still pending: background reading goes on.
-		expect( impact() ).toHaveTextContent(
+		expect( site() ).toHaveTextContent(
 			'This report checks for the pending site check results every few seconds while it is open.'
 		);
 	} );
@@ -388,9 +393,7 @@ describe( 'Report load errors', () => {
 		openReport( 60 );
 
 		const alert = await screen.findByRole( 'alert' );
-		expect( alert ).toHaveTextContent(
-			"This report couldn't be loaded. Try again."
-		);
+		expect( alert ).toHaveTextContent( "This report couldn't be loaded." );
 		expect( alert ).not.toHaveTextContent( 'memory' );
 		expect( document.body ).not.toHaveTextContent( 'Server says' );
 		expect(

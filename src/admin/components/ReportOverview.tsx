@@ -3,11 +3,11 @@ import { Fragment } from 'react';
 
 import { cn } from '@/lib/utils';
 
-import type { PendingRefresh } from '../hooks/use-pending-refresh';
 import type {
 	ImpactFinding,
 	PhaseKey,
 	PotentialImpact as PotentialImpactData,
+	SiteCheckId,
 	SiteChecks,
 	Provider,
 	ReportPhase,
@@ -16,6 +16,7 @@ import type { PhaseChangeCounts } from '../utils/changes';
 import type { ImpactView } from '../utils/impact';
 import { formatCount } from '../utils/format';
 import {
+	actionSchedulerNotDetectedText,
 	observedChangesText,
 	phaseSummarySentences,
 	PROVIDERS,
@@ -27,11 +28,15 @@ import { AppLink } from './AppLink';
 import { Icon } from './Icon';
 import { PotentialImpact } from './PotentialImpact';
 
+export { DEFAULT_VISIBLE_FINDINGS } from './PotentialImpact';
+
 /*
- * The overview of one phase: a summary panel with its total of observed
- * changes and plain sentences, Potential Impact (always the Net result),
- * then one card per signal that opens the signal's details. No change rows
- * here: they belong to the detail views.
+ * The overview of one phase: the configuration changes of the phase (its
+ * total of observed changes and plain sentences), Potential Impact (always
+ * the Net result), then one card per signal that opens the signal's
+ * details. No change rows here: they belong to the detail views. The site
+ * response checks are not part of any phase: the report page shows them
+ * above the phase tabs.
  */
 
 /**
@@ -45,7 +50,7 @@ import { PotentialImpact } from './PotentialImpact';
  * @param props.onOpenSignal    Opens a signal's details in the app.
  * @param props.impact          Potential Impact of the report (Net result and site checks).
  * @param props.siteChecks      The report's site checks.
- * @param props.pendingRefresh  Background reads while site check results are pending.
+ * @param props.onShowSiteCheck Opens a check in "Site response checks".
  * @param props.findingHref     Link target of a finding's signal details.
  * @param props.onOpenFinding   Opens a finding's signal details in the app.
  * @param props.onShowNetResult Selects the Net result phase; null if selected.
@@ -61,7 +66,7 @@ export function ReportOverview( {
 	onOpenSignal,
 	impact,
 	siteChecks,
-	pendingRefresh,
+	onShowSiteCheck,
 	findingHref,
 	onOpenFinding,
 	onShowNetResult,
@@ -76,7 +81,7 @@ export function ReportOverview( {
 	onOpenSignal: ( signal: Provider ) => void;
 	impact: PotentialImpactData;
 	siteChecks?: SiteChecks;
-	pendingRefresh?: PendingRefresh;
+	onShowSiteCheck: ( check: SiteCheckId ) => void;
 	findingHref: ( finding: ImpactFinding ) => string;
 	onOpenFinding: ( finding: ImpactFinding ) => void;
 	onShowNetResult: ( () => void ) | null;
@@ -94,7 +99,7 @@ export function ReportOverview( {
 			<PotentialImpact
 				impact={ impact }
 				siteChecks={ siteChecks }
-				pendingRefresh={ pendingRefresh }
+				onShowSiteCheck={ onShowSiteCheck }
 				windowSeconds={ windowSeconds }
 				findingHref={ findingHref }
 				onOpenFinding={ onOpenFinding }
@@ -114,6 +119,10 @@ export function ReportOverview( {
 						data={ data }
 						count={ counts[ provider ] }
 						windowSeconds={ windowSeconds }
+						actionSchedulerAbsent={
+							impact.signals.action_scheduler.status ===
+							'not_applicable'
+						}
 						href={ signalHref( provider ) }
 						onOpen={ () => onOpenSignal( provider ) }
 					/>
@@ -124,9 +133,10 @@ export function ReportOverview( {
 }
 
 /**
- * The phase's result: its total of observed changes, where they were
- * observed, and that observations are not causes. The phase itself is named
- * by the selected tab; its description is in the technical details.
+ * The phase's configuration changes: its total of observed changes, where
+ * they were observed, and that observations are not causes. The phase
+ * itself is named by the selected tab; its description is in the technical
+ * details. Without changes it stays compact.
  *
  * @param props               Props.
  * @param props.data          Phase data of every signal.
@@ -156,20 +166,23 @@ function UpdateSummary( {
 	return (
 		<section
 			aria-labelledby="updatelens-summary-title"
-			className="rounded-xl border border-tint-border bg-tint px-5 py-5 sm:px-8 sm:py-7"
+			className={ cn(
+				'rounded-xl border border-tint-border bg-tint px-5 sm:px-8',
+				hasChanges ? 'py-5 sm:py-7' : 'py-4 sm:py-5'
+			) }
 		>
 			<h3
 				id="updatelens-summary-title"
 				className="text-xs font-semibold uppercase tracking-[0.08em] text-tint-foreground"
 			>
-				{ __( 'Update summary', 'updatelens' ) }
+				{ __( 'Configuration changes', 'updatelens' ) }
 			</h3>
 			<p
 				className={ cn(
 					'mt-2 tabular-nums tracking-tight text-slate-900',
 					hasChanges
 						? 'text-[2rem] font-semibold leading-tight sm:text-[2.5rem]'
-						: 'text-2xl font-semibold leading-snug'
+						: 'text-xl font-semibold leading-snug'
 				) }
 			>
 				{ observedChangesText( counts.total ) }
@@ -179,7 +192,12 @@ function UpdateSummary( {
 					{ sentences.join( ' ' ) }
 				</p>
 			) }
-			<p className="mt-5 flex gap-2 border-t border-tint-border pt-4 text-[13px] leading-5 text-slate-600 sm:mt-6">
+			<p
+				className={ cn(
+					'flex gap-2 border-t border-tint-border text-[13px] leading-5 text-slate-600',
+					hasChanges ? 'mt-5 pt-4 sm:mt-6' : 'mt-4 pt-3'
+				) }
+			>
 				<Icon name="info" className="mt-0.5 size-4 text-slate-500" />
 				<span>
 					{ __(
@@ -225,6 +243,8 @@ function signalDescription( provider: Provider ): string {
  * @param props.data          Phase data of every signal.
  * @param props.count         Change count of the signal, null if unavailable.
  * @param props.windowSeconds Observation window length from the API.
+ * @param props.actionSchedulerAbsent Whether Action Scheduler's absence is
+ *                            confirmed for the whole update (Potential Impact).
  * @param props.href          Link target of the signal's details.
  * @param props.onOpen        Opens the details in the app.
  */
@@ -233,6 +253,7 @@ function SignalCard( {
 	data,
 	count,
 	windowSeconds,
+	actionSchedulerAbsent,
 	href,
 	onOpen,
 }: {
@@ -240,16 +261,24 @@ function SignalCard( {
 	data: ReportPhase;
 	count: number | null;
 	windowSeconds: number;
+	actionSchedulerAbsent: boolean;
 	href: string;
 	onOpen: () => void;
 } ) {
 	const statusId = `updatelens-card-${ provider }-status`;
 	const hasChanges = ( count ?? 0 ) > 0;
 	const breakdown = hasChanges ? signalBreakdown( provider, data ) : [];
-	const unavailable =
-		count === null
-			? signalUnavailableText( provider, data, windowSeconds )?.title
-			: null;
+	// Not detected is worded by its evidence, like the observation coverage.
+	const notDetected =
+		provider === 'action_scheduler' &&
+		! data.action_scheduler.available &&
+		data.action_scheduler.reason === 'not_installed';
+	let unavailable: string | null | undefined = null;
+	if ( count === null ) {
+		unavailable = notDetected
+			? actionSchedulerNotDetectedText( actionSchedulerAbsent )
+			: signalUnavailableText( provider, data, windowSeconds )?.title;
+	}
 
 	return (
 		<li
@@ -289,7 +318,7 @@ function SignalCard( {
 					</p>
 				</div>
 			</div>
-			<p id={ statusId } className="mt-3 md:mt-5">
+			<p id={ statusId } className="mt-3">
 				<span
 					className={ cn(
 						'block tabular-nums',
@@ -322,14 +351,14 @@ function SignalCard( {
 			<span
 				aria-hidden="true"
 				className={ cn(
-					'mt-3 block self-start md:mt-auto md:self-stretch md:pt-5',
+					'mt-3 block self-start md:mt-auto md:self-stretch md:pt-3',
 					// Centered on the state's first line on phones.
 					hasChanges ? 'pt-1.5' : 'pt-0.5'
 				) }
 			>
 				<span
 					className={ cn(
-						'flex items-center gap-1.5 text-sm font-medium md:justify-between md:gap-2 md:border-t md:pt-3',
+						'flex items-center gap-1.5 text-sm font-medium md:justify-between md:gap-2 md:border-t md:pt-2.5',
 						hasChanges ? 'text-primary' : 'text-slate-600'
 					) }
 				>

@@ -88,6 +88,7 @@ export default function App( {
 						navigate( { view: 'history', page } )
 					}
 					focusHeading={ navigated }
+					initialView={ ! navigated }
 					pluginsUrl={ pluginsUrl }
 				/>
 			) }
@@ -98,6 +99,7 @@ export default function App( {
 					href={ href }
 					onNavigate={ navigate }
 					focusHeading={ navigated }
+					initialView={ ! navigated }
 				/>
 			) }
 		</div>

@@ -4,6 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HistoryPage } from '@/admin/pages/HistoryPage';
+import type { SiteCheckImpact } from '@/admin/types/api';
+
+import cases from '../fixtures/site-check-impact-cases.json';
 
 import {
 	COMPLETED,
@@ -75,7 +78,7 @@ describe( 'HistoryPage', () => {
 		);
 		expect( first ).toHaveTextContent( 'UpdateLens Fixture A' );
 		expect( first ).toHaveTextContent( /1\.0\.0\s*→\s*to\s*1\.1\.0/ );
-		expect( first ).toHaveTextContent( 'Completed' );
+		expect( first ).toHaveTextContent( 'Update completed' );
 		expect( first ).not.toHaveTextContent( 'Partial report' );
 		expect( first ).toHaveTextContent( 'View report' );
 		expect(
@@ -194,7 +197,7 @@ describe( 'HistoryPage', () => {
 
 		const alert = await screen.findByRole( 'alert' );
 		expect( alert ).toHaveTextContent(
-			"Update history couldn't be loaded. Try again."
+			"Update history couldn't be loaded."
 		);
 		expect( document.body ).not.toHaveTextContent(
 			/database|updatelens_reports_unavailable/
@@ -209,13 +212,113 @@ describe( 'HistoryPage', () => {
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 3 );
 	} );
 
+	it.each( [
+		[ 'home_newly_failing', 'newly_failing', 'Newly failing: Homepage' ],
+		[ 'rest_newly_failing', 'newly_failing', 'Newly failing: REST API' ],
+		[ 'both_passed', 'passed', 'Passed before and after' ],
+		[ 'one_unavailable', 'partial', '1 of 2 compared' ],
+		[ 'unconfirmed', 'partial', '1 of 2 compared' ],
+		[ 'no_baseline', 'not_compared', 'Not compared' ],
+		[ 'pending', 'pending', 'Waiting for results' ],
+		[ 'disabled', 'disabled', 'Off for this update' ],
+		[ 'both_cross_origin', 'unsupported', 'Not supported on this site' ],
+		[ 'historical', 'not_recorded', 'Not recorded for this update' ],
+	] as Array< [ keyof typeof cases.cases, string, string ] > )(
+		'%s: site checks have their own line, apart from the status badge',
+		async ( name, kind, text ) => {
+			const evaluation = cases.cases[ name ]
+				.potential_impact_site_checks as SiteCheckImpact;
+			apiFetchMock.mockResolvedValue(
+				listResponse( [
+					historyItem( COMPLETED, {
+						site_checks: {
+							status: evaluation.status,
+							checks: evaluation.checks,
+						},
+					} ),
+				] )
+			);
+			renderHistory();
+
+			const [ link ] = await screen.findAllByRole( 'link' );
+			const line = link.querySelector( '[data-outcome]' )!;
+			expect( line ).toHaveAttribute( 'data-outcome', kind );
+			expect( line ).toHaveTextContent( `Site checks: ${ text }` );
+			// The update's own status stays a separate badge.
+			expect( link ).toHaveTextContent( 'Update completed' );
+			expect( line ).not.toHaveTextContent( 'Update completed' );
+			// Visible text, not a hidden detail: a failure needs no report open.
+			if ( kind === 'newly_failing' ) {
+				expect(
+					line.querySelector( '.text-rose-800' )
+				).toHaveTextContent( text );
+			}
+			if ( kind !== 'passed' ) {
+				expect( line.textContent ).not.toMatch( /Passed/ );
+			}
+		}
+	);
+
+	it( 'an older API without site checks reads as not recorded', async () => {
+		const { site_checks: omitted, ...older } = historyItem( COMPLETED );
+		void omitted;
+		apiFetchMock.mockResolvedValue( listResponse( [ older ] ) );
+		renderHistory();
+
+		const [ link ] = await screen.findAllByRole( 'link' );
+		expect( link.querySelector( '[data-outcome]' ) ).toHaveTextContent(
+			'Site checks: Not recorded for this update'
+		);
+	} );
+
 	it( 'explains a permission error', async () => {
-		apiFetchMock.mockRejectedValue( new Response( '{}', { status: 403 } ) );
+		apiFetchMock.mockRejectedValue(
+			new Response(
+				JSON.stringify( {
+					code: 'rest_forbidden',
+					data: { status: 403 },
+				} ),
+				{ status: 403 }
+			)
+		);
 		renderHistory();
 
 		expect( await screen.findByRole( 'alert' ) ).toHaveTextContent(
 			"You don't have permission to view UpdateLens reports."
 		);
 		expect( screen.queryByRole( 'button', { name: 'Retry' } ) ).toBeNull();
+	} );
+
+	it( 'tells a REST API blocked in front of WordPress from a missing permission', async () => {
+		// A firewall's HTML page: not UpdateLens's permission check.
+		apiFetchMock.mockRejectedValue(
+			new Response( '<!doctype html><h1>Forbidden</h1>', { status: 403 } )
+		);
+		renderHistory();
+
+		const alert = await screen.findByRole( 'alert' );
+		expect( alert ).toHaveTextContent(
+			"Update history couldn't be loaded."
+		);
+		expect( alert ).toHaveTextContent(
+			"The site's REST API refused the request (HTTP 403). A security plugin, firewall or host setting may be blocking it for administrators. Stored reports are not affected."
+		);
+		expect( alert ).not.toHaveTextContent( 'permission' );
+		expect( alert ).not.toHaveTextContent( 'Forbidden' );
+		expect(
+			screen.getByRole( 'button', { name: 'Retry' } )
+		).toBeInTheDocument();
+	} );
+
+	it( 'says when the REST API answers with something other than data', async () => {
+		// PHP output printed before the JSON.
+		apiFetchMock.mockResolvedValue(
+			new Response( 'Warning: output before JSON\n[]', { status: 200 } )
+		);
+		renderHistory();
+
+		expect( await screen.findByRole( 'alert' ) ).toHaveTextContent(
+			"The site's REST API answered with something other than data (HTTP 200), for example PHP output, an error page or a firewall page. Stored reports are not affected."
+		);
 	} );
 } );

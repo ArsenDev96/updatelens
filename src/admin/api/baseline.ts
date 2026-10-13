@@ -2,6 +2,7 @@ import apiFetch from '@wordpress/api-fetch';
 
 import type { BaselinePlugin, MonitoringBaseline } from '../types/api';
 import { toApiError } from './errors';
+import { initialMonitoring } from './initial-data';
 
 const PATH = '/updatelens/v1/baseline';
 
@@ -52,6 +53,11 @@ function normalize( data: unknown ): MonitoringBaseline {
  * @throws {ApiError}
  */
 export async function getBaseline(): Promise< MonitoringBaseline > {
+	// Printed with the History page the screen was loaded for, if any.
+	const initial = initialMonitoring();
+	if ( initial !== null ) {
+		return normalize( initial );
+	}
 	try {
 		return normalize( await apiFetch( { path: PATH } ) );
 	} catch ( error ) {
@@ -65,6 +71,10 @@ export async function getBaseline(): Promise< MonitoringBaseline > {
  * @throws {ApiError}
  */
 export async function getMonitoringStart(): Promise< string | null > {
+	const initial = initialMonitoring();
+	if ( initial !== null ) {
+		return normalize( initial ).started_at;
+	}
 	try {
 		return normalize(
 			await apiFetch( { path: `${ PATH }?_fields=started_at` } )

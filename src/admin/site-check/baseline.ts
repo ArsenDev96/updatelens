@@ -2,11 +2,13 @@
  * BEFORE baselines in the background on the Plugins and Updates screens.
  * Loaded by AdminAssets::enqueue_site_check_baseline() only where PHP allows
  * it (BaselinePage: opt-in on, `update_plugins`, a plugin update available,
- * no maintenance mode). No UI, no strings, no console output.
+ * no maintenance mode). Its only UI is the passive readiness line next to the
+ * screen's title (readiness.ts, texts from PHP); no console output.
  *
- * Event-driven, never polling: the page asks when it loads and whenever it
+ * Event-driven, never polling: the page asks when it loads, whenever it
  * becomes visible again (`visibilitychange`, window `focus`, a page restored
- * from the back/forward cache), and only for checks that are due. PHP owns
+ * from the back/forward cache) and once when an update's pause ends, and
+ * only for checks that are due. PHP owns
  * the freshness rules (Baselines): it says per check how long a baseline
  * stays fresh (`refresh_in`), and a `before` start opens sessions only for
  * the checks that are due, so a fresh homepage baseline is reused while
@@ -20,7 +22,8 @@
  * (`wp-plugin-updating`, or any form submission), a pending start is
  * dropped, a running baseline is aborted and no new one starts for
  * UPDATE_PAUSE_MS or while `updates.js` is busy; other tabs are told to do
- * the same.
+ * the same. When the pause ends, the page asks once more (the earlier checks
+ * are outdated by then), so the next update can be compared too.
  *
  * Tabs of one browser share the work: one run at a time (Web Locks, else a
  * short localStorage lease, else none), and each finished run tells the
@@ -28,6 +31,13 @@
  * redundant requests.
  */
 import { CHECKS, REFRESH_IN_BOUNDS, type CheckId } from './contract';
+import {
+	createReadiness,
+	mountReadinessLine,
+	parseReadinessSettings,
+	type ReadinessSettings,
+	type SharedBaseline,
+} from './readiness';
 import { runSiteChecks, type RunResult, type RunnerSettings } from './runner';
 
 /** Settings printed by PHP (BaselinePage::settings()). */
@@ -40,6 +50,8 @@ export interface BaselineSettings extends RunnerSettings {
 		/** Seconds until each check's baseline is due, when the page was built. */
 		refresh_in: Record< CheckId, number >;
 	};
+	/** The readiness line (absent or invalid: no line). */
+	status?: ReadinessSettings;
 }
 
 /** Web Lock (and fallback lease key) that allows one run per browser. */
@@ -78,7 +90,12 @@ const PERMANENT_NOT_RUN = [
 
 /** Messages between tabs. */
 export type SchedulerMessage =
-	| { type: 'due'; due: Partial< Record< CheckId, number > > }
+	| {
+			type: 'due';
+			due: Partial< Record< CheckId, number > >;
+			/** Earlier checks the sending tab stored (its readiness line). */
+			ready?: Partial< Record< CheckId, SharedBaseline > >;
+	  }
 	| { type: 'updating' };
 
 export interface SchedulerDependencies {
@@ -150,9 +167,11 @@ export function parseBaselineSettings(
 		return null;
 	}
 
+	const status = parseReadinessSettings( value.status );
 	return {
 		ajaxUrl: value.ajaxUrl,
 		nonce: value.nonce,
+		...( status ? { status } : {} ),
 		schedule: {
 			refresh_after: schedule.refresh_after,
 			retry_after_failure: schedule.retry_after_failure,
@@ -184,10 +203,18 @@ export function createBaselineScheduler(
 	let stopped = false;
 	let pausedUntil = 0;
 	let pending: ReturnType< typeof setTimeout > | null = null;
+	// One start when the update pause ends (the checks are due then).
+	let resume: ReturnType< typeof setTimeout > | null = null;
 	const dropPending = () => {
 		if ( pending !== null ) {
 			clearTimeout( pending );
 			pending = null;
+		}
+	};
+	const dropResume = () => {
+		if ( resume !== null ) {
+			clearTimeout( resume );
+			resume = null;
 		}
 	};
 
@@ -299,14 +326,30 @@ export function createBaselineScheduler(
 		},
 		updateStarted( fromOtherTab = false ) {
 			pausedUntil = deps.now() + UPDATE_PAUSE_MS;
+			// Every stored baseline is outdated once an update has run (PHP:
+			// `outdated`): due again when the pause ends, not at its old time.
+			CHECKS.forEach( ( check ) => {
+				if ( Number.isFinite( due[ check ] ) ) {
+					due[ check ] = Math.min( due[ check ], pausedUntil );
+				}
+			} );
 			dropPending();
 			running?.abort();
+			// The next update needs new earlier checks: ask once when the pause
+			// ends (evaluate() still requires a visible page and an idle
+			// updates.js), not only at the next focus or visibility change.
+			dropResume();
+			resume = setTimeout( () => {
+				resume = null;
+				scheduler.schedule();
+			}, UPDATE_PAUSE_MS );
 			if ( ! fromOtherTab ) {
 				deps.publish( { type: 'updating' } );
 			}
 		},
 		cancel() {
 			dropPending();
+			dropResume();
 			running?.abort();
 		},
 		receive( message ) {
@@ -458,6 +501,61 @@ export function bindBaseline( win: BaselineWindow ): BaselineScheduler | null {
 
 	let channel: BroadcastChannel | null = null;
 	const now = () => Date.now();
+
+	// The readiness line: what this page knows, never a request of its own.
+	const readiness = settings.status
+		? createReadiness( settings.status, now )
+		: null;
+	let line = settings.status
+		? mountReadinessLine( win.document, settings.status )
+		: null;
+	let expiry: ReturnType< typeof setTimeout > | null = null;
+	const render = () => {
+		if ( ! readiness || ! line ) {
+			return;
+		}
+		line.render( readiness.state(), readiness.isRunning() );
+		if ( expiry !== null ) {
+			clearTimeout( expiry );
+			expiry = null;
+		}
+		const next = readiness.nextChange();
+		if ( next !== null ) {
+			// A baseline that gets too old stops counting as ready.
+			expiry = setTimeout( render, Math.max( 0, next - now() ) + 50 );
+		}
+	};
+	const finished = ( result: RunResult | null ) => {
+		if ( ! readiness ) {
+			return;
+		}
+		if (
+			result?.status === 'not_needed' &&
+			result.reason === 'no_updates'
+		) {
+			// Nothing left to update here: the line has nothing to say.
+			line?.remove();
+			line = null;
+		} else if (
+			result?.status === 'start_failed' &&
+			STOP_ERRORS.includes( result.error ?? '' )
+		) {
+			readiness.stop();
+		} else if (
+			result?.status === 'not_needed' &&
+			result.reason === 'update_in_progress'
+		) {
+			readiness.updateStarted();
+		}
+		readiness.runFinished( result );
+		render();
+	};
+	const updateStarted = () => {
+		readiness?.updateStarted();
+		render();
+	};
+	render();
+
 	const scheduler = createBaselineScheduler( settings, {
 		now,
 		isVisible: () => win.document.visibilityState === 'visible',
@@ -470,17 +568,30 @@ export function bindBaseline( win: BaselineWindow ): BaselineScheduler | null {
 						updates.queue.length > 0 ) )
 			);
 		},
-		run: ( signal ) =>
-			runSiteChecks( settings, {
-				purpose: 'before',
-				signal,
-				fetch: fetchFn.bind( win ),
-				location: win.location,
-			} ),
+		run: async ( signal ) => {
+			readiness?.runStarted();
+			render();
+			let result: RunResult | null = null;
+			try {
+				result = await runSiteChecks( settings, {
+					purpose: 'before',
+					signal,
+					fetch: fetchFn.bind( win ),
+					location: win.location,
+				} );
+				return result;
+			} finally {
+				finished( result );
+			}
+		},
 		lock: createRunLock( win, now ),
 		publish: ( message ) => {
 			try {
-				channel?.postMessage( message );
+				channel?.postMessage(
+					message.type === 'due' && readiness
+						? { ...message, ready: readiness.shared() }
+						: message
+				);
 			} catch {
 				// Other tabs then ask the server themselves.
 			}
@@ -490,7 +601,22 @@ export function bindBaseline( win: BaselineWindow ): BaselineScheduler | null {
 	try {
 		if ( typeof win.BroadcastChannel === 'function' ) {
 			channel = new win.BroadcastChannel( CHANNEL_NAME );
-			channel.onmessage = ( event ) => scheduler.receive( event.data );
+			channel.onmessage = ( event ) => {
+				scheduler.receive( event.data );
+				const message: unknown = event.data;
+				if ( ! isRecord( message ) || ! readiness ) {
+					return;
+				}
+				if ( message.type === 'updating' ) {
+					updateStarted();
+				} else if (
+					message.type === 'due' &&
+					isRecord( message.ready )
+				) {
+					readiness.receive( message.ready );
+					render();
+				}
+			};
 		}
 	} catch {
 		channel = null;
@@ -508,13 +634,17 @@ export function bindBaseline( win: BaselineWindow ): BaselineScheduler | null {
 	// Passive listeners only: WordPress's own handlers run unchanged.
 	win.document.addEventListener(
 		'submit',
-		() => scheduler.updateStarted(),
+		() => {
+			scheduler.updateStarted();
+			updateStarted();
+		},
 		true
 	);
 	if ( typeof win.jQuery === 'function' ) {
-		win.jQuery( win.document ).on( 'wp-plugin-updating', () =>
-			scheduler.updateStarted()
-		);
+		win.jQuery( win.document ).on( 'wp-plugin-updating', () => {
+			scheduler.updateStarted();
+			updateStarted();
+		} );
 	}
 	// Module scripts run when the document is parsed: the grace period starts
 	// there, without waiting for images (plugin icons on the Updates screen).

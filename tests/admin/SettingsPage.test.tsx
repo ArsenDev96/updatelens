@@ -94,6 +94,9 @@ function section() {
 	return screen.getByRole( 'region', { name: /Site checks/ } );
 }
 
+/** The stored state's badge ("Saved setting: On"). */
+const badge = () => within( section() ).getByText( /^Saved setting:/ );
+
 describe( 'Settings page', () => {
 	beforeEach( () => {
 		apiFetchMock.mockReset();
@@ -112,10 +115,30 @@ describe( 'Settings page', () => {
 		expect(
 			screen.getByRole( 'heading', { level: 3, name: 'Site checks' } )
 		).toBeInTheDocument();
-		expect( within( section() ).getByText( 'Off' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
 		expect( checkbox() ).toHaveAccessibleDescription(
-			'Compare your homepage and WordPress REST API responses before and after supported manual plugin updates. UpdateLens records observed changes to help you investigate possible problems.'
+			'Compare your homepage and WordPress REST API responses just before and after a plugin update. Each report shows the results in its “Site response checks” section.'
 		);
+		// The workflow, visible without opening anything.
+		expect(
+			within(
+				screen.getByRole( 'list', { name: 'To compare an update:' } )
+			)
+				.getAllByRole( 'listitem' )
+				.map( ( item ) => item.textContent )
+		).toEqual( [
+			'Open Installed Plugins and wait until UpdateLens shows “Ready to compare site responses”.',
+			'Click “Update now” for the plugin there.',
+			'Keep that tab open for a few seconds after “Updated!” appears, so the checks after the update can finish.',
+		] );
+		// Further explanations are in "How site checks work".
+		for ( const point of [
+			/Turning site checks on does not test your site right away\./,
+			/Updates from Dashboard → Updates get no check after the update, so they are not compared\./,
+			/Missing, inconclusive and unsupported checks are never counted as passed\./,
+		] ) {
+			expect( screen.getByText( point ) ).not.toBeVisible();
+		}
 
 		// One read of the settings; no history, reports or site check requests.
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 1 );
@@ -133,10 +156,11 @@ describe( 'Settings page', () => {
 		openSettings();
 
 		expect( await screen.findByRole( 'checkbox' ) ).toBeChecked();
-		expect( within( section() ).getByText( 'On' ) ).toBeInTheDocument();
-		expect( within( section() ).getByText( /Saved setting:/ ) ).toHaveClass(
-			'sr-only'
-		);
+		expect( badge() ).toHaveTextContent( /^Saved setting: On$/ );
+		// The badge names what it shows: the saved setting.
+		expect(
+			within( section() ).getByText( /Saved setting:/ )
+		).toBeVisible();
 	} );
 
 	it( 'saves only on "Save settings", then shows the stored value', async () => {
@@ -149,7 +173,7 @@ describe( 'Settings page', () => {
 		expect( checkbox() ).toBeChecked();
 		expect( screen.getByText( 'Unsaved change' ) ).toBeInTheDocument();
 		expect( posts() ).toHaveLength( 0 );
-		expect( within( section() ).getByText( 'Off' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
 
 		await user.click( saveButton() );
 
@@ -165,7 +189,7 @@ describe( 'Settings page', () => {
 		expect( await screen.findByRole( 'status' ) ).toHaveTextContent(
 			'Settings saved. Site checks are on. They start the next time Plugins or Updates is opened while plugin updates are available.'
 		);
-		expect( within( section() ).getByText( 'On' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: On$/ );
 		expect(
 			screen.queryByText( 'Unsaved change' )
 		).not.toBeInTheDocument();
@@ -184,7 +208,7 @@ describe( 'Settings page', () => {
 
 		openSettings();
 		expect( await screen.findByRole( 'checkbox' ) ).toBeChecked();
-		expect( within( section() ).getByText( 'On' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: On$/ );
 	} );
 
 	it( 'turns site checks off', async () => {
@@ -203,7 +227,7 @@ describe( 'Settings page', () => {
 			'Settings saved. Site checks are off. Existing reports keep their site check results.'
 		);
 		expect( checkbox() ).not.toBeChecked();
-		expect( within( section() ).getByText( 'Off' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
 	} );
 
 	it( 'shows the saving state and sends one request for repeated saves', async () => {
@@ -260,10 +284,10 @@ describe( 'Settings page', () => {
 		await user.click( saveButton() );
 
 		expect( await screen.findByRole( 'alert' ) ).toHaveTextContent(
-			"Settings couldn't be saved. The setting shown as saved is unchanged. Try again."
+			"Settings couldn't be saved. The setting shown as saved is unchanged. The site's REST API returned an error (HTTP 500)."
 		);
 		expect( screen.queryByText( /Server detail/ ) ).not.toBeInTheDocument();
-		expect( within( section() ).getByText( 'Off' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
 		expect( checkbox() ).toBeChecked();
 		expect( screen.getByRole( 'status' ) ).toBeEmptyDOMElement();
 
@@ -271,7 +295,7 @@ describe( 'Settings page', () => {
 		await user.click( saveButton() );
 		expect( await screen.findByText( /Settings saved/ ) ).toBeVisible();
 		expect( screen.queryByRole( 'alert' ) ).not.toBeInTheDocument();
-		expect( within( section() ).getByText( 'On' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: On$/ );
 	} );
 
 	it( 'explains a refused save', async () => {
@@ -285,8 +309,9 @@ describe( 'Settings page', () => {
 		await user.click( checkbox() );
 		await user.click( saveButton() );
 
+		// A refused nonce is the login session, not a missing permission.
 		expect( await screen.findByRole( 'alert' ) ).toHaveTextContent(
-			"You don't have permission to change UpdateLens settings."
+			"Settings couldn't be saved. The setting shown as saved is unchanged. Your login session may have expired. Reload the page or log in again."
 		);
 	} );
 
@@ -300,7 +325,7 @@ describe( 'Settings page', () => {
 		await user.click( saveButton() );
 
 		expect( await screen.findByRole( 'alert' ) ).toBeInTheDocument();
-		expect( within( section() ).getByText( 'Off' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
 	} );
 
 	it( 'separates the saved preference from a host restriction', async () => {
@@ -308,9 +333,9 @@ describe( 'Settings page', () => {
 		openSettings();
 
 		expect( await screen.findByRole( 'checkbox' ) ).toBeChecked();
-		expect(
-			within( section() ).getByText( 'Off for this site' )
-		).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent(
+			/^Saved setting: Off for this site$/
+		);
 		expect(
 			within( section() ).queryByText( 'On' )
 		).not.toBeInTheDocument();
@@ -330,7 +355,7 @@ describe( 'Settings page', () => {
 		const user = userEvent.setup();
 		await screen.findByRole( 'checkbox' );
 
-		expect( within( section() ).getByText( 'Off' ) ).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
 		expect(
 			within( section() ).queryByText( 'Off for this site' )
 		).not.toBeInTheDocument();
@@ -347,9 +372,9 @@ describe( 'Settings page', () => {
 		expect( await screen.findByRole( 'status' ) ).toHaveTextContent(
 			"Settings saved. Site checks stay off because of this site's configuration."
 		);
-		expect(
-			within( section() ).getByText( 'Off for this site' )
-		).toBeInTheDocument();
+		expect( badge() ).toHaveTextContent(
+			/^Saved setting: Off for this site$/
+		);
 		expect(
 			screen
 				.getByText( /Your saved setting is on, but/ )
@@ -417,7 +442,7 @@ describe( 'Settings page', () => {
 		const user = userEvent.setup();
 
 		expect( await screen.findByRole( 'alert' ) ).toHaveTextContent(
-			"Settings couldn't be loaded. Try again."
+			"Settings couldn't be loaded."
 		);
 		expect( screen.queryByRole( 'checkbox' ) ).not.toBeInTheDocument();
 		await user.click( screen.getByRole( 'button', { name: 'Retry' } ) );

@@ -145,7 +145,7 @@ describe( 'Potential Impact', () => {
 		await renderReport( IMPACT );
 
 		const summary = screen.getByRole( 'region', {
-			name: 'Update summary',
+			name: 'Configuration changes',
 		} );
 		const cards = screen.getByRole( 'list', { name: 'Signals' } );
 		expect(

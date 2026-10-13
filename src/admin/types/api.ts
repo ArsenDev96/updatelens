@@ -140,6 +140,11 @@ export interface AnalysisHistoryItem extends AnalysisBase {
 	has_post_update: boolean;
 	has_final: boolean;
 	phases: Record< PhaseKey, HistoryPhase >;
+	/**
+	 * The report's site check evaluation (`potential_impact.site_checks`)
+	 * without findings; absent from APIs before it was added.
+	 */
+	site_checks?: Pick< SiteCheckImpact, 'status' | 'checks' >;
 }
 
 /** Options totals and signed deltas (`after - before`) in raw counts and bytes. */

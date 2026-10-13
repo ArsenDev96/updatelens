@@ -1,5 +1,6 @@
 import { _n, __, sprintf } from '@wordpress/i18n';
 
+import type { ApiError } from '../api/errors';
 import type {
 	ActionSchedulerUnavailableReason,
 	ActionScheduleType,
@@ -60,7 +61,7 @@ export function statusLabel(
 		case 'awaiting_settle':
 			return __( 'Observing', 'updatelens' );
 		case 'completed':
-			return __( 'Completed', 'updatelens' );
+			return __( 'Update completed', 'updatelens' );
 		case 'failed':
 			return __( 'Failed', 'updatelens' );
 		case 'incompatible':
@@ -110,6 +111,92 @@ export function reportTooLargeText(): string {
 		"This report is too large to load with the site's current PHP memory limit. The analysis is still stored, but its details cannot be displayed.",
 		'updatelens'
 	);
+}
+
+/**
+ * Why a request to UpdateLens's own REST routes failed, in fixed words
+ * (never the server's message): whether the site's REST API answered with
+ * something other than data, refused the request, or returned an error.
+ * Stored reports are not affected by any of these. Null when the caller's
+ * own text says it (not found, too large).
+ *
+ * @param error Failure.
+ */
+export function requestFailureText(
+	error: ApiError,
+	aboutReports = true
+): string | null {
+	const cause = requestCauseText( error );
+	// The stored data is never what failed; said only where reports were read.
+	return cause !== null &&
+		aboutReports &&
+		[ 'blocked', 'unreadable', 'failed' ].includes( error.kind )
+		? `${ cause } ${ __( 'Stored reports are not affected.', 'updatelens' ) }`
+		: cause;
+}
+
+/**
+ * The cause part of requestFailureText().
+ *
+ * @param error Failure.
+ */
+function requestCauseText( error: ApiError ): string | null {
+	switch ( error.kind ) {
+		case 'forbidden':
+			return __(
+				"You don't have permission to view UpdateLens reports.",
+				'updatelens'
+			);
+		case 'session':
+			return __(
+				'Your login session may have expired. Reload the page or log in again.',
+				'updatelens'
+			);
+		case 'blocked':
+			return sprintf(
+				/* translators: %s: HTTP status code, e.g. "401". */
+				__(
+					"The site's REST API refused the request (HTTP %s). A security plugin, firewall or host setting may be blocking it for administrators.",
+					'updatelens'
+				),
+				String( error.status ?? 403 )
+			);
+		case 'unreadable':
+			return error.status !== null
+				? sprintf(
+						/* translators: %s: HTTP status code, e.g. "200". */
+						__(
+							"The site's REST API answered with something other than data (HTTP %s), for example PHP output, an error page or a firewall page.",
+							'updatelens'
+						),
+						String( error.status )
+					)
+				: __(
+						"The site's REST API answered with something other than data, for example PHP output, an error page or a firewall page.",
+						'updatelens'
+					);
+		case 'offline':
+			return __(
+				'The request did not reach the site. Check the connection and try again.',
+				'updatelens'
+			);
+		case 'failed':
+			return error.status !== null
+				? sprintf(
+						/* translators: %s: HTTP status code, e.g. "500". */
+						__(
+							"The site's REST API returned an error (HTTP %s).",
+							'updatelens'
+						),
+						String( error.status )
+					)
+				: __(
+						"The request to the site's REST API failed.",
+						'updatelens'
+					);
+		default:
+			return null;
+	}
 }
 
 export function phaseLabel( phase: PhaseKey ): string {
@@ -250,11 +337,11 @@ export function signalStatusText( count: number | null ): string {
 }
 
 /**
- * Signal names as a list: "A", "A and B", "A, B and C".
+ * Names as a list: "A", "A and B", "A, B and C".
  *
- * @param items Signal names (at most three).
+ * @param items Names (at most three).
  */
-function listText( items: string[] ): string {
+export function listText( items: string[] ): string {
 	if ( items.length === 1 ) {
 		return items[ 0 ];
 	}
@@ -654,6 +741,24 @@ export function cronUnavailableReasonText(
  * @param reason        API reason.
  * @param windowSeconds Observation window length from the API.
  */
+/**
+ * Action Scheduler not detected in a phase (`not_installed`), worded by the
+ * evidence: confirmed absent at every capture of the update (Potential
+ * Impact made it not applicable), or seen absent at the start of a phase
+ * only (older analyses), which is not confirmed. The overview's card and the
+ * observation coverage use the same words.
+ *
+ * @param confirmed Whether the absence is confirmed for the whole update.
+ */
+export function actionSchedulerNotDetectedText( confirmed: boolean ): string {
+	return confirmed
+		? __( 'Action Scheduler not detected', 'updatelens' )
+		: __(
+				'Action Scheduler not detected (not confirmed for the whole update)',
+				'updatelens'
+			);
+}
+
 export function actionSchedulerUnavailableReasonText(
 	reason: ActionSchedulerUnavailableReason | string,
 	windowSeconds: number

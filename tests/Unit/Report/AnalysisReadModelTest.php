@@ -177,7 +177,7 @@ final class AnalysisReadModelTest extends TestCase {
 	 * Only whitelisted fields, with JSON types; database strings become ints/bools.
 	 */
 	public function test_history_item_fields_and_types() {
-		$item = ( new AnalysisReadModel() )->history_item(
+		$item         = ( new AnalysisReadModel() )->history_item(
 			self::row(
 				array(
 					'has_options_during_update_diff' => '1',
@@ -185,9 +185,16 @@ final class AnalysisReadModelTest extends TestCase {
 				)
 			)
 		);
-		$none = array(
+		$none         = array(
 			'recorded'    => false,
 			'has_changes' => null,
+		);
+		$not_captured = array(
+			'status'        => 'not_applicable',
+			'state'         => 'not_run',
+			'change'        => null,
+			'reason'        => 'not_captured',
+			'finding_count' => null,
 		);
 
 		$this->assertSame(
@@ -228,6 +235,14 @@ final class AnalysisReadModelTest extends TestCase {
 						'options'          => $none,
 						'cron'             => $none,
 						'action_scheduler' => $none,
+					),
+				),
+				// A row without site check columns: recorded before site checks.
+				'site_checks'       => array(
+					'status' => 'not_applicable',
+					'checks' => array(
+						'home' => $not_captured,
+						'rest' => $not_captured,
 					),
 				),
 			),

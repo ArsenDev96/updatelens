@@ -5,18 +5,23 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 import { getAnalyses, PER_PAGE } from '../api/analyses';
+import { initialHistory } from '../api/initial-data';
 import { FirstRun } from '../components/FirstRun';
+import { Icon } from '../components/Icon';
 import { LoadError } from '../components/LoadError';
 import { MonitoringBoundary } from '../components/MonitoringBoundary';
 import { Pagination } from '../components/Pagination';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
+import { usePageLoadFallback } from '../hooks/use-page-load-fallback';
 import { useRequest } from '../hooks/use-request';
 import type { AnalysisHistoryItem } from '../types/api';
 import { historyPhaseState } from '../utils/changes';
 import { formatDateTime } from '../utils/format';
 import { historyPhaseText, PHASE_KEYS, phaseLabel } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
+import { siteCheckOutcome } from '../utils/siteChecks';
+import { TONE_ICON } from '../utils/tone';
 
 interface HistoryPageProps {
 	page: number;
@@ -26,6 +31,11 @@ interface HistoryPageProps {
 	onPageChange: ( page: number ) => void;
 	/** Move focus to the heading (after in-app navigation). */
 	focusHeading: boolean;
+	/**
+	 * Whether this is the view the page was loaded for: then the History page
+	 * the admin page printed is used (no REST needed). Default true.
+	 */
+	initialView?: boolean;
 	/** Plugins screen URL for the first-run screen; empty if the user cannot open it. */
 	pluginsUrl?: string;
 }
@@ -36,10 +46,22 @@ export function HistoryPage( {
 	onOpenReport,
 	onPageChange,
 	focusHeading,
+	initialView = true,
 	pluginsUrl = '',
 }: HistoryPageProps ) {
-	const load = useCallback( () => getAnalyses( page, PER_PAGE ), [ page ] );
+	// The page the screen was loaded with first; REST after in-app navigation.
+	const load = useCallback(
+		() =>
+			( initialView ? initialHistory( page, PER_PAGE ) : null ) ??
+			getAnalyses( page, PER_PAGE ),
+		[ page, initialView ]
+	);
 	const [ request, retry ] = useRequest( load );
+	// Paged in the app while REST fails: load the page again instead.
+	const reloading = usePageLoadFallback(
+		request.status === 'error' ? request.error : null,
+		! initialView
+	);
 	const heading = useRef< HTMLHeadingElement >( null );
 	// Before the first analysis, onboarding replaces the history.
 	const firstRun = request.status === 'ready' && request.data.total === 0;
@@ -76,13 +98,15 @@ export function HistoryPage( {
 				</p>
 			</div>
 
-			{ request.status === 'loading' && <HistorySkeleton /> }
+			{ ( request.status === 'loading' || reloading ) && (
+				<HistorySkeleton />
+			) }
 
-			{ request.status === 'error' && (
+			{ request.status === 'error' && ! reloading && (
 				<LoadError
 					error={ request.error }
 					message={ __(
-						"Update history couldn't be loaded. Try again.",
+						"Update history couldn't be loaded.",
 						'updatelens'
 					) }
 					onRetry={ retry }
@@ -173,6 +197,7 @@ function HistoryRow( {
 					<Versions plugin={ item.plugin } />
 				</p>
 				<PhaseChanges item={ item } />
+				<SiteChecksLine item={ item } />
 			</div>
 			<div className="flex items-center justify-between gap-4 text-sm sm:flex-col sm:items-end sm:justify-center sm:gap-1">
 				{ date && (
@@ -226,6 +251,53 @@ function PhaseChanges( { item }: { item: AnalysisHistoryItem } ) {
 				);
 			} ) }
 		</ul>
+	);
+}
+
+/**
+ * The update's site response checks, apart from its status badge: the same
+ * outcome as the report summary (newly failing first, then pending,
+ * passed, partly or not compared, off, unsupported or not recorded), so a
+ * failing check is visible without opening the report.
+ *
+ * @param props      Props.
+ * @param props.item History item.
+ */
+function SiteChecksLine( { item }: { item: AnalysisHistoryItem } ) {
+	const outcome = siteCheckOutcome( item.site_checks );
+	const failing = outcome.kind === 'newly_failing';
+	return (
+		<p
+			data-outcome={ outcome.kind }
+			className="flex items-start gap-1.5 text-xs leading-5"
+		>
+			<Icon
+				name={ outcome.icon }
+				className={ cn(
+					'mt-0.5 size-4 shrink-0',
+					TONE_ICON[ outcome.tone ]
+				) }
+			/>
+			<span>
+				<span className="text-muted-foreground">
+					{ __( 'Site checks', 'updatelens' ) }
+					<span className="sr-only">:</span>
+				</span>{ ' ' }
+				<span
+					className={ cn(
+						failing
+							? 'font-semibold text-rose-800'
+							: outcome.tone === 'caution'
+								? 'font-medium text-amber-900'
+								: outcome.tone === 'neutral'
+									? 'text-muted-foreground'
+									: 'font-medium text-foreground'
+					) }
+				>
+					{ outcome.value }
+				</span>
+			</span>
+		</p>
 	);
 }
 

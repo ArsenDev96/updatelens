@@ -8,6 +8,7 @@
 namespace UpdateLens\Tests\Unit\Report;
 
 use PHPUnit\Framework\TestCase;
+use UpdateLens\Report\AnalysisReadModel;
 use UpdateLens\Report\PotentialImpact;
 use UpdateLens\Report\SiteCheckReport;
 use UpdateLens\Tests\Support\SiteCheckFixture as F;
@@ -400,6 +401,24 @@ final class SiteCheckImpactCasesTest extends TestCase {
 		}
 
 		$this->assertSame( $generated, json_decode( (string) file_get_contents( $file ), true ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local fixture.
+	}
+
+	/**
+	 * A history item's site checks are the report's evaluation without its
+	 * findings, from the same stored row: History and the report never differ.
+	 */
+	public function test_history_items_share_the_report_evaluation() {
+		foreach ( self::cases() as $name => list( , $row, $now ) ) {
+			$model  = new AnalysisReadModel(
+				static function () use ( $now ) {
+					return $now;
+				}
+			);
+			$report = $model->report( $row )['potential_impact']['site_checks'];
+			unset( $report['findings'] );
+
+			$this->assertSame( $report, $model->history_item( $row )['site_checks'], $name );
+		}
 	}
 
 	/**

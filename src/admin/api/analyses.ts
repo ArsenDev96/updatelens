@@ -5,7 +5,7 @@ import type {
 	AnalysisHistoryItem,
 	AnalysisReport,
 } from '../types/api';
-import { toApiError } from './errors';
+import { ApiError, responseError, toApiError } from './errors';
 
 const BASE_PATH = '/updatelens/v1/analyses';
 
@@ -35,14 +35,25 @@ export async function getAnalyses(
 			path: `${ BASE_PATH }?page=${ page }&per_page=${ perPage }`,
 			parse: false,
 		} );
-		const items = ( await response.json() ) as AnalysisHistoryItem[];
+		let items: unknown;
+		try {
+			items = await response.json();
+		} catch {
+			// A 200 that is not JSON: PHP output before the data, an HTML page.
+			throw new ApiError( 'unreadable', response.status );
+		}
 
 		return {
-			items: Array.isArray( items ) ? items : [],
+			items: Array.isArray( items )
+				? ( items as AnalysisHistoryItem[] )
+				: [],
 			total: headerInt( response, 'X-WP-Total' ),
 			totalPages: headerInt( response, 'X-WP-TotalPages' ),
 		};
 	} catch ( error ) {
+		if ( error instanceof Response ) {
+			throw await responseError( error );
+		}
 		throw toApiError( error );
 	}
 }
@@ -55,10 +66,25 @@ export async function getAnalyses(
  */
 export async function getAnalysis( id: number ): Promise< AnalysisReport > {
 	try {
-		return await apiFetch< AnalysisReport >( {
+		// Like the History: the response itself, so a failure keeps its
+		// HTTP status (apiFetch drops it for an answer that is not JSON).
+		const response: unknown = await apiFetch< Response, false >( {
 			path: `${ BASE_PATH }/${ id }`,
+			parse: false,
 		} );
+		// A middleware may answer with the parsed data instead.
+		if ( ! ( response instanceof Response ) ) {
+			return response as AnalysisReport;
+		}
+		try {
+			return ( await response.json() ) as AnalysisReport;
+		} catch {
+			throw new ApiError( 'unreadable', response.status );
+		}
 	} catch ( error ) {
+		if ( error instanceof Response ) {
+			throw await responseError( error );
+		}
 		throw toApiError( error );
 	}
 }

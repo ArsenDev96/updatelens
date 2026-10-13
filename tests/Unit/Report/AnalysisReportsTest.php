@@ -250,6 +250,20 @@ final class AnalysisReportsTest extends TestCase {
 						),
 					)
 				),
+				// This test site's rows have no site check columns written.
+				'site_checks'       => array(
+					'status' => 'not_applicable',
+					'checks' => array_fill_keys(
+						array( 'home', 'rest' ),
+						array(
+							'status'        => 'not_applicable',
+							'state'         => 'not_run',
+							'change'        => null,
+							'reason'        => 'not_captured',
+							'finding_count' => null,
+						)
+					),
+				),
 			),
 			$history['items'][0]
 		);
@@ -1067,7 +1081,7 @@ final class AnalysisReportsTest extends TestCase {
 		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
 		$items = $this->reports()->history( 1, 20 )['items'];
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'error', 'has_during_update', 'has_post_update', 'has_final', 'phases' ), array_keys( $items[1] ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'error', 'has_during_update', 'has_post_update', 'has_final', 'phases', 'site_checks' ), array_keys( $items[1] ) );
 		$this->assertTrue( $items[1]['has_final'], 'Flags describe the options signal.' );
 		$this->assertSame(
 			array(
@@ -1078,8 +1092,13 @@ final class AnalysisReportsTest extends TestCase {
 			'Malformed Cron state: not recorded.'
 		);
 		$this->assertTrue( $items[0]['phases']['final']['cron']['has_changes'] );
-		foreach ( array( 'acme_cleanup', 'wp_version_check', 'acme_update_once', self::CRON_SECRET, 'reason', 'malformed' ) as $needle ) {
+		foreach ( array( 'acme_cleanup', 'wp_version_check', 'acme_update_once', self::CRON_SECRET, 'malformed' ) as $needle ) {
 			$this->assertStringNotContainsString( $needle, self::json( $items ) );
+		}
+		// No Cron reasons: the only reasons are the site checks' own fixed codes.
+		foreach ( $items as $item ) {
+			unset( $item['site_checks'] );
+			$this->assertStringNotContainsString( 'reason', self::json( $item ) );
 		}
 	}
 
@@ -1539,9 +1558,12 @@ final class AnalysisReportsTest extends TestCase {
 		);
 		$this->assertFalse( $item['phases']['post_update']['action_scheduler']['has_changes'] );
 		$this->assertTrue( $item['phases']['final']['action_scheduler']['has_changes'] );
-		foreach ( array( 'fetch_patterns', 'woocommerce', self::AS_SECRET, 'reason' ) as $needle ) {
+		foreach ( array( 'fetch_patterns', 'woocommerce', self::AS_SECRET ) as $needle ) {
 			$this->assertStringNotContainsString( $needle, self::json( $item ) );
 		}
+		// No Action Scheduler reasons: only the site checks' own fixed codes.
+		unset( $item['site_checks'] );
+		$this->assertStringNotContainsString( 'reason', self::json( $item ) );
 	}
 
 	/**

@@ -875,6 +875,11 @@ final class SiteCheckWordPressTest extends TestCase {
 				BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['schedule']['refresh_in']['home'],
 				$name
 			);
+			$this->assertSame(
+				in_array( 'home', $opened, true ) ? 'none' : 'unsupported',
+				BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['status']['checks']['home']['state'],
+				$name
+			);
 		}
 
 		// Both on other origins: nothing to run, no session, nothing counted, no script.
@@ -1251,6 +1256,11 @@ final class SiteCheckWordPressTest extends TestCase {
 	 */
 	public function test_baseline_page_settings() {
 		$settings = BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity );
+		$none     = array(
+			'state'      => 'none',
+			'verdict'    => null,
+			'expires_in' => 0,
+		);
 		$this->assertSame(
 			array(
 				'ajaxUrl'  => 'https://example.com/wp-admin/admin-ajax.php',
@@ -1263,20 +1273,67 @@ final class SiteCheckWordPressTest extends TestCase {
 						'rest' => 0,
 					),
 				),
+				'status'   => array(
+					'max_age'     => 600,
+					'screen'      => 'plugins',
+					'plugins_url' => 'https://example.com/wp-admin/plugins.php?plugin_status=upgrade',
+					'checks'      => array(
+						'home' => $none,
+						'rest' => $none,
+					),
+					'labels'      => BaselinePage::status_labels(),
+				),
 			),
 			$settings
 		);
-		$this->assertNotNull( BaselinePage::settings( 'update-core.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity ) );
+		$this->assertSame( array( 'prefix', 'preparing', 'preparing_next', 'ready', 'ready_home', 'ready_rest', 'unavailable', 'other_screen', 'plugins_link' ), array_keys( BaselinePage::status_labels() ) );
+		// Dashboard → Updates still collects earlier checks, but its line only
+		// says that updates from there are not compared.
+		$this->assertSame( 'updates', BaselinePage::settings( 'update-core.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['status']['screen'] );
 
 		$checks = $this->start();
 		$this->report_check( $checks['rest'], array( F::rest() ) );
 		$this->time += 60;
+		$settings    = BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity );
 		$this->assertSame(
 			array(
 				'home' => 0,
 				'rest' => 240,
 			),
-			BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['schedule']['refresh_in']
+			$settings['schedule']['refresh_in']
+		);
+		// Ready only with a stored, attachable earlier check, with its verdict
+		// and the seconds until it is too old to be attached.
+		$this->assertSame(
+			array(
+				'home' => $none,
+				'rest' => array(
+					'state'      => 'ready',
+					'verdict'    => 'pass',
+					'expires_in' => 540,
+				),
+			),
+			$settings['status']['checks']
+		);
+
+		// While an update runs nothing is ready: it would not be attached.
+		$token = $this->activity->new_token();
+		$this->activity->begin( $token );
+		$this->assertSame(
+			array(
+				'home' => $none,
+				'rest' => $none,
+			),
+			BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['status']['checks']
+		);
+		// Once it ended, the earlier check is outdated: still not ready.
+		$this->activity->end( $token );
+		$this->assertSame(
+			array(
+				'home' => $none,
+				'rest' => $none,
+			),
+			BaselinePage::settings( 'plugins.php', $this->baselines, new ContextHasher( 'test-site-salt' ), $this->activity )['status']['checks']
 		);
 
 		foreach ( array( 'index.php', 'plugin-install.php', 'themes.php', 'toplevel_page_updatelens', 'updatelens_page_updatelens-settings', null, array( 'plugins.php' ) ) as $screen ) {

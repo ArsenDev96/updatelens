@@ -157,6 +157,51 @@ final class AnalysesController extends WP_REST_Controller {
 	}
 
 	/**
+	 * Schema of a history item's site checks: the report's site check
+	 * evaluation (`potential_impact.site_checks`) without findings.
+	 *
+	 * @return array
+	 */
+	private static function history_site_checks_schema() {
+		$check = array(
+			'type'       => 'object',
+			'properties' => array(
+				'status'        => array(
+					'type' => 'string',
+					'enum' => array( PotentialImpact::EVALUATED, PotentialImpact::PENDING, PotentialImpact::NOT_EVALUATED, PotentialImpact::NOT_APPLICABLE ),
+				),
+				'state'         => array(
+					'type' => 'string',
+					'enum' => SiteCheckReport::STATES,
+				),
+				'change'        => array( 'type' => array( 'string', 'null' ) ),
+				'reason'        => array( 'type' => array( 'string', 'null' ) ),
+				'finding_count' => array( 'type' => array( 'integer', 'null' ) ),
+			),
+		);
+
+		return array(
+			'description' => __( 'Homepage and REST API checks before and after the update, as evaluated in the report (without findings): browser observations, not proven causes. Computed on every read.', 'updatelens' ),
+			'type'        => 'object',
+			'context'     => array( 'view' ),
+			'readonly'    => true,
+			'properties'  => array(
+				'status' => array(
+					'type' => 'string',
+					'enum' => array( PotentialImpact::EVALUATED, PotentialImpact::PARTIAL, PotentialImpact::PENDING, PotentialImpact::NOT_EVALUATED, PotentialImpact::NOT_APPLICABLE ),
+				),
+				'checks' => array(
+					'type'       => 'object',
+					'properties' => array(
+						'home' => $check,
+						'rest' => $check,
+					),
+				),
+			),
+		);
+	}
+
+	/**
 	 * Schema of the site check comparison (SiteCheckReport).
 	 *
 	 * @return array
@@ -519,13 +564,14 @@ final class AnalysesController extends WP_REST_Controller {
 					),
 				);
 			}
-			$properties['phases'] = array(
+			$properties['phases']      = array(
 				'description' => __( 'Per phase and signal: whether a diff is recorded and whether it has changes. Diffs are not decoded for the history.', 'updatelens' ),
 				'type'        => 'object',
 				'context'     => array( 'view' ),
 				'readonly'    => true,
 				'properties'  => $phases,
 			);
+			$properties['site_checks'] = self::history_site_checks_schema();
 
 			$this->history_schema = array(
 				'$schema'    => 'http://json-schema.org/draft-04/schema#',

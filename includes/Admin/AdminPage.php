@@ -7,8 +7,11 @@
 
 namespace UpdateLens\Admin;
 
+use Throwable;
 use UpdateLens\Baseline\MonitoringBaseline;
 use UpdateLens\Core\Plugin;
+use UpdateLens\Report\AnalysisReports;
+use UpdateLens\Report\MonitoringStart;
 use UpdateLens\Storage\Schema;
 
 defined( 'ABSPATH' ) || exit;
@@ -168,6 +171,45 @@ final class AdminPage {
 		}
 
 		$this->assets_loaded = AdminAssets::enqueue();
+		if ( $this->assets_loaded && $hook_suffix === $this->hook_suffix ) {
+			$this->add_initial_data();
+		}
+	}
+
+	/**
+	 * Print the stored report or History page the URL asks for into the page
+	 * (InitialData), before the app's script, so they open without the REST
+	 * API. Same access rule and read models as the REST read endpoints;
+	 * database errors never reach the page.
+	 *
+	 * @return void
+	 */
+	private function add_initial_data() {
+		global $wpdb;
+
+		$show_errors = $wpdb->hide_errors();
+		try {
+			$reports = AnalysisReports::create();
+			$data    = InitialData::build(
+				// phpcs:ignore WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Read-only screen selection (which report or History page to show); InitialData accepts only digit strings.
+				wp_unslash( $_GET ),
+				current_user_can( Plugin::CAPABILITY ),
+				array( $reports, 'history' ),
+				array( $reports, 'report' ),
+				static function () {
+					return MonitoringStart::create()->read();
+				}
+			);
+			$script = null === $data ? null : InitialData::script( wp_json_encode( $data, InitialData::JSON_FLAGS ) );
+			if ( null !== $script ) {
+				wp_add_inline_script( AdminAssets::HANDLE, $script, 'before' );
+			}
+		} catch ( Throwable $e ) {
+			// Without initial data the app reads over REST as before.
+			return;
+		} finally {
+			$wpdb->show_errors( $show_errors );
+		}
 	}
 
 	/**

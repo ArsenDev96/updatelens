@@ -26,6 +26,12 @@ export type PendingRefreshState = 'off' | 'auto' | 'stopped';
 
 export interface PendingRefresh {
 	state: PendingRefreshState;
+	/**
+	 * The last failed read: why a stopped run stopped (null when it stopped
+	 * at the read limit), or, while running, a read of this run that failed
+	 * and was not followed by a successful one.
+	 */
+	error: ApiError | null;
 	/** A read is in flight (a background read or a manual refresh). */
 	checking: boolean;
 	/** Reads now and starts a new run. */
@@ -72,8 +78,9 @@ export function hasPendingResults( report: AnalysisReport ): boolean {
  * read runs when it is visible again), and the run stops when nothing is
  * pending any more, the view unmounts, the report changes, after
  * PENDING_REFRESH_MAX_REQUESTS reads or after PENDING_REFRESH_MAX_FAILURES
- * failed reads in a row. Failed background reads keep the current report and
- * are not shown; a failed manual refresh keeps it too and reports its error.
+ * failed reads in a row. Failed background reads keep the current report; a
+ * run that stopped because reads failed reports the last failure (`error`),
+ * and a failed manual refresh keeps the report too and reports its error.
  *
  * Reads never overlap: a manual refresh waits for a background read in
  * flight and then reads, and the background waits a full interval after a
@@ -93,8 +100,16 @@ export function usePendingRefresh(
 	const [ stopped, setStopped ] = useState< {
 		id: number;
 		run: number;
+		error: ApiError | null;
 	} | null >( null );
 	const [ reads, setReads ] = useState( 0 );
+	// The latest failed background read of the running run, cleared by a
+	// successful one: a pressed "Refresh results" that fails says so at once.
+	const [ failure, setFailure ] = useState< {
+		id: number;
+		run: number;
+		error: ApiError;
+	} | null >( null );
 	const [ manual, setManual ] = useState< {
 		status: ManualRefresh[ 'status' ];
 		error: ApiError | null;
@@ -141,6 +156,7 @@ export function usePendingRefresh(
 		let deferred = false;
 		let requests = 0;
 		let failures = 0;
+		let lastError: ApiError | null = null;
 
 		const schedule = ( delay: number ) => {
 			timer = window.setTimeout( tick, delay );
@@ -169,12 +185,18 @@ export function usePendingRefresh(
 				.then(
 					( next ) => {
 						failures = 0;
+						lastError = null;
 						if ( active ) {
+							setFailure( null );
 							update.current( next );
 						}
 					},
-					() => {
+					( error: unknown ) => {
 						failures++;
+						lastError = toApiError( error );
+						if ( active ) {
+							setFailure( { id, run, error: lastError } );
+						}
 					}
 				)
 				.finally( () => {
@@ -187,7 +209,14 @@ export function usePendingRefresh(
 						requests >= PENDING_REFRESH_MAX_REQUESTS ||
 						failures >= PENDING_REFRESH_MAX_FAILURES
 					) {
-						setStopped( { id, run } );
+						setStopped( {
+							id,
+							run,
+							error:
+								failures >= PENDING_REFRESH_MAX_FAILURES
+									? lastError
+									: null,
+						} );
 						return;
 					}
 					// If the update resolved the results, this effect is cleaned
@@ -250,15 +279,20 @@ export function usePendingRefresh(
 	}, [ read ] );
 
 	let state: PendingRefreshState = 'off';
+	const ended = stopped !== null && stopped.id === id && stopped.run === run;
 	if ( pending ) {
-		state =
-			stopped !== null && stopped.id === id && stopped.run === run
-				? 'stopped'
-				: 'auto';
+		state = ended ? 'stopped' : 'auto';
 	}
 
 	return {
 		state,
+		error: ! pending
+			? null
+			: ended
+				? stopped.error
+				: failure !== null && failure.id === id && failure.run === run
+					? failure.error
+					: null,
 		checking: pending && reads > 0,
 		refreshNow,
 		manual: { ...manual, refresh },

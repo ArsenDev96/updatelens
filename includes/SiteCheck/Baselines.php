@@ -182,10 +182,11 @@ final class Baselines {
 	 * @param string|null           $generation Current updater activity generation
 	 *                                          (UpdateActivity::quiet_generation()); null: unknown
 	 *                                          or an update is running, so not compared.
-	 * @return array<string, array{state: string, age: int|null, refresh_in: int}>
+	 * @return array<string, array{state: string, age: int|null, refresh_in: int, verdict: string|null}>
 	 *         By check, in CheckDefinition order: `age` in whole seconds
 	 *         (null when missing), `refresh_in` seconds until the baseline
-	 *         is due (0 = due now).
+	 *         is due (0 = due now), `verdict` of a `ready` baseline (derived
+	 *         on decode, never stored; null in every other state).
 	 */
 	public function readiness( $user, $login, array $targets, $generation = null ) {
 		$now       = (float) call_user_func( $this->now );
@@ -198,6 +199,7 @@ final class Baselines {
 					'state'      => self::OUTDATED,
 					'age'        => (int) floor( max( 0.0, $now - $result->get_completed_at() ) ),
 					'refresh_in' => 0,
+					'verdict'    => null,
 				);
 				continue;
 			}
@@ -211,6 +213,7 @@ final class Baselines {
 					'state'      => self::MISSING,
 					'age'        => null,
 					'refresh_in' => 0,
+					'verdict'    => null,
 				);
 				continue;
 			}
@@ -222,6 +225,7 @@ final class Baselines {
 				'state'      => $expired ? self::EXPIRED : self::READY,
 				'age'        => (int) floor( $age ),
 				'refresh_in' => $expired ? 0 : max( 0, (int) ceil( self::REFRESH_AFTER_SECONDS - $age ) ),
+				'verdict'    => $expired ? null : $result->get_verdict(),
 			);
 		}
 
@@ -362,6 +366,34 @@ final class Baselines {
 		}
 
 		return $due;
+	}
+
+	/**
+	 * What the Plugins and Updates screens may say about each check before
+	 * an update, from readiness() output (BaselinePage, shown by the
+	 * baseline script): `ready` with the baseline's verdict and the seconds
+	 * until it is too old to be attached (MAX_AGE_SECONDS), else `none`.
+	 *
+	 * Without a quiet generation (an update is running, or the ledger is
+	 * unreadable) no baseline counts as ready: whether it can be attached to
+	 * the next update is unknown.
+	 *
+	 * @param array<string, array{state: string, age: int|null, verdict: string|null}> $readiness readiness() output.
+	 * @param bool                                                                     $quiet     Whether readiness() had a quiet generation.
+	 * @return array<string, array{state: string, verdict: string|null, expires_in: int}>
+	 */
+	public static function status( array $readiness, $quiet ) {
+		return array_map(
+			static function ( $state ) use ( $quiet ) {
+				$ready = $quiet && self::READY === $state['state'] && is_string( $state['verdict'] ) && null !== $state['age'];
+				return array(
+					'state'      => $ready ? self::READY : 'none',
+					'verdict'    => $ready ? $state['verdict'] : null,
+					'expires_in' => $ready ? max( 0, self::MAX_AGE_SECONDS - (int) $state['age'] ) : 0,
+				);
+			},
+			$readiness
+		);
 	}
 
 	/**

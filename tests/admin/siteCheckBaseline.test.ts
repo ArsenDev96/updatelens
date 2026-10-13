@@ -743,6 +743,24 @@ describe( 'createBaselineScheduler', () => {
 		expect( await scheduler.evaluate() ).toBe( 'ran' );
 	} );
 
+	it( 'an update makes fresh baselines due when the pause ends (they are outdated)', async () => {
+		const harness = deps();
+		const scheduler = createBaselineScheduler(
+			settings( { home: 250, rest: 3600 } ),
+			harness.deps
+		);
+		scheduler.receive( { type: 'due', due: { rest: Infinity } } );
+
+		scheduler.updateStarted();
+		expect( scheduler.dueAt() ).toEqual( {
+			home: 1760090000000 + UPDATE_PAUSE_MS,
+			rest: 1760090000000 + UPDATE_PAUSE_MS,
+		} );
+		expect( await scheduler.evaluate() ).toBe( 'skipped' );
+		vi.advanceTimersByTime( UPDATE_PAUSE_MS );
+		expect( await scheduler.evaluate() ).toBe( 'ran' );
+	} );
+
 	it( 'follows other tabs: their due times and their updates', async () => {
 		const harness = deps();
 		const scheduler = createBaselineScheduler( settings(), harness.deps );

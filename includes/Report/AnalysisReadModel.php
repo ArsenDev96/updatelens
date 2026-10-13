@@ -185,7 +185,9 @@ final class AnalysisReadModel {
 	 * whether a wp_options diff is stored. `phases.<phase>.<signal>` says
 	 * whether a diff is stored (`recorded`) and whether it contains changes
 	 * (`has_changes`, null if not recorded). Only the report decodes diffs,
-	 * so it alone can find a stored diff unreadable.
+	 * so it alone can find a stored diff unreadable. `site_checks` is the
+	 * report's site check evaluation (`potential_impact.site_checks` without
+	 * `findings`), computed from the same stored results on every read.
 	 *
 	 * @param array<string, mixed> $row Analysis row.
 	 * @return array<string, mixed>
@@ -203,6 +205,14 @@ final class AnalysisReadModel {
 			);
 		}
 		$item['phases'] = $phases;
+		// The report's own site check evaluation (potential_impact.site_checks),
+		// without the findings' evidence: per check its status, state, kind of
+		// change, reason and finding count.
+		$site_checks         = $this->potential_impact->evaluate_site_checks( SiteCheckReport::build( $row, (float) call_user_func( $this->now ) ) );
+		$item['site_checks'] = array(
+			'status' => $site_checks['status'],
+			'checks' => $site_checks['checks'],
+		);
 
 		return $item;
 	}

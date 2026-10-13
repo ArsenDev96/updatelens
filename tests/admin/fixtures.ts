@@ -793,6 +793,11 @@ export function historyItem(
 			post_update: phase( 'post_update' ),
 			final: phase( 'final' ),
 		},
+		// The report's site check evaluation without findings, as PHP returns it.
+		site_checks: {
+			status: report.potential_impact.site_checks.status,
+			checks: report.potential_impact.site_checks.checks,
+		},
 		...overrides,
 	};
 }

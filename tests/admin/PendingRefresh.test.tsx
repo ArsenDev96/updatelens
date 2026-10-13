@@ -71,6 +71,9 @@ async function wait( ms: number ) {
 }
 
 const impact = () => screen.getByRole( 'region', { name: 'Potential impact' } );
+/** The site response checks section (pending results and their refresh). */
+const site = () =>
+	screen.getByRole( 'region', { name: 'Site response checks' } );
 
 /** Titles of the finding rows. */
 const rowTitles = () =>
@@ -127,7 +130,9 @@ describe( 'Pending site check results', () => {
 			'Site check results arrived.'
 		);
 		expect(
-			within( impact() ).queryByRole( 'button', { name: 'Check now' } )
+			within( site() ).queryByRole( 'button', {
+				name: 'Refresh results',
+			} )
 		).not.toBeInTheDocument();
 
 		// Resolved: no further reads.
@@ -135,7 +140,7 @@ describe( 'Pending site check results', () => {
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 2 );
 	} );
 
-	it( 'reads one at a time, stops at the limit and offers Check again', async () => {
+	it( 'reads one at a time, stops at the limit and offers Refresh results', async () => {
 		await open( report( 'pending' ) );
 		let resolve: ( value: AnalysisReport ) => void = () => {};
 		apiFetchMock.mockImplementation(
@@ -157,11 +162,12 @@ describe( 'Pending site check results', () => {
 		expect( apiFetchMock ).toHaveBeenCalledTimes(
 			1 + PENDING_REFRESH_MAX_REQUESTS
 		);
-		expect( impact() ).toHaveTextContent(
+		expect( site() ).toHaveTextContent(
 			'Automatic checking stopped; the site check results have not arrived yet.'
 		);
-		const again = within( impact() ).getByRole( 'button', {
-			name: 'Check again',
+		// It only reads the report again: the same name in both states.
+		const again = within( site() ).getByRole( 'button', {
+			name: 'Refresh results',
 		} );
 		await wait( PENDING_REFRESH_INTERVAL_MS * 5 );
 		expect( apiFetchMock ).toHaveBeenCalledTimes(
@@ -169,7 +175,9 @@ describe( 'Pending site check results', () => {
 		);
 
 		// Still pending: never shown as passed.
-		expect( impact() ).toHaveTextContent( 'Homepage check: Still pending' );
+		expect( impact() ).toHaveTextContent(
+			'Site response checks: Homepage and REST API waiting for results'
+		);
 		expect( impact().textContent ).not.toMatch( /Passed at both/ );
 		again.focus();
 		fireEvent.click( again );
@@ -178,21 +186,31 @@ describe( 'Pending site check results', () => {
 			2 + PENDING_REFRESH_MAX_REQUESTS
 		);
 		// The same button, now for a new run, keeps focus.
-		expect( again ).toHaveAccessibleName( 'Check now' );
+		expect( again ).toHaveAccessibleName( 'Refresh results' );
 		expect( again ).toHaveFocus();
 	} );
 
-	it( 'keeps the report and stays quiet when reads fail', async () => {
+	it( 'keeps the report when reads fail, and says why it stopped', async () => {
 		await open( report( 'pending' ) );
-		apiFetchMock.mockRejectedValue( new Error( 'offline' ) );
+		apiFetchMock.mockRejectedValue( {
+			code: 'invalid_json',
+			message: 'The response is not a valid JSON response.',
+		} );
 
-		await wait( PENDING_REFRESH_INTERVAL_MS * 3 );
-		expect( apiFetchMock ).toHaveBeenCalledTimes( 4 );
-		expect( impact() ).toHaveTextContent(
-			'Automatic checking stopped; the site check results have not arrived yet.'
+		// The first failed read is said at once; the run keeps trying.
+		await wait( PENDING_REFRESH_INTERVAL_MS );
+		expect( site() ).toHaveTextContent(
+			'Refreshing the results failed; this report tries again in a few seconds. The results shown are from the last successful read, and checks still waiting stay unresolved.'
 		);
+		await wait( PENDING_REFRESH_INTERVAL_MS * 2 );
+		expect( apiFetchMock ).toHaveBeenCalledTimes( 4 );
+		// Not "the results have not arrived": the report could not be read.
+		expect( site() ).toHaveTextContent(
+			"Automatic checking stopped: refreshed results are unavailable. The results shown are from the last successful read, and checks still waiting stay unresolved and are not counted as passed. The site's REST API answered with something other than data, for example PHP output, an error page or a firewall page. Stored reports are not affected."
+		);
+		expect( site().textContent ).not.toMatch( /Passed/ );
 		expect( screen.queryByRole( 'alert' ) ).not.toBeInTheDocument();
-		expect( document.body ).not.toHaveTextContent( 'offline' );
+		expect( document.body ).not.toHaveTextContent( 'not a valid JSON' );
 		expect( rowTitles() ).toHaveLength( 4 );
 
 		await wait( PENDING_REFRESH_INTERVAL_MS * 5 );
@@ -231,7 +249,7 @@ describe( 'Pending site check results', () => {
 		await wait( PENDING_REFRESH_INTERVAL_MS * 12 );
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 1 );
 		expect(
-			within( impact() ).queryByRole( 'button', { name: /^Check/ } )
+			within( site() ).queryByRole( 'button', { name: /^Check/ } )
 		).not.toBeInTheDocument();
 	} );
 

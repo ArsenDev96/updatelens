@@ -110,8 +110,18 @@ final class BaselinePage {
 		} catch ( InvalidArgumentException $e ) {
 			return null;
 		}
-		$baselines = null === $baselines ? Baselines::from_wordpress() : $baselines;
-		$activity  = null === $activity ? UpdateActivity::from_wordpress() : $activity;
+		$baselines  = null === $baselines ? Baselines::from_wordpress() : $baselines;
+		$activity   = null === $activity ? UpdateActivity::from_wordpress() : $activity;
+		$generation = $activity->quiet_generation();
+		$readiness  = $baselines->readiness( get_current_user_id(), $login, $targets, $generation );
+		$checks     = Baselines::status( $readiness, null !== $generation );
+		foreach ( $unsupported as $check ) {
+			$checks[ $check ] = array(
+				'state'      => 'unsupported',
+				'verdict'    => null,
+				'expires_in' => 0,
+			);
+		}
 
 		return array(
 			'ajaxUrl'  => admin_url( 'admin-ajax.php' ),
@@ -120,8 +130,38 @@ final class BaselinePage {
 			'schedule' => array(
 				'refresh_after'       => Baselines::REFRESH_AFTER_SECONDS,
 				'retry_after_failure' => Baselines::RETRY_AFTER_FAILURE_SECONDS,
-				'refresh_in'          => AjaxEndpoints::without_unsupported( Baselines::refresh_in( $baselines->readiness( get_current_user_id(), $login, $targets, $activity->quiet_generation() ) ), $unsupported ),
+				'refresh_in'          => AjaxEndpoints::without_unsupported( Baselines::refresh_in( $readiness ), $unsupported ),
 			),
+			// The readiness line near the update controls (no request of its own).
+			// Dashboard → Updates gets a note instead: its updates are not compared.
+			'status'   => array(
+				'max_age'     => Baselines::MAX_AGE_SECONDS,
+				'screen'      => 'update-core.php' === $hook_suffix ? 'updates' : 'plugins',
+				'plugins_url' => admin_url( 'plugins.php?plugin_status=upgrade' ),
+				'checks'      => $checks,
+				'labels'      => self::status_labels(),
+			),
+		);
+	}
+
+	/**
+	 * Texts of the readiness line, translated here so the baseline script
+	 * needs no translation files of its own. "Ready" means an update started
+	 * now can be compared, never that its checks will pass.
+	 *
+	 * @return array<string, string>
+	 */
+	public static function status_labels() {
+		return array(
+			'prefix'         => __( 'UpdateLens:', 'updatelens' ),
+			'preparing'      => __( 'Preparing site checks…', 'updatelens' ),
+			'preparing_next' => __( 'Preparing site checks for another update…', 'updatelens' ),
+			'ready'          => __( 'Ready to compare site responses', 'updatelens' ),
+			'ready_home'     => __( 'Ready to compare the homepage only', 'updatelens' ),
+			'ready_rest'     => __( 'Ready to compare the REST API only', 'updatelens' ),
+			'unavailable'    => __( 'Site checks unavailable for now', 'updatelens' ),
+			'other_screen'   => __( 'Site responses are compared only for updates started with “Update now” on Installed Plugins, not from this screen.', 'updatelens' ),
+			'plugins_link'   => __( 'Go to Installed Plugins', 'updatelens' ),
 		);
 	}
 }

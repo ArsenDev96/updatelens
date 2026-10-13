@@ -152,6 +152,10 @@ function plugin_basename( $file ) {
 	return 'updatelens/updatelens.php';
 }
 
+function __( $text, $domain = 'default' ) {
+	return $text;
+}
+
 function esc_attr( $text ) {
 	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
 }

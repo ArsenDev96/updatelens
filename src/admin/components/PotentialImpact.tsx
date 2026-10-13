@@ -5,14 +5,12 @@ import {
 	useId,
 	useMemo,
 	useRef,
-	useState,
 	type ReactNode,
 } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-import type { PendingRefresh } from '../hooks/use-pending-refresh';
 import type {
 	ActionScheduleType,
 	ImpactActionSide,
@@ -24,7 +22,6 @@ import type {
 	SiteCheckFinding,
 	SiteCheckId,
 	SiteChecks,
-	SiteCheckSide,
 } from '../types/api';
 import {
 	formatBytesDelta,
@@ -56,12 +53,8 @@ import {
 	type FindingGroup,
 	type ImpactView,
 } from '../utils/impact';
+import { siteCheckFindingButtonId } from '../utils/siteChecks';
 import {
-	attemptText,
-	comparedTimingText,
-	requestLabel,
-	sideTimingText,
-	sideSummaryText,
 	SITE_CHECKS,
 	siteCheckCoverage,
 	siteCheckFindings,
@@ -71,6 +64,7 @@ import {
 	siteCheckPatterns,
 	siteChecksApplicable,
 	siteChecksEvaluated,
+	siteChecksIncompleteText,
 	siteChecksNotUsed,
 	siteCheckSubject,
 	siteCheckSummary,
@@ -122,7 +116,7 @@ const FINDINGS_STEP = 50;
  * @param props.selectedPhase   Phase selected in the report's tabs.
  * @param props.view            Expanded groups and disclosures.
  * @param props.onViewChange    Updates them.
- * @param props.pendingRefresh  Background reads while site check results are pending.
+ * @param props.onShowSiteCheck Opens a check in "Site response checks".
  */
 export function PotentialImpact( {
 	impact,
@@ -134,7 +128,7 @@ export function PotentialImpact( {
 	selectedPhase,
 	view,
 	onViewChange,
-	pendingRefresh,
+	onShowSiteCheck,
 }: {
 	impact: PotentialImpactData;
 	siteChecks?: SiteChecks;
@@ -145,34 +139,9 @@ export function PotentialImpact( {
 	selectedPhase: PhaseKey;
 	view: ImpactView;
 	onViewChange: ( view: ImpactView ) => void;
-	pendingRefresh?: PendingRefresh;
+	onShowSiteCheck: ( check: SiteCheckId ) => void;
 } ) {
 	const state = impactState( impact );
-	const title = useRef< HTMLHeadingElement >( null );
-	const refreshing =
-		pendingRefresh !== undefined && pendingRefresh.state !== 'off';
-	// Announced once when pending site check results arrive while open.
-	const sitePending = impact.site_checks?.status === 'pending';
-	const [ wasPending, setWasPending ] = useState( sitePending );
-	const [ arrived, setArrived ] = useState( false );
-	if ( wasPending !== sitePending ) {
-		setWasPending( sitePending );
-		setArrived( ! sitePending );
-	}
-	// The refresh line disappears when results arrive: if it had focus, focus
-	// moves to the section title instead of being lost.
-	const refreshFocused = useRef( false );
-	useEffect( () => {
-		if ( ! refreshing && refreshFocused.current ) {
-			refreshFocused.current = false;
-			if (
-				document.activeElement === null ||
-				document.activeElement === document.body
-			) {
-				title.current?.focus();
-			}
-		}
-	}, [ refreshing ] );
 	const groups = useMemo(
 		() => groupFindings( impact.findings ),
 		[ impact.findings ]
@@ -210,9 +179,7 @@ export function PotentialImpact( {
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
 				<h3
 					id="updatelens-impact-title"
-					ref={ title }
-					tabIndex={ -1 }
-					className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600 focus:outline-none"
+					className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600"
 				>
 					{ __( 'Potential impact', 'updatelens' ) }
 				</h3>
@@ -272,21 +239,9 @@ export function PotentialImpact( {
 			{ evaluated && (
 				<IncompleteChecks
 					impact={ impact }
-					siteChecks={ siteChecks }
 					windowSeconds={ windowSeconds }
 				/>
 			) }
-			{ refreshing && (
-				<PendingRefreshLine
-					refresh={ pendingRefresh }
-					onFocus={ () => {
-						refreshFocused.current = true;
-					} }
-				/>
-			) }
-			<p role="status" className="sr-only">
-				{ arrived && __( 'Site check results arrived.', 'updatelens' ) }
-			</p>
 			{ groups.length + siteFindings.length > 0 && (
 				<ul
 					aria-label={ __( 'Findings', 'updatelens' ) }
@@ -300,6 +255,7 @@ export function PotentialImpact( {
 							<SiteCheckFindingItem
 								key={ key }
 								finding={ finding }
+								onShowSiteCheck={ onShowSiteCheck }
 								expanded={ expanded }
 								onToggle={ () =>
 									setVisible(
@@ -339,80 +295,22 @@ export function PotentialImpact( {
 }
 
 /**
- * While site check results are pending: that the report checks for them by
- * itself, or that it stopped, and a button to check now. The button stays
- * the same element in both states, so focus is kept.
- *
- * @param props         Props.
- * @param props.refresh Background reads.
- * @param props.onFocus Notes that focus is inside.
- */
-function PendingRefreshLine( {
-	refresh,
-	onFocus,
-}: {
-	refresh: PendingRefresh;
-	onFocus: () => void;
-} ) {
-	const stopped = refresh.state === 'stopped';
-	return (
-		<p
-			onFocus={ onFocus }
-			className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-5 text-slate-600"
-		>
-			<span>
-				{ stopped
-					? __(
-							'Automatic checking stopped; the site check results have not arrived yet.',
-							'updatelens'
-						)
-					: __(
-							'This report checks for the pending site check results every few seconds while it is open.',
-							'updatelens'
-						) }
-			</span>
-			<Button
-				type="button"
-				variant="outline"
-				size="sm"
-				aria-disabled={ refresh.checking }
-				onClick={ () => {
-					if ( ! refresh.checking ) {
-						refresh.refreshNow();
-					}
-				} }
-			>
-				<Icon
-					name="progress"
-					className={ cn(
-						'size-4',
-						refresh.checking && 'motion-safe:animate-spin'
-					) }
-				/>
-				{ stopped
-					? __( 'Check again', 'updatelens' )
-					: __( 'Check now', 'updatelens' ) }
-			</Button>
-		</p>
-	);
-}
-
-/**
  * Signals whose checks did not run, always visible (also while every group
  * is collapsed): partial results must never read as complete.
  *
+ * Site checks that were used but not compared (or are still pending) are
+ * one line naming them: their states and reasons are in "Site response
+ * checks" above, so they are not repeated here.
+ *
  * @param props               Props.
  * @param props.impact        API evaluation.
- * @param props.siteChecks    The report's site checks (inconclusive details).
  * @param props.windowSeconds Observation window length from the API.
  */
 function IncompleteChecks( {
 	impact,
-	siteChecks,
 	windowSeconds,
 }: {
 	impact: PotentialImpactData;
-	siteChecks?: SiteChecks;
 	windowSeconds: number;
 } ) {
 	const incomplete = PROVIDERS.filter(
@@ -463,38 +361,32 @@ function IncompleteChecks( {
 					</li>
 				);
 			} ) }
-			{ sites.map( ( check ) => {
-				const text = siteCheckCoverage(
-					check,
-					impact.site_checks.checks[ check ],
-					siteChecks?.checks[ check ]
-				);
-				return (
-					<li
-						key={ check }
-						data-category={ text.category }
-						className="flex gap-2"
-					>
-						<Icon
-							name="site_checks"
-							className="mt-0.5 size-4 shrink-0 text-amber-700"
-						/>
-						<span>
-							<span className="font-medium">
-								{ siteCheckName( check ) }
-							</span>
-							{ ': ' }
-							{ text.status }
-							{ text.detail && (
-								<>
-									{ ' · ' }
-									{ text.detail }
-								</>
-							) }
+			{ sites.length > 0 && (
+				<li
+					data-category={
+						sites.every(
+							( check ) =>
+								impact.site_checks.checks[ check ]?.status ===
+								'pending'
+						)
+							? 'waiting'
+							: 'unavailable'
+					}
+					className="flex gap-2"
+				>
+					<Icon
+						name="site_checks"
+						className="mt-0.5 size-4 shrink-0 text-amber-700"
+					/>
+					<span>
+						<span className="font-medium">
+							{ __( 'Site response checks', 'updatelens' ) }
 						</span>
-					</li>
-				);
-			} ) }
+						{ ': ' }
+						{ siteChecksIncompleteText( sites, impact ) }
+					</span>
+				</li>
+			) }
 		</ul>
 	);
 }
@@ -582,14 +474,10 @@ function WhatWasChecked( {
 												evaluation,
 												siteChecks?.checks[ check ]
 											),
-											description:
-												evaluation.status ===
-												'evaluated'
-													? comparedTimingText(
-															siteChecks,
-															check
-														)
-													: null,
+											// The earlier and later checks are in
+											// "Site response checks".
+											detail: null,
+											description: null,
 										} }
 									/>
 								)
@@ -799,29 +687,33 @@ function FindingGroupItem( {
 
 /**
  * A site check finding as a compact row, like a group of findings: title,
- * source ("Site checks · Homepage") and one sentence. Expanded, it shows the
- * exact earlier and later observations, why it might matter and what to
- * check next. There is no signal page to link to: the evidence is here.
+ * source ("Site checks · Homepage") and one sentence. Expanded, it says what
+ * changed, why it might matter and what to check next; the earlier and later
+ * requests are in "Site response checks", one link away (no signal page).
  *
- * @param props          Props.
- * @param props.finding  Finding.
- * @param props.expanded Whether it is expanded.
- * @param props.onToggle Expands or collapses it.
+ * @param props                 Props.
+ * @param props.finding         Finding.
+ * @param props.expanded        Whether it is expanded.
+ * @param props.onToggle        Expands or collapses it.
+ * @param props.onShowSiteCheck Opens the check in "Site response checks".
  */
 function SiteCheckFindingItem( {
 	finding,
 	expanded,
 	onToggle,
+	onShowSiteCheck,
 }: {
 	finding: SiteCheckFinding;
 	expanded: boolean;
 	onToggle: () => void;
+	onShowSiteCheck: ( check: SiteCheckId ) => void;
 } ) {
 	return (
 		<CompactRow
 			icon="site_checks"
 			title={ siteCheckFindingTitle( finding ) }
 			count={ 1 }
+			buttonId={ siteCheckFindingButtonId( finding.check ) }
 			source={
 				<>
 					<span>{ __( 'Site checks', 'updatelens' ) }</span>{ ' ' }
@@ -841,29 +733,25 @@ function SiteCheckFindingItem( {
 						<p className="mt-1.5 text-sm leading-6 text-slate-800">
 							{ siteCheckWhatChanged( finding ) }
 						</p>
-						<RowDetails
-							boxed
-							rows={ [
-								[
-									__( 'Earlier check', 'updatelens' ),
-									<SideEvidence
-										key="b"
-										check={ finding.check }
-										side={ finding.before }
-										purpose="before"
-									/>,
-								],
-								[
-									__( 'Later check', 'updatelens' ),
-									<SideEvidence
-										key="a"
-										check={ finding.check }
-										side={ finding.after }
-										purpose="after"
-									/>,
-								],
-							] }
-						/>
+						<p className="mt-1.5 text-[13px] leading-5">
+							<button
+								type="button"
+								onClick={ () =>
+									onShowSiteCheck( finding.check )
+								}
+								className="rounded font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							>
+								{ finding.check === 'home'
+									? __(
+											'Show the homepage requests in Site response checks',
+											'updatelens'
+										)
+									: __(
+											'Show the REST API requests in Site response checks',
+											'updatelens'
+										) }
+							</button>
+						</p>
 					</div>
 					<Guidance
 						why={ siteCheckWhyItMatters( finding ) }
@@ -872,46 +760,6 @@ function SiteCheckFindingItem( {
 				</div>
 			) }
 		/>
-	);
-}
-
-/**
- * One side of a site check as observed: its verdict, when it ran relative to
- * the update, and every request.
- *
- * @param props         Props.
- * @param props.check   Check.
- * @param props.side    Side.
- * @param props.purpose `before` or `after`.
- */
-function SideEvidence( {
-	check,
-	side,
-	purpose,
-}: {
-	check: SiteCheckId;
-	side: SiteCheckSide;
-	purpose: 'before' | 'after';
-} ) {
-	const timing = sideTimingText( side, purpose );
-	return (
-		<span className="block space-y-0.5">
-			<span className="block font-medium text-slate-800">
-				{ sideSummaryText( side ) }
-			</span>
-			{ timing && (
-				<span className="block text-muted-foreground">{ timing }</span>
-			) }
-			{ ( side.result?.attempts ?? [] ).map( ( attempt, index ) => (
-				<span key={ index } className="block">
-					<span className="text-muted-foreground">
-						{ requestLabel( index ) }
-						{ ': ' }
-					</span>
-					{ attemptText( check, attempt ) }
-				</span>
-			) ) }
-		</span>
 	);
 }
 
@@ -929,11 +777,13 @@ function SideEvidence( {
  * @param props.expanded Whether it is expanded.
  * @param props.onToggle Expands or collapses it.
  * @param props.details  Renders the expanded content.
+ * @param props.buttonId Id of the toggle button (a link target), if any.
  */
 function CompactRow( {
 	icon,
 	title,
 	count,
+	buttonId,
 	source,
 	summary,
 	expanded,
@@ -943,6 +793,7 @@ function CompactRow( {
 	icon: IconName;
 	title: string;
 	count: number;
+	buttonId?: string;
 	source: ReactNode;
 	summary: string;
 	expanded: boolean;
@@ -979,6 +830,7 @@ function CompactRow( {
 					>
 						<button
 							type="button"
+							id={ buttonId }
 							aria-expanded={ expanded }
 							aria-controls={ panelId }
 							aria-describedby={ summaryId }

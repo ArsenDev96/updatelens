@@ -107,6 +107,7 @@ describe( 'App navigation', () => {
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 1 );
 		expect( apiFetchMock ).toHaveBeenCalledWith( {
 			path: '/updatelens/v1/analyses/2',
+			parse: false,
 		} );
 		// Not focused on initial load.
 		expect( screen.getByRole( 'heading', { level: 2 } ) ).not.toHaveFocus();

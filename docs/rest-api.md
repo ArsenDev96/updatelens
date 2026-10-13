@@ -12,6 +12,8 @@ Endpoints for analysis history, reports, the monitoring start (all read-only) an
 
 `GET /updatelens/v1/status` is unchanged (`{"version":"…"}`).
 
+- **Without the REST API:** the UpdateLens screen also receives the report or History page its URL asks for with the admin page itself (`Admin\InitialData`, `window.updatelensInitialData`): the same read models and fields as `GET /analyses/{id}` and `GET /analyses` (plus `/baseline` where the screen shows it), the same capability, `{ "view": "report", "id": 42, "status": "ok" | "not_found" | "too_large" | "unavailable", "report": {…} }` or `{ "view": "history", "page": 1, "per_page": 20, "status": "ok" | "unavailable", "items": […], "total": 45, "total_pages": 3, "monitoring": {…} | null }`. It is not an API: it is printed only into the authenticated UpdateLens screen, never read through REST, and needs a working admin page and database. Refreshes and in-app navigation keep using the endpoints below.
+
 ## `GET /updatelens/v1/analyses`
 
 History, newest first (`ORDER BY id DESC`).
@@ -33,6 +35,8 @@ Body: an array of history items. Diffs are never decoded or returned for the lis
   - `has_changes`: whether it contains any added, removed, changed or rescheduled record (the stored diff does not begin with its codec's empty-diff prefix, `OptionsDiffCodec::EMPTY_PREFIX` / `CronDiffCodec::EMPTY_PREFIX` / `ActionSchedulerDiffCodec::EMPTY_PREFIX`); `null` if not recorded.
 
 `recorded` without changes is a successful observation with nothing to show, not missing data. A site without Action Scheduler has `action_scheduler.recorded: false`; the phase is then described by the other signals. Only the report decodes diffs, so only the report can find a stored diff unreadable (`data_corrupt`). No Cron or Action Scheduler hooks, groups, reasons or arguments are part of the history.
+
+- `site_checks`: the report's site check evaluation (`potential_impact.site_checks`, see below) without `findings`, computed from the same stored results on every read: `status` (`evaluated`, `partial`, `pending`, `not_evaluated`, `not_applicable`) and per check (`home`, `rest`) its `status`, comparison `state`, `change`, `reason` and `finding_count`. The list reads the site check result columns for this (small result facts and fixed reason codes), so History needs no request per row. Rows recorded before site checks existed read as `not_applicable` with reason `not_captured`.
 
 ```json
 [
@@ -70,6 +74,25 @@ Body: an array of history items. Diffs are never decoded or returned for the lis
         "options": { "recorded": true, "has_changes": true },
         "cron": { "recorded": true, "has_changes": true },
         "action_scheduler": { "recorded": true, "has_changes": true }
+      }
+    },
+    "site_checks": {
+      "status": "evaluated",
+      "checks": {
+        "home": {
+          "status": "evaluated",
+          "state": "newly_failing",
+          "change": null,
+          "reason": null,
+          "finding_count": 1
+        },
+        "rest": {
+          "status": "evaluated",
+          "state": "passed_both",
+          "change": null,
+          "reason": null,
+          "finding_count": 0
+        }
       }
     }
   }

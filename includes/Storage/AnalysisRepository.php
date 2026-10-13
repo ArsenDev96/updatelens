@@ -247,7 +247,10 @@ class AnalysisRepository {
 	 * has changes (`has_changes_<column>`, NULL if not stored). Both are
 	 * computed in SQL: a NULL check and a prefix comparison with the codec's
 	 * empty diff (history_like_patterns()). The diff JSON is never returned or
-	 * decoded. Ordered by primary key, so the page is read from the PK index
+	 * decoded. The site check columns (SITE_CHECK_RESULT_COLUMNS: small result
+	 * facts, at most a few KB per row, and fixed reason codes) are read too,
+	 * so each item can show its site check comparison without a request per
+	 * row. Ordered by primary key, so the page is read from the PK index
 	 * without a sort.
 	 *
 	 * @param int $limit  Page size.
@@ -262,6 +265,7 @@ class AnalysisRepository {
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
 				'SELECT id, plugin_file, plugin_name, version_before, version_after, status, settle_outcome, started_at, settle_deadline, completed_at, error_code,
+					site_check_home_before, site_check_home_before_reason, site_check_rest_before, site_check_rest_before_reason, site_check_update_started_at, site_check_after_started_at, site_check_home_after, site_check_home_after_reason, site_check_rest_after, site_check_rest_after_reason,
 					options_during_update_diff IS NOT NULL AS has_options_during_update_diff,
 					options_during_update_diff NOT LIKE %s AS has_changes_options_during_update_diff,
 					options_post_update_diff IS NOT NULL AS has_options_post_update_diff,

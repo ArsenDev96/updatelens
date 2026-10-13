@@ -50,7 +50,9 @@ function indicatorClassName(
 ): string {
 	return cn(
 		'inline-block whitespace-nowrap rounded-full px-2 text-xs leading-5 tabular-nums',
-		isSelected && 'bg-white/20 font-semibold',
+		// On the selected (accent) tab: a light pill with accent text. A
+		// translucent white pill left white text below 4.5:1.
+		isSelected && 'bg-primary-foreground font-semibold text-primary',
 		! isSelected &&
 			( tone === 'changes'
 				? 'bg-tint-strong font-semibold text-tint-foreground'

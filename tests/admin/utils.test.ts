@@ -113,7 +113,7 @@ describe( 'labels', () => {
 	it.each( [
 		[ 'captured', 'Updating', 'progress' ],
 		[ 'awaiting_settle', 'Observing', 'progress' ],
-		[ 'completed', 'Completed', 'positive' ],
+		[ 'completed', 'Update completed', 'positive' ],
 		[ 'failed', 'Failed', 'negative' ],
 		[ 'incompatible', 'Incompatible', 'caution' ],
 		[ 'abandoned', 'Incomplete', 'neutral' ],
@@ -126,8 +126,8 @@ describe( 'labels', () => {
 
 	it.each( [
 		[ 'completed', 'expired', 'Partial report', 'caution' ],
-		[ 'completed', 'admin_shutdown', 'Completed', 'positive' ],
-		[ 'completed', 'next_update', 'Completed', 'positive' ],
+		[ 'completed', 'admin_shutdown', 'Update completed', 'positive' ],
+		[ 'completed', 'next_update', 'Update completed', 'positive' ],
 		[ 'awaiting_settle', null, 'Observing', 'progress' ],
 		[ 'failed', 'not_applicable', 'Failed', 'negative' ],
 		// Only a completed analysis can be partial.

@@ -118,16 +118,71 @@ final class BaselinesTest extends TestCase {
 					'state'      => 'missing',
 					'age'        => null,
 					'refresh_in' => 0,
+					'verdict'    => null,
 				),
 				'rest' => array(
 					'state'      => 'missing',
 					'age'        => null,
 					'refresh_in' => 0,
+					'verdict'    => null,
 				),
 			),
 			$this->readiness()
 		);
 		$this->assertSame( array( 'home', 'rest' ), Baselines::due( $this->readiness() ) );
+	}
+
+	/**
+	 * What the Plugins and Updates screens may call ready: a stored,
+	 * attachable baseline with its verdict and the seconds it stays
+	 * attachable; nothing while an update runs, once too old or outdated.
+	 */
+	public function test_status_for_the_update_screens() {
+		$this->baselines->save( self::before_run( 'home', $this->now - 20.5, $this->now - 0.5 ) );
+		// One failed request without a confirming retry: inconclusive, stored as it is.
+		$this->baselines->save( self::before_run( 'rest', $this->now - 30, $this->now - 10, array( 'facts' => array( F::rest( array( 'status' => 500 ) ) ) ) ) );
+		$none = array(
+			'state'      => 'none',
+			'verdict'    => null,
+			'expires_in' => 0,
+		);
+
+		$this->assertSame(
+			array(
+				'home' => array(
+					'state'      => 'ready',
+					'verdict'    => 'pass',
+					'expires_in' => 600,
+				),
+				// The verdict is passed on; the screens never count it as ready.
+				'rest' => array(
+					'state'      => 'ready',
+					'verdict'    => 'inconclusive',
+					'expires_in' => 590,
+				),
+			),
+			Baselines::status( $this->readiness(), true )
+		);
+		$this->assertSame(
+			array(
+				'home' => $none,
+				'rest' => $none,
+			),
+			Baselines::status( $this->readiness(), false ),
+			'Without a quiet generation (an update running) nothing is ready.'
+		);
+
+		$this->now += 595;
+		$this->assertSame( array( 'ready', 5 ), array( Baselines::status( $this->readiness(), true )['home']['state'], Baselines::status( $this->readiness(), true )['home']['expires_in'] ) );
+		$this->assertSame( $none, Baselines::status( $this->readiness(), true )['rest'], 'Too old to be attached.' );
+		$this->assertSame(
+			array(
+				'home' => $none,
+				'rest' => $none,
+			),
+			Baselines::status( $this->baselines->readiness( F::USER, self::LOGIN, self::targets(), 'other:2' ), true ),
+			'Outdated by a later update.'
+		);
 	}
 
 	/**
@@ -173,7 +228,7 @@ final class BaselinesTest extends TestCase {
 	public function test_clock_skew() {
 		$this->baselines->save( self::before_run( 'home', $this->now, $this->now + 2.0 ) );
 
-		$this->assertSame( array( 'ready', 0, 300 ), array_values( $this->readiness()['home'] ) );
+		$this->assertSame( array( 'ready', 0, 300, 'pass' ), array_values( $this->readiness()['home'] ) );
 	}
 
 	/**

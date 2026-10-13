@@ -20,6 +20,7 @@ import { LoadError } from '../components/LoadError';
 import { useRequest } from '../hooks/use-request';
 import type { SiteCheckSettings } from '../types/api';
 import type { Tone } from '../utils/labels';
+import { requestFailureText } from '../utils/labels';
 import { TONE_BADGE, TONE_DOT } from '../utils/tone';
 
 /** Outcome of the last save, until the setting is changed again. */
@@ -64,7 +65,7 @@ export function SettingsPage() {
 				<LoadError
 					error={ request.error }
 					message={ __(
-						"Settings couldn't be loaded. Try again.",
+						"Settings couldn't be loaded.",
 						'updatelens'
 					) }
 					forbiddenMessage={ __(
@@ -145,7 +146,8 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 			<form
 				onSubmit={ onSubmit }
 				noValidate
-				className="space-y-4 p-4 sm:p-6"
+				// Long lines stay readable on wide screens.
+				className="max-w-2xl space-y-4 p-4 sm:p-6"
 			>
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
 					<h3
@@ -191,16 +193,45 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 							className="text-[13px] leading-5 text-slate-600"
 						>
 							{ __(
-								'Compare your homepage and WordPress REST API responses before and after supported manual plugin updates. UpdateLens records observed changes to help you investigate possible problems.',
+								'Compare your homepage and WordPress REST API responses just before and after a plugin update. Each report shows the results in its “Site response checks” section.',
 								'updatelens'
 							) }
 						</p>
+						<p
+							id={ `${ id }-steps` }
+							className="pt-1 text-[13px] font-medium leading-5 text-slate-800"
+						>
+							{ __( 'To compare an update:', 'updatelens' ) }
+						</p>
+						<ol
+							aria-labelledby={ `${ id }-steps` }
+							className="list-decimal space-y-0.5 pl-5 text-[13px] leading-5 text-slate-600 marker:text-slate-500"
+						>
+							<li>
+								{ __(
+									'Open Installed Plugins and wait until UpdateLens shows “Ready to compare site responses”.',
+									'updatelens'
+								) }
+							</li>
+							<li>
+								{ __(
+									'Click “Update now” for the plugin there.',
+									'updatelens'
+								) }
+							</li>
+							<li>
+								{ __(
+									'Keep that tab open for a few seconds after “Updated!” appears, so the checks after the update can finish.',
+									'updatelens'
+								) }
+							</li>
+						</ol>
 					</div>
 				</div>
 
 				{ restricted && <RestrictionNote enabled={ saved.enabled } /> }
 
-				<div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-4">
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-7">
 					<Button
 						type="submit"
 						aria-disabled={ isSaving }
@@ -247,9 +278,10 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 }
 
 /**
- * The stored state as a badge: On, Off, or "Off for this site" when the
- * administrator turned site checks on but the site's configuration keeps
- * them off. Turned off by the administrator, it is the plain "Off".
+ * The stored state as a badge: "Saved setting: On", "… Off", or "… Off for
+ * this site" when the administrator turned site checks on but the site's
+ * configuration keeps them off. Turned off by the administrator, it is the
+ * plain "Off". It shows what is saved, not the unsaved checkbox.
  *
  * @param props          Props.
  * @param props.settings Stored settings.
@@ -276,10 +308,9 @@ function StateBadge( { settings }: { settings: SiteCheckSettings } ) {
 				aria-hidden="true"
 				className={ cn( 'size-1.5 rounded-full', TONE_DOT[ tone ] ) }
 			/>
-			<span className="sr-only">
-				{ __( 'Saved setting:', 'updatelens' ) }{ ' ' }
+			<span>
+				{ __( 'Saved setting:', 'updatelens' ) } { label }
 			</span>
-			{ label }
 		</p>
 	);
 }
@@ -386,10 +417,13 @@ function SaveError( { error }: { error: ApiError } ) {
 							"You don't have permission to change UpdateLens settings.",
 							'updatelens'
 						)
-					: __(
-							"Settings couldn't be saved. The setting shown as saved is unchanged. Try again.",
+					: `${ __(
+							"Settings couldn't be saved. The setting shown as saved is unchanged.",
 							'updatelens'
-						) }
+						) } ${
+							requestFailureText( error, false ) ??
+							__( 'Try again.', 'updatelens' )
+						}` }
 			</p>
 		</div>
 	);
@@ -456,19 +490,25 @@ function HowItWorks( {
 				<HowGroup title={ __( 'When checks run', 'updatelens' ) }>
 					<li>
 						{ __(
-							'Earlier checks: when an administrator who can update plugins opens Plugins or Updates while plugin updates are available.',
+							'Before an update: in the background while an administrator who can update plugins has Installed Plugins or Dashboard → Updates open and plugin updates are available. Turning site checks on does not test your site right away.',
 							'updatelens'
 						) }
 					</li>
 					<li>
 						{ __(
-							'Later checks: in the same browser tab, right after a successful update of a single plugin with “Update now”, while the tab stays open and the site can record the result.',
+							'After an update: in the same browser tab, right after a successful update of a single plugin with “Update now” on Installed Plugins, while the tab stays open and the site can record the result.',
 							'updatelens'
 						) }
 					</li>
 					<li>
 						{ __(
-							'Plugin updates never wait for a site check.',
+							'Updates from Dashboard → Updates get no check after the update, so they are not compared.',
+							'updatelens'
+						) }
+					</li>
+					<li>
+						{ __(
+							'“Ready to compare” means a comparison is possible, not that the checks will pass. Plugin updates never wait for a site check.',
 							'updatelens'
 						) }
 					</li>
@@ -477,6 +517,12 @@ function HowItWorks( {
 					<li>
 						{ __(
 							'Results are observations, not proof that an updated plugin caused a problem.',
+							'updatelens'
+						) }
+					</li>
+					<li>
+						{ __(
+							'Missing, inconclusive and unsupported checks are never counted as passed.',
 							'updatelens'
 						) }
 					</li>

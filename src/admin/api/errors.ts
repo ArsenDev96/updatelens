@@ -1,7 +1,24 @@
 /**
  * Kinds of failure the UI distinguishes. Server messages are never shown.
+ *
+ * - `forbidden`: UpdateLens's own permission check refused (`rest_forbidden`).
+ * - `session`: the REST nonce or login session was refused.
+ * - `blocked`: another 401/403 from the REST API (a security plugin or host
+ *   rule in front of it), not UpdateLens's permission check.
+ * - `unreadable`: the answer was not REST JSON (PHP output before the data,
+ *   an HTML error or firewall page); its HTTP status is unknown then.
+ * - `offline`: the request did not reach the site.
+ * - `failed`: any other error, with its HTTP status if known.
  */
-export type ApiErrorKind = 'not_found' | 'forbidden' | 'too_large' | 'failed';
+export type ApiErrorKind =
+	| 'not_found'
+	| 'forbidden'
+	| 'session'
+	| 'blocked'
+	| 'unreadable'
+	| 'offline'
+	| 'too_large'
+	| 'failed';
 
 export class ApiError extends Error {
 	readonly kind: ApiErrorKind;
@@ -56,8 +73,24 @@ export function toApiError( error: unknown ): ApiError {
 	if ( status === 404 || code === 'updatelens_analysis_not_found' ) {
 		return new ApiError( 'not_found', status );
 	}
-	if ( status === 401 || status === 403 || code === 'rest_forbidden' ) {
+	if ( code === 'rest_forbidden' ) {
 		return new ApiError( 'forbidden', status );
+	}
+	if (
+		code === 'rest_cookie_invalid_nonce' ||
+		code === 'rest_not_logged_in'
+	) {
+		return new ApiError( 'session', status );
+	}
+	if ( status === 401 || status === 403 ) {
+		return new ApiError( 'blocked', status );
+	}
+	// apiFetch's codes for an answer that is not JSON, and for no answer.
+	if ( code === 'invalid_json' ) {
+		return new ApiError( 'unreadable', status );
+	}
+	if ( code === 'fetch_error' ) {
+		return new ApiError( 'offline', status );
 	}
 	// A report whose stored details would not fit in the memory a request may
 	// use (`ReportTooLargeException`): retrying does not help.
@@ -65,4 +98,25 @@ export function toApiError( error: unknown ): ApiError {
 		return new ApiError( 'too_large', status );
 	}
 	return new ApiError( 'failed', status );
+}
+
+/**
+ * The ApiError of a failed Response (apiFetch with `parse: false` rejects
+ * with it): the REST error code from its JSON body when there is one, else
+ * an answer that is not REST data, with the HTTP status either way.
+ *
+ * @param response Failed response.
+ */
+export async function responseError( response: Response ): Promise< ApiError > {
+	let code = '';
+	try {
+		const body: unknown = await response.json();
+		if ( body && typeof body === 'object' && 'code' in body ) {
+			const value = ( body as { code: unknown } ).code;
+			code = typeof value === 'string' ? value : '';
+		}
+	} catch {
+		code = 'invalid_json';
+	}
+	return toApiError( { code, data: { status: response.status } } );
 }

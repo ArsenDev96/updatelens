@@ -8,7 +8,6 @@ import type {
 	SiteCheckId,
 	SiteCheckImpactCheck,
 	SiteCheckSide,
-	SiteChecks,
 } from '../types/api';
 import {
 	formatCount,
@@ -287,25 +286,28 @@ export function siteCheckWhatChanged( finding: SiteCheckFinding ): string {
 	const before =
 		finding.check === 'home'
 			? __(
-					'The homepage responded successfully during the earlier check.',
+					'The homepage responded successfully before the update.',
 					'updatelens'
 				)
 			: __(
-					'The REST API responded as expected during the earlier check.',
+					'The REST API responded as expected before the update.',
 					'updatelens'
 				);
 	return `${ before } ${ laterText( finding ) }`;
 }
 
 /**
- * What the later requests saw.
+ * What the later requests saw: a redirect (the change finding) or how they
+ * failed.
  *
- * @param finding Finding.
+ * @param finding Finding, or a later side described like one.
  */
-function laterText( finding: SiteCheckFinding ): string {
+export function laterText(
+	finding: Pick< SiteCheckFinding, 'code' | 'after' >
+): string {
 	if ( finding.code === 'site_check_changed' ) {
 		return __(
-			'Two later requests were redirected. The browser cannot see where a redirect leads.',
+			'Both requests after the update were redirected. The browser cannot see where a redirect leads.',
 			'updatelens'
 		);
 	}
@@ -313,44 +315,50 @@ function laterText( finding: SiteCheckFinding ): string {
 		case 'http':
 			return sprintf(
 				/* translators: %s: HTTP status code, e.g. "500". */
-				__( 'Two later requests returned HTTP %s.', 'updatelens' ),
+				__(
+					'Both requests after the update returned HTTP %s.',
+					'updatelens'
+				),
 				httpStatus( finding.after ) ?? ''
 			);
 		case 'timeout':
 			return __(
-				'Two later requests timed out: no response arrived within the time limit.',
+				'Both requests after the update timed out: no response arrived within the time limit.',
 				'updatelens'
 			);
 		case 'incomplete':
 			return __(
-				'WordPress answered two later requests, but the page did not reach the expected completion marker.',
+				'WordPress answered both requests after the update, but the page did not reach the expected completion marker.',
 				'updatelens'
 			);
 		case 'invalid_json':
 			return __(
-				'Two later requests returned a response that was not valid JSON.',
+				'Both requests after the update returned a response that was not valid JSON.',
 				'updatelens'
 			);
 		case 'extra_output':
 			return __(
-				'Two later requests returned other output before the JSON.',
+				'Both requests after the update returned other output before the JSON.',
 				'updatelens'
 			);
 		case 'unexpected_json':
 			return __(
-				'Two later requests returned JSON other than the expected user data.',
+				'Both requests after the update returned JSON other than the expected user data.',
 				'updatelens'
 			);
 		case 'wrong_user':
 			return __(
-				'Two later requests returned data for a different user.',
+				'Both requests after the update returned data for a different user.',
 				'updatelens'
 			);
 		case 'redirected':
-			return __( 'Two later requests were redirected.', 'updatelens' );
+			return __(
+				'Both requests after the update were redirected.',
+				'updatelens'
+			);
 		default:
 			return __(
-				'Two later requests failed in different ways (see each request).',
+				'Both requests after the update failed, in different ways (see each request).',
 				'updatelens'
 			);
 	}
@@ -668,49 +676,87 @@ function relativeText( seconds: number, purpose: 'before' | 'after' ): string {
 			);
 }
 
+/** One request as observed by the browser, for the expanded details. */
+export interface AttemptView {
+	/** "HTTP 500 · 0.2 seconds", "No response within 10 seconds". */
+	summary: string;
+	/** Labelled facts: response source, completion marker or body. */
+	fields: Array< [ string, string ] >;
+}
+
 /**
- * One request as observed by the browser: "HTTP 500 · WordPress verified ·
- * 0.2 seconds", "No response within 10 seconds".
+ * One request as labelled fields. The response source says whether
+ * UpdateLens's one-time marker came back (WordPress verified as the sender),
+ * also for a failed response; nothing here says what caused a failure.
  *
  * @param check   Check.
  * @param attempt Attempt.
  */
-export function attemptText(
+export function attemptView(
 	check: SiteCheckId,
 	attempt: SiteCheckAttempt
-): string {
+): AttemptView {
 	const duration = formatDuration( attempt.duration_ms / 1000 );
 	if ( attempt.status === null ) {
 		switch ( attempt.outcome ) {
 			case 'timeout':
-				return sprintf(
-					/* translators: %s: how long the browser waited, e.g. "10 seconds". */
-					__( 'No response within %s', 'updatelens' ),
-					duration
-				);
+				return {
+					summary: sprintf(
+						/* translators: %s: how long the browser waited, e.g. "10 seconds". */
+						__( 'No response within %s', 'updatelens' ),
+						duration
+					),
+					fields: [],
+				};
 			case 'redirect':
-				return __(
-					'Redirected (the browser cannot see where)',
-					'updatelens'
-				);
+				return {
+					summary: __(
+						'Redirected (the browser cannot see where)',
+						'updatelens'
+					),
+					fields: [],
+				};
 			default:
-				return __( 'Network error, no response', 'updatelens' );
+				return {
+					summary: __( 'Network error, no response', 'updatelens' ),
+					fields: [],
+				};
 		}
 	}
 
-	const parts = [ statusText( attempt ) ];
-	if ( attempt.origin === 'verified' ) {
-		parts.push( __( 'WordPress verified', 'updatelens' ) );
-	} else {
-		parts.push( __( 'Not verified as WordPress', 'updatelens' ) );
-	}
+	const fields: Array< [ string, string ] > = [
+		[ __( 'Source', 'updatelens' ), sourceText( attempt ) ],
+	];
 	const form =
 		check === 'home' ? endMarkerText( attempt ) : bodyText( attempt );
 	if ( form ) {
-		parts.push( form );
+		fields.push( [
+			check === 'home'
+				? __( 'Completion marker', 'updatelens' )
+				: __( 'Body', 'updatelens' ),
+			form,
+		] );
 	}
-	parts.push( duration );
-	return parts.join( ' · ' );
+	return {
+		summary: `${ statusText( attempt ) } · ${ duration }`,
+		fields,
+	};
+}
+
+/**
+ * Whether the response was verified as coming from WordPress: UpdateLens's
+ * one-time marker came back with it. A failed response can be verified too.
+ *
+ * @param attempt Attempt with a status.
+ */
+function sourceText( attempt: SiteCheckAttempt ): string {
+	// What "verified" means is said once, below the requests.
+	if ( attempt.origin !== 'verified' ) {
+		return __( 'Not verified as WordPress', 'updatelens' );
+	}
+	return attempt.status !== null && attempt.status >= 400
+		? __( 'Verified as WordPress, also for this error', 'updatelens' )
+		: __( 'Verified as WordPress', 'updatelens' );
 }
 
 /**
@@ -753,16 +799,13 @@ function endMarkerText( attempt: SiteCheckAttempt ): string | null {
 	}
 	switch ( attempt.end_marker ) {
 		case 'current':
-			return __( 'page completion marker present', 'updatelens' );
+			return __( 'Present', 'updatelens' );
 		case 'absent':
-			return __( 'page completion marker missing', 'updatelens' );
+			return __( 'Missing', 'updatelens' );
 		case 'stale':
-			return __(
-				'marker of an earlier check (cached page)',
-				'updatelens'
-			);
+			return __( 'From an earlier check (cached page)', 'updatelens' );
 		case 'not_read':
-			return __( 'page not fully inspected', 'updatelens' );
+			return __( 'Not inspected', 'updatelens' );
 		default:
 			return null;
 	}
@@ -776,9 +819,9 @@ function endMarkerText( attempt: SiteCheckAttempt ): string | null {
 function bodyText( attempt: SiteCheckAttempt ): string | null {
 	switch ( attempt.body ) {
 		case 'expected_user':
-			return __( 'expected user data', 'updatelens' );
+			return __( 'Expected user data', 'updatelens' );
 		case 'other_user':
-			return __( 'data for a different user', 'updatelens' );
+			return __( 'Data for a different user', 'updatelens' );
 		case 'wp_error':
 			return attempt.error_code && attempt.error_code !== 'other'
 				? sprintf(
@@ -788,15 +831,15 @@ function bodyText( attempt: SiteCheckAttempt ): string | null {
 					)
 				: __( 'WordPress error', 'updatelens' );
 		case 'unexpected_json':
-			return __( 'unexpected JSON', 'updatelens' );
+			return __( 'Unexpected JSON', 'updatelens' );
 		case 'extra_output':
-			return __( 'other output before the JSON', 'updatelens' );
+			return __( 'Other output before the JSON', 'updatelens' );
 		case 'invalid_json':
-			return __( 'invalid JSON', 'updatelens' );
+			return __( 'Invalid JSON', 'updatelens' );
 		case 'empty':
-			return __( 'empty response', 'updatelens' );
+			return __( 'Empty response', 'updatelens' );
 		case 'not_read':
-			return __( 'response not fully inspected', 'updatelens' );
+			return __( 'Not fully inspected', 'updatelens' );
 		default:
 			return null;
 	}
@@ -840,7 +883,7 @@ export function siteCheckCoverage(
 				category: 'waiting',
 				status: __( 'Still pending', 'updatelens' ),
 				detail: __(
-					'Waiting for the later check from the browser that ran the update.',
+					'Waiting for the check after the update from the browser that ran it.',
 					'updatelens'
 				),
 			};
@@ -909,10 +952,7 @@ function comparedText(
 			};
 		case 'failing_both':
 			return {
-				status: __(
-					'Already failing at the earlier observation',
-					'updatelens'
-				),
+				status: __( 'Already failing before the update', 'updatelens' ),
 				detail: __(
 					'It failed before and after the update, so it is not a new finding.',
 					'updatelens'
@@ -948,7 +988,7 @@ function changedText(
 			);
 		case 'redirect_then_failure':
 			return __(
-				'The homepage redirected before the update and failed in both requests after it. The earlier check was a redirect, not a verified pass, so this is not reported as a newly failing check.',
+				'The homepage redirected before the update and failed in both requests after it. The check before the update was a redirect, not a verified pass, so this is not reported as a newly failing check.',
 				'updatelens'
 			);
 		default:
@@ -1017,11 +1057,58 @@ export function siteChecksNotUsed(
 }
 
 /**
+ * Site checks that were used but not compared, or are still pending, in one
+ * line for Potential Impact: names and state only ("Homepage and REST API
+ * not compared · details in the section above"); the reasons are in "Site
+ * response checks".
+ *
+ * @param checks Checks to name (pending or not evaluated).
+ * @param impact API evaluation.
+ */
+export function siteChecksIncompleteText(
+	checks: SiteCheckId[],
+	impact: PotentialImpact
+): string {
+	const names = ( list: SiteCheckId[] ) =>
+		list.length > 1
+			? __( 'Homepage and REST API', 'updatelens' )
+			: siteCheckSubject( list[ 0 ] );
+	const pending = checks.filter(
+		( check ) => impact.site_checks.checks[ check ]?.status === 'pending'
+	);
+	const other = checks.filter( ( check ) => ! pending.includes( check ) );
+	const parts: string[] = [];
+	if ( pending.length > 0 ) {
+		parts.push(
+			sprintf(
+				/* translators: %s: check names, e.g. "Homepage" or "Homepage and REST API". */
+				__( '%s waiting for results', 'updatelens' ),
+				names( pending )
+			)
+		);
+	}
+	if ( other.length > 0 ) {
+		parts.push(
+			sprintf(
+				/* translators: %s: check names, e.g. "Homepage" or "Homepage and REST API". */
+				__( '%s not compared', 'updatelens' ),
+				names( other )
+			)
+		);
+	}
+	return sprintf(
+		/* translators: %s: e.g. "Homepage not compared". */
+		__( '%s · details in the section above', 'updatelens' ),
+		parts.join( __( '; ', 'updatelens' ) )
+	);
+}
+
+/**
  * Why a check on another origin than wp-admin did not run.
  *
  * @param check The check, or null for both.
  */
-function crossOriginText( check: SiteCheckId | null ): string {
+export function crossOriginText( check: SiteCheckId | null ): string {
 	switch ( check ) {
 		case 'home':
 			return __(
@@ -1067,16 +1154,16 @@ function notComparedText(
  *
  * @param reason BEFORE reason.
  */
-function beforeReasonText( reason: string ): string {
+export function beforeReasonText( reason: string ): string {
 	switch ( reason ) {
 		case 'no_login_session':
 			return __(
-				'The update request had no WordPress login session to match an earlier check with.',
+				'The update request had no WordPress login session to match a check before the update with.',
 				'updatelens'
 			);
 		case 'update_order_unknown':
 			return __(
-				'UpdateLens could not record the order of updates, so no earlier check could be matched to this one.',
+				'UpdateLens could not record the order of updates, so no check before the update could be matched to it.',
 				'updatelens'
 			);
 		case 'overlapping_update':
@@ -1086,50 +1173,53 @@ function beforeReasonText( reason: string ): string {
 			);
 		case 'missing':
 			return __(
-				'No earlier check from this administrator’s login session was available when the update started. Earlier checks run on the Plugins and Updates screens.',
+				'No check from this login session had finished when the update started. These checks run in the background on Installed Plugins; wait until UpdateLens shows “Ready to compare site responses” there before clicking “Update now”.',
 				'updatelens'
 			);
 		case 'corrupt':
 		case 'data_corrupt':
-			return __( 'The earlier check could not be read.', 'updatelens' );
+			return __(
+				'The check before the update could not be read.',
+				'updatelens'
+			);
 		case 'definition_changed':
 			return __(
-				'The earlier check used a different version of the check.',
+				'The check before the update used a different version of the check.',
 				'updatelens'
 			);
 		case 'target_changed':
 			return __(
-				'The site address changed after the earlier check.',
+				'The site address changed after the check before the update.',
 				'updatelens'
 			);
 		case 'not_completed_before_update':
 			return __(
-				'The update started before the earlier check finished.',
+				'The update started before the check before it had finished.',
 				'updatelens'
 			);
 		case 'expired':
 			return __(
-				'The earlier check was too old when the update started.',
+				'The check before the update was too old when the update started.',
 				'updatelens'
 			);
 		case 'taken_during_update':
 			return __(
-				'The earlier check ran while another update was in progress.',
+				'The check before the update ran while another update was in progress.',
 				'updatelens'
 			);
 		case 'intervening_update':
 			return __(
-				'Another update ran between the earlier check and this update.',
+				'Another update ran between the check and this update.',
 				'updatelens'
 			);
 		case 'selection_failed':
 			return __(
-				'The earlier check could not be selected because of an unexpected error.',
+				'The check before the update could not be selected because of an unexpected error.',
 				'updatelens'
 			);
 		default:
 			return __(
-				'No earlier check was available for this update.',
+				'No check before the update was available.',
 				'updatelens'
 			);
 	}
@@ -1140,55 +1230,66 @@ function beforeReasonText( reason: string ): string {
  *
  * @param reason AFTER reason.
  */
-function afterReasonText( reason: string ): string {
+export function afterReasonText( reason: string ): string {
 	switch ( reason ) {
 		case 'overlapping_update':
 			return __(
-				'Another update ran after this one, before the later check could start.',
+				'Another update ran after this one, before the check after the update could start.',
 				'updatelens'
 			);
 		case 'update_order_unknown':
 			return __(
-				'UpdateLens could not confirm that no other update ran before the later check, so it did not run.',
+				'UpdateLens could not confirm that no other update ran in between, so the check after the update did not run.',
 				'updatelens'
 			);
 		case 'rate_limited':
 			return __(
-				'The later check did not start because too many checks had run recently.',
+				'The check after the update did not start because too many checks had run recently.',
 				'updatelens'
 			);
 		case 'session_failed':
-			return __( 'The later check could not be started.', 'updatelens' );
+			return __(
+				'The check after the update could not be started.',
+				'updatelens'
+			);
 		case 'analysis_ended':
 			return __(
-				'The update did not complete normally, so there was no later check.',
+				'The update did not complete normally, so there was no check after it.',
 				'updatelens'
 			);
 		case 'settle_expired':
 			return __(
-				'The observation after the update was not captured in time, so there was no later check.',
+				'The observation after the update was not captured in time, so there was no check after it.',
 				'updatelens'
 			);
 		case 'not_followed_up':
 			return __(
-				'The later check runs only in the browser that ran the update, right after it; this update was finished by a later page load.',
+				'Checks after an update run only after “Update now” on Installed Plugins, in the same browser tab. This update finished another way, for example from Dashboard → Updates, so there was no check after it.',
+				'updatelens'
+			);
+		case 'no_baseline':
+			return __(
+				'There was no check before the update to compare with, so none ran after it.',
 				'updatelens'
 			);
 		case 'not_started':
 			return __(
-				'The later check did not start, for example because the page was closed or left right after the update.',
+				'The check after the update did not start, for example because the page was closed or left right after the update.',
 				'updatelens'
 			);
 		case 'not_reported':
 			return __(
-				'The later check started, but its result was not reported, for example because the page was closed while it ran.',
+				'The check after the update started, but its result was not reported, for example because the page was closed while it ran.',
 				'updatelens'
 			);
 		case 'data_corrupt':
-			return __( 'The later check could not be read.', 'updatelens' );
+			return __(
+				'The check after the update could not be read.',
+				'updatelens'
+			);
 		default:
 			return __(
-				'No later check was available for this update.',
+				'No check after the update was available.',
 				'updatelens'
 			);
 	}
@@ -1200,7 +1301,7 @@ function afterReasonText( reason: string ): string {
  * @param reason     Comparison reason.
  * @param comparison The report's comparison (for inconclusive details).
  */
-function comparisonReasonText(
+export function comparisonReasonText(
 	reason: string,
 	comparison: SiteCheckComparison | undefined
 ): string {
@@ -1212,12 +1313,12 @@ function comparisonReasonText(
 			);
 		case 'overlapping_update':
 			return __(
-				'Another update ran after this one finished, before the later check was reported.',
+				'Another update ran after this one finished, before the check after it was reported.',
 				'updatelens'
 			);
 		case 'update_order_unknown':
 			return __(
-				'UpdateLens could not confirm that no other update ran before the later check.',
+				'UpdateLens could not confirm that no other update ran before the check after the update.',
 				'updatelens'
 			);
 		case 'definition_changed':
@@ -1242,29 +1343,35 @@ function comparisonReasonText(
 			);
 		case 'baseline_after_update_start':
 			return __(
-				'The update started before the earlier check finished.',
+				'The update started before the check before it had finished.',
 				'updatelens'
 			);
 		case 'baseline_expired':
 			return __(
-				'The earlier check was too old when the update started.',
+				'The check before the update was too old when the update started.',
 				'updatelens'
 			);
 		case 'after_during_update':
 			return __(
-				'The later check started before the update had finished.',
+				'The check after the update started before the update had finished.',
 				'updatelens'
 			);
 		case 'before_inconclusive':
 			return sprintf(
 				/* translators: %s: why the check gave no reliable result, e.g. "a security challenge was returned." */
-				__( 'The earlier check was inconclusive: %s', 'updatelens' ),
+				__(
+					'The check before the update was inconclusive: %s',
+					'updatelens'
+				),
 				inconclusiveText( comparison?.before )
 			);
 		case 'after_inconclusive':
 			return sprintf(
 				/* translators: %s: why the check gave no reliable result, e.g. "one request failed and the retry did not confirm it." */
-				__( 'The later check was inconclusive: %s', 'updatelens' ),
+				__(
+					'The check after the update was inconclusive: %s',
+					'updatelens'
+				),
 				inconclusiveText( comparison?.after )
 			);
 		case 'redirected_both':
@@ -1326,39 +1433,6 @@ function inconclusiveText( side: SiteCheckSide | undefined ): string {
 		default:
 			return __( 'it gave no reliable result.', 'updatelens' );
 	}
-}
-
-/**
- * Timing of a compared check, for "What was checked": when the earlier and
- * later checks ran relative to the update.
- *
- * @param siteChecks The report's `site_checks`.
- * @param check      Check.
- */
-export function comparedTimingText(
-	siteChecks: SiteChecks | undefined,
-	check: SiteCheckId
-): string | null {
-	const comparison = siteChecks?.checks[ check ];
-	if ( ! comparison ) {
-		return null;
-	}
-	const age = comparison.before.age_seconds;
-	const delay = comparison.after.delay_seconds;
-	if (
-		age === null ||
-		age === undefined ||
-		delay === null ||
-		delay === undefined
-	) {
-		return null;
-	}
-	return sprintf(
-		/* translators: 1: e.g. "4.2 minutes before the update started". 2: e.g. "3 seconds after the update finished". */
-		__( 'Earlier check %1$s; later check %2$s.', 'updatelens' ),
-		relativeText( age, 'before' ),
-		relativeText( delay, 'after' )
-	);
 }
 
 /** The site check patterns, for "Patterns checked". */

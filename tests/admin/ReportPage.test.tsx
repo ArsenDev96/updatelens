@@ -78,13 +78,15 @@ describe( 'ReportPage', () => {
 				} )
 			).toBeInTheDocument();
 			const header = screen.getByRole( 'banner' );
+			// The plugin file is a technical detail, not part of the header.
+			expect( header ).not.toHaveTextContent(
+				'updatelens-fixture-a/updatelens-fixture-a.php'
+			);
+			expect( technicalDetails() ).toHaveTextContent(
+				'updatelens-fixture-a/updatelens-fixture-a.php'
+			);
 			expect(
-				within( header ).getByText(
-					'updatelens-fixture-a/updatelens-fixture-a.php'
-				)
-			).toBeInTheDocument();
-			expect(
-				within( header ).getByText( 'Completed' )
+				within( header ).getByText( 'Update completed' )
 			).toBeInTheDocument();
 			expect(
 				within( header ).getByText( /^Updated / )
@@ -297,7 +299,7 @@ describe( 'ReportPage', () => {
 		} );
 
 		it.each( [
-			[ 'completed', COMPLETED, 'Completed' ],
+			[ 'completed', COMPLETED, 'Update completed' ],
 			[ 'observing', AWAITING, 'Observing' ],
 			[ 'failed', FAILED, 'Failed' ],
 		] )(
@@ -477,7 +479,7 @@ describe( 'ReportPage', () => {
 			expect( crumbs[ 2 ] ).toHaveAttribute( 'aria-current', 'page' );
 			// Report context: plugin, versions and status.
 			expect( screen.getByRole( 'banner' ) ).toHaveTextContent(
-				/UpdateLens Fixture A\s*1\.0\.0 →\s*to 1\.1\.0\s*Completed/
+				/UpdateLens Fixture A\s*1\.0\.0 →\s*to 1\.1\.0\s*Update completed/
 			);
 
 			// Tabs count this signal only.
@@ -809,7 +811,7 @@ describe( 'ReportPage', () => {
 		renderReport( null, 'cron' );
 
 		expect( await screen.findByRole( 'alert' ) ).toHaveTextContent(
-			"This report couldn't be loaded. Try again."
+			"This report couldn't be loaded."
 		);
 		expect(
 			screen.getByRole( 'button', { name: 'Retry' } )

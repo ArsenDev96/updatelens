@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 
 import type { ApiError } from '../api/errors';
-import { reportTooLargeText } from '../utils/labels';
+import { reportTooLargeText, requestFailureText } from '../utils/labels';
 
 interface LoadErrorProps {
 	error: ApiError;
@@ -18,7 +18,10 @@ interface LoadErrorProps {
 }
 
 /**
- * Failed request. Shows fixed text per error kind, never server messages.
+ * Failed request. Shows fixed text per error kind, never server messages:
+ * what failed, then why (the site's REST API refused, answered with
+ * something other than data, or returned an error), and Retry where it may
+ * help.
  *
  * @param props Props.
  */
@@ -30,18 +33,18 @@ export function LoadError( {
 	children,
 }: LoadErrorProps ) {
 	let text = message;
+	let cause = requestFailureText( error );
 	if ( error.kind === 'forbidden' ) {
-		text =
-			forbiddenMessage ??
-			__(
-				"You don't have permission to view UpdateLens reports.",
-				'updatelens'
-			);
+		text = forbiddenMessage ?? cause ?? message;
+		cause = null;
 	} else if ( error.kind === 'not_found' ) {
 		text = __( 'This analysis no longer exists.', 'updatelens' );
 	} else if ( error.kind === 'too_large' ) {
 		text = reportTooLargeText();
 	}
+	const retry = ! [ 'forbidden', 'not_found', 'too_large' ].includes(
+		error.kind
+	);
 
 	return (
 		<div
@@ -49,8 +52,9 @@ export function LoadError( {
 			className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm"
 		>
 			<p className="font-medium">{ text }</p>
+			{ cause && <p className="text-slate-700">{ cause }</p> }
 			<div className="flex flex-wrap items-center gap-3">
-				{ error.kind === 'failed' && (
+				{ retry && (
 					<Button variant="outline" size="sm" onClick={ onRetry }>
 						{ __( 'Retry', 'updatelens' ) }
 					</Button>

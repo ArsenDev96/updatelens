@@ -335,7 +335,9 @@ describe( 'Action Scheduler in reports', () => {
 				/error|failed|broken|unreadable|corrupt/i
 			);
 			expect(
-				within( screen.getByRole( 'banner' ) ).getByText( 'Completed' )
+				within( screen.getByRole( 'banner' ) ).getByText(
+					'Update completed'
+				)
 			).toBeInTheDocument();
 		} );
 

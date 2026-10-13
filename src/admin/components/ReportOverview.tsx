@@ -167,8 +167,8 @@ function UpdateSummary( {
 		<section
 			aria-labelledby="updatelens-summary-title"
 			className={ cn(
-				'rounded-xl border border-tint-border bg-tint px-5 sm:px-8',
-				hasChanges ? 'py-5 sm:py-7' : 'py-4 sm:py-5'
+				'rounded-xl border border-tint-border bg-tint px-4 sm:px-8',
+				hasChanges ? 'py-5 sm:py-6' : 'py-4 sm:py-5'
 			) }
 		>
 			<h3
@@ -181,7 +181,7 @@ function UpdateSummary( {
 				className={ cn(
 					'mt-2 tabular-nums tracking-tight text-slate-900',
 					hasChanges
-						? 'text-[2rem] font-semibold leading-tight sm:text-[2.5rem]'
+						? 'text-2xl font-semibold leading-tight sm:text-[1.625rem]'
 						: 'text-xl font-semibold leading-snug'
 				) }
 			>

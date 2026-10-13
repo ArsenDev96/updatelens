@@ -3,48 +3,47 @@ import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
-import type { AnalysisReport, PhaseKey, SiteCheckId } from '../types/api';
+import type { AnalysisReport, PhaseKey } from '../types/api';
 import type { PhaseChangeCounts } from '../utils/changes';
 import {
 	configurationGlance,
-	coverageLines,
+	coverageLine,
+	impactGlance,
 	siteChecksGlance,
 	type GlanceItem,
 } from '../utils/glance';
 import type { Tone } from '../utils/labels';
-import { siteCheckSubject } from '../utils/siteCheckImpact';
-import { siteCheckNextStep } from '../utils/siteChecks';
 import { TONE_ICON } from '../utils/tone';
 import { Icon, type IconName } from './Icon';
 
 /*
  * A compact summary right below the report header: configuration changes,
- * site response checks and observation coverage, side by side and kept
- * apart. Each is a fact with its own tone; there is no overall verdict on
- * the update. Newly failing and pending site checks show here before the
- * longer sections, a finding with its next step and a link to it, and
- * coverage names what was observed, sources and site responses separately.
+ * site response checks and Potential Impact side by side and kept apart,
+ * with the observation coverage of the configuration sources below them.
+ * Each is a fact with its own tone; there is no overall verdict on the
+ * update. Next steps and explanations are in the sections below: the
+ * summary says what was observed and where to look.
  */
 
 /**
  * The summary.
  *
- * @param props               Props.
- * @param props.report        Report.
- * @param props.counts        Change counts per phase.
- * @param props.onShowFinding Opens a site check's finding in Potential Impact.
+ * @param props              Props.
+ * @param props.report       Report.
+ * @param props.counts       Change counts per phase.
+ * @param props.onShowImpact Moves to the Potential Impact section.
  */
 export function ReportGlance( {
 	report,
 	counts,
-	onShowFinding,
+	onShowImpact,
 }: {
 	report: AnalysisReport;
 	counts: Record< PhaseKey, PhaseChangeCounts >;
-	onShowFinding: ( check: SiteCheckId ) => void;
+	onShowImpact: () => void;
 } ) {
-	const site = siteChecksGlance( report );
-	const evaluation = report.potential_impact.site_checks;
+	const impact = impactGlance( report );
+	const coverage = coverageLine( report, counts );
 
 	return (
 		<section
@@ -56,72 +55,31 @@ export function ReportGlance( {
 					<Fact item={ configurationGlance( report, counts ) } />
 				</Item>
 				<Item label={ __( 'Site response checks', 'updatelens' ) }>
-					<Fact item={ site } />
-					{ site.outcome.findings.length > 0 && (
-						<div className="ml-6 mt-2 space-y-1.5 text-[13px] leading-5">
-							<ul className="space-y-1.5">
-								{ site.outcome.findings.map( ( check ) => (
-									<li
-										key={ check }
-										className="text-slate-800"
-									>
-										<span className="font-medium">
-											{ siteCheckSubject( check ) }
-											{ ': ' }
-										</span>
-										{ siteCheckNextStep(
-											check,
-											evaluation?.checks[ check ]
-										) }{ ' ' }
-										<button
-											type="button"
-											onClick={ () =>
-												onShowFinding( check )
-											}
-											className="inline-flex min-h-6 items-center rounded font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-										>
-											{ check === 'home'
-												? __(
-														'Show the homepage finding',
-														'updatelens'
-													)
-												: __(
-														'Show the REST API finding',
-														'updatelens'
-													) }
-										</button>
-									</li>
-								) ) }
-							</ul>
-							<p className="text-slate-600">
-								{ __(
-									'An observed result, not proof that the updated plugin caused it.',
-									'updatelens'
-								) }
-							</p>
-						</div>
+					<Fact item={ siteChecksGlance( report ) } />
+				</Item>
+				<Item label={ __( 'Potential impact', 'updatelens' ) }>
+					<Fact item={ impact } />
+					{ impact.state === 'findings' && (
+						<button
+							type="button"
+							onClick={ onShowImpact }
+							className="ml-6 mt-1.5 inline-flex min-h-6 items-center rounded text-[13px] font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						>
+							{ __( 'Go to findings', 'updatelens' ) }
+						</button>
 					) }
 				</Item>
-				<Item label={ __( 'Observation coverage', 'updatelens' ) }>
-					<ul className="space-y-1.5">
-						{ coverageLines( report, counts ).map( ( line ) => (
-							<li key={ line.label } className="flex gap-2">
-								<ToneIcon
-									icon={ line.icon }
-									tone={ line.tone }
-								/>
-								<span className="min-w-0 text-[13px] leading-5 text-slate-700">
-									<span className="font-semibold text-slate-900">
-										{ line.label }
-										{ ': ' }
-									</span>
-									{ line.text }
-								</span>
-							</li>
-						) ) }
-					</ul>
-				</Item>
 			</dl>
+			<p className="flex gap-2 rounded-b-xl border-t bg-slate-50 px-4 py-2.5 text-[13px] leading-5 text-slate-700 sm:px-5">
+				<ToneIcon icon={ coverage.icon } tone={ coverage.tone } />
+				<span className="min-w-0">
+					<span className="font-semibold text-slate-900">
+						{ coverage.label }
+						{ ': ' }
+					</span>
+					{ coverage.text }
+				</span>
+			</p>
 		</section>
 	);
 }

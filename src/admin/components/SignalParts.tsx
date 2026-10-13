@@ -242,7 +242,7 @@ export function StatePill( {
 		<span
 			className={ cn(
 				'inline-flex items-baseline gap-1 rounded-full bg-slate-100 px-2 text-xs font-medium leading-5',
-				muted ? 'text-slate-500' : 'text-slate-700',
+				muted ? 'text-slate-600' : 'text-slate-700',
 				className
 			) }
 		>

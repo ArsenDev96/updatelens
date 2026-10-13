@@ -638,7 +638,7 @@ describe( 'Site checks in Potential Impact', () => {
 		} );
 
 		expect( impact() ).toHaveTextContent(
-			'You are viewing During update. These findings do not come from that phase: Potential Impact uses the Net result (before the update compared with after it) and site checks taken just before and after the update.'
+			'You are viewing During update. These findings do not come from that phase: Potential Impact uses the Net result (before the update compared with after it) and site checks taken before and after the update.'
 		);
 		await user.click( rowButton( rows()[ 0 ] ) );
 		const titles = rowTitles();

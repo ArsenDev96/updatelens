@@ -1449,7 +1449,7 @@ export function siteCheckPatterns(): string[] {
 export function siteCheckLimitations(): string[] {
 	return [
 		__(
-			'Site checks are separate requests from your browser shortly before and after the update. They are not part of any phase, and are compared only when both ran under the same conditions.',
+			'Site checks are separate requests from your browser before and after the update. They are not part of any phase, and are compared only when both ran under the same conditions.',
 			'updatelens'
 		),
 		__(

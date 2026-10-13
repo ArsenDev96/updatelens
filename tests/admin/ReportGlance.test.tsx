@@ -18,10 +18,11 @@ const apiFetchMock = vi.mocked( apiFetch );
 
 /*
  * The summary below the report header: configuration changes, site
- * response checks and observation coverage as three separate facts, never
- * one verdict on the update. Newly failing and pending checks show here,
- * before the longer sections, a finding with its next step and a link to
- * it; coverage names what was observed, sources and site responses apart.
+ * response checks and Potential Impact as three separate facts, never one
+ * verdict on the update, with the observation coverage of the
+ * configuration sources below them. Newly failing and pending checks and
+ * findings to review show here, before the longer sections; next steps and
+ * explanations stay in those sections.
  */
 
 type CaseName = keyof typeof cases.cases;
@@ -61,12 +62,9 @@ function glance(): Record< string, string > {
 	);
 }
 
-/** The coverage lines. */
-function coverage(): string[] {
-	const term = within( summary() ).getByText( 'Observation coverage' );
-	return within( term.nextElementSibling as HTMLElement )
-		.getAllByRole( 'listitem' )
-		.map( ( item ) => item.textContent ?? '' );
+/** The coverage line below the three facts. */
+function coverage(): string {
+	return summary().querySelector( ':scope > p' )?.textContent ?? '';
 }
 
 const FORBIDDEN =
@@ -132,28 +130,35 @@ describe( 'Report summary', () => {
 		).toBeTruthy();
 	} );
 
-	it( 'keeps configuration changes, site checks and coverage apart, without a verdict', async () => {
+	it( 'keeps configuration changes, site checks and Potential Impact apart, without a verdict', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
 		expect( Object.keys( glance() ) ).toEqual( [
 			'Configuration changes',
 			'Site response checks',
-			'Observation coverage',
+			'Potential impact',
 		] );
 		expect( glance()[ 'Configuration changes' ] ).toMatch(
 			/^\d+ changes? observedNet result · /
 		);
+		// Both checks in the same state: said once.
 		expect( glance()[ 'Site response checks' ] ).toBe(
-			'Passed before and afterHomepage: passed before and after · REST API: passed before and after'
+			'Passed before and after'
 		);
-		// What was observed, sources and site responses apart; never "complete".
-		expect( coverage() ).toEqual( [
-			'Configuration sources: Options & autoload and WP-Cron observed · Action Scheduler not detected',
-			'Site responses: Homepage and REST API compared',
-		] );
+		// No findings is worded by completeness, with what it was based on.
+		expect( glance()[ 'Potential impact' ] ).toBe(
+			'No findings matched the completed observations.Based on Net result and site checks'
+		);
+		expect(
+			within( summary() ).queryByRole( 'button' )
+		).not.toBeInTheDocument();
+		// What was observed of the configuration sources; never "complete".
+		expect( coverage() ).toBe(
+			'Configuration sources: Options & autoload and WP-Cron observed · Action Scheduler not detected'
+		);
 		expect( summary().textContent ).not.toMatch( FORBIDDEN );
 	} );
 
-	it( 'a newly failing homepage: its next step and a link to the finding, not a cause', async () => {
+	it( 'a newly failing homepage: the outcome and a finding to review, next steps stay below', async () => {
 		vi.useFakeTimers( { shouldAdvanceTime: true } );
 		try {
 			const user = userEvent.setup( {
@@ -163,50 +168,52 @@ describe( 'Report summary', () => {
 				withSiteChecks( COMPLETED, 'home_newly_failing' )
 			);
 			expect( glance()[ 'Site response checks' ] ).toBe(
-				'Newly failing: HomepageHomepage: newly failing · REST API: passed before and afterHomepage: Check whether the homepage is accessible now. Show the homepage findingAn observed result, not proof that the updated plugin caused it.'
+				'Newly failing: HomepageHomepage: newly failing · REST API: passed before and after'
 			);
+			expect( glance()[ 'Potential impact' ] ).toBe(
+				'1 finding to reviewBased on Net result and site checksGo to findings'
+			);
+			// The next step is in Site response checks and Potential Impact.
+			expect( summary().textContent ).not.toMatch( /Check whether/ );
+			expect( summary().textContent ).not.toMatch( FORBIDDEN );
 			await user.click(
 				within( summary() ).getByRole( 'button', {
-					name: 'Show the homepage finding',
+					name: 'Go to findings',
 				} )
 			);
 			await act( () => vi.runOnlyPendingTimersAsync() );
-			const finding = screen.getByRole( 'button', {
-				name: 'Homepage check newly failing, 1 finding',
-			} );
-			expect( finding ).toHaveAttribute( 'aria-expanded', 'true' );
-			expect( finding ).toHaveFocus();
+			expect(
+				screen.getByRole( 'heading', { name: 'Potential impact' } )
+			).toHaveFocus();
 		} finally {
 			vi.useRealTimers();
 		}
 	} );
 
-	it( 'a newly failing REST API: check the block editor', async () => {
+	it( 'a newly failing REST API', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'rest_newly_failing' ) );
 		expect( glance()[ 'Site response checks' ] ).toMatch(
-			/^Newly failing: REST API.*REST API: Check whether the block editor works\. Show the REST API finding/
+			/^Newly failing: REST APIHomepage: passed before and after · REST API: newly failing$/
 		);
 	} );
 
-	it( 'names both checks when both newly fail, each with its next step', async () => {
+	it( 'names both checks when both newly fail', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'both_newly_failing' ) );
-		expect( glance()[ 'Site response checks' ] ).toMatch(
-			/^Newly failing: Homepage and REST API/
+		expect( glance()[ 'Site response checks' ] ).toBe(
+			'Newly failing: Homepage and REST API'
 		);
-		expect(
-			within( summary() ).getAllByRole( 'button', {
-				name: /^Show the (homepage|REST API) finding$/,
-			} )
-		).toHaveLength( 2 );
+		expect( glance()[ 'Potential impact' ] ).toMatch(
+			/^2 findings to review/
+		);
 	} );
 
 	it( 'surfaces pending results', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'pending' ) );
-		expect( glance()[ 'Site response checks' ] ).toMatch(
-			/^Waiting for results/
+		expect( glance()[ 'Site response checks' ] ).toBe(
+			'Waiting for results'
 		);
-		expect( coverage()[ 1 ] ).toBe(
-			'Site responses: Waiting for the checks after the update'
+		expect( glance()[ 'Potential impact' ] ).toMatch(
+			/^No findings yet — site checks are still pending\./
 		);
 		expect( summary().textContent ).not.toMatch( /Passed/ );
 	} );
@@ -218,68 +225,43 @@ describe( 'Report summary', () => {
 		expect( glance()[ 'Site response checks' ] ).toMatch(
 			/^Newly failing: REST APIHomepage: waiting for results/
 		);
-		expect( coverage()[ 1 ] ).toBe(
-			'Site responses: REST API compared · Homepage waiting for results'
-		);
 	} );
 
 	it.each( [
-		[
-			'no_baseline',
-			'Not comparedHomepage: not compared · REST API: not compared',
-			'Site responses: Homepage and REST API not compared',
-		],
+		[ 'no_baseline', 'Not compared' ],
 		[
 			'unconfirmed',
 			'1 of 2 comparedHomepage: not compared · REST API: passed before and after',
-			'Site responses: REST API compared · Homepage not compared',
 		],
 		[
 			'home_cross_origin',
 			'Compared before and afterHomepage: not supported · REST API: passed before and after',
-			'Site responses: REST API compared · Homepage not supported',
 		],
 		[
 			'failing_both',
 			'Failing after the update: HomepageHomepage: failing before and after · REST API: passed before and after',
-			'Site responses: Homepage and REST API compared',
 		],
 		[
 			'redirect_then_failure',
 			'Failing after the update: HomepageHomepage: redirected before, failed after · REST API: passed before and after',
-			'Site responses: Homepage and REST API compared',
 		],
-	] as Array< [ CaseName, string, string ] > )(
+	] as Array< [ CaseName, string ] > )(
 		'%s: never passed when it was not compared as passed',
-		async ( name, site, responses ) => {
+		async ( name, site ) => {
 			await renderReport( withSiteChecks( COMPLETED, name ) );
 			expect( glance()[ 'Site response checks' ] ).toBe( site );
-			expect( coverage()[ 1 ] ).toBe( responses );
 		}
 	);
 
 	it.each( [
-		[
-			'disabled',
-			'Off for this update',
-			'Site responses: Not checked: site checks were off',
-		],
-		[
-			'historical',
-			'Not recorded for this update',
-			'Site responses: Not checked: not recorded for this update',
-		],
-		[
-			'both_cross_origin',
-			'Not supported on this site',
-			'Site responses: Not checked: not supported on this site',
-		],
-	] as Array< [ CaseName, string, string ] > )(
-		'%s: one quiet state, and coverage says the site was not checked',
-		async ( name, site, responses ) => {
+		[ 'disabled', 'Off for this update' ],
+		[ 'historical', 'Not recorded for this update' ],
+		[ 'both_cross_origin', 'Not supported on this site' ],
+	] as Array< [ CaseName, string ] > )(
+		'%s: one quiet state',
+		async ( name, site ) => {
 			await renderReport( withSiteChecks( COMPLETED, name ) );
 			expect( glance()[ 'Site response checks' ] ).toBe( site );
-			expect( coverage()[ 1 ] ).toBe( responses );
 		}
 	);
 
@@ -287,7 +269,7 @@ describe( 'Report summary', () => {
 		await renderReport(
 			actionScheduler( 'snapshot_unavailable', 'not_evaluated' )
 		);
-		expect( coverage()[ 0 ] ).toMatch(
+		expect( coverage() ).toMatch(
 			/^Configuration sources: Options & autoload and WP-Cron observed · Action Scheduler not available: /
 		);
 	} );
@@ -302,7 +284,7 @@ describe( 'Report summary', () => {
 		await renderReport(
 			actionScheduler( 'not_installed', 'not_applicable' )
 		);
-		expect( coverage()[ 0 ] ).toMatch( /· Action Scheduler not detected$/ );
+		expect( coverage() ).toMatch( /· Action Scheduler not detected$/ );
 		expect( card() ).toHaveTextContent(
 			/Not available Action Scheduler not detectedView details$/
 		);
@@ -326,7 +308,7 @@ describe( 'Report summary', () => {
 			.textContent!.replace( /^.*Not available /, '' )
 			.replace( /View details$/, '' );
 		expect( title ).not.toBe( '' );
-		expect( coverage()[ 0 ] ).toContain(
+		expect( coverage() ).toContain(
 			`Action Scheduler not available: ${ title }`
 		);
 	} );
@@ -335,7 +317,7 @@ describe( 'Report summary', () => {
 		await renderReport(
 			actionScheduler( 'not_installed', 'not_evaluated' )
 		);
-		expect( coverage()[ 0 ] ).toBe(
+		expect( coverage() ).toBe(
 			'Configuration sources: Options & autoload and WP-Cron observed · Action Scheduler not detected (not confirmed for the whole update)'
 		);
 	} );
@@ -345,21 +327,27 @@ describe( 'Report summary', () => {
 		expect( glance()[ 'Configuration changes' ] ).toMatch(
 			/^Net result not availableDuring update: \d+ changes?$/
 		);
-		expect( coverage()[ 0 ] ).toBe(
+		expect( glance()[ 'Potential impact' ] ).toBe(
+			'Not available for this report'
+		);
+		expect( coverage() ).toBe(
 			'Configuration sources: Observed during the update only: the state after it was not captured in time.'
 		);
 	} );
 
 	it( 'an open analysis is still observing', async () => {
 		await renderReport( AWAITING );
-		expect( coverage()[ 0 ] ).toMatch(
+		expect( glance()[ 'Potential impact' ] ).toBe(
+			'Waiting for the Net result'
+		);
+		expect( coverage() ).toMatch(
 			/^Configuration sources: Still observing/
 		);
 	} );
 
 	it( 'a failed analysis did not finish', async () => {
 		await renderReport( FAILED );
-		expect( coverage()[ 0 ] ).toBe(
+		expect( coverage() ).toBe(
 			'Configuration sources: The observation did not finish; see the status above.'
 		);
 	} );

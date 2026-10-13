@@ -216,8 +216,17 @@ describe( 'HistoryPage', () => {
 		[ 'home_newly_failing', 'newly_failing', 'Newly failing: Homepage' ],
 		[ 'rest_newly_failing', 'newly_failing', 'Newly failing: REST API' ],
 		[ 'both_passed', 'passed', 'Passed before and after' ],
-		[ 'one_unavailable', 'partial', '1 of 2 compared' ],
-		[ 'unconfirmed', 'partial', '1 of 2 compared' ],
+		// Partly compared: each check's own state follows.
+		[
+			'one_unavailable',
+			'partial',
+			'1 of 2 compared · Homepage: passed before and after · REST API: not compared',
+		],
+		[
+			'unconfirmed',
+			'partial',
+			'1 of 2 compared · Homepage: not compared · REST API: passed before and after',
+		],
 		[ 'no_baseline', 'not_compared', 'Not compared' ],
 		[ 'pending', 'pending', 'Waiting for results' ],
 		[ 'disabled', 'disabled', 'Off for this update' ],
@@ -243,7 +252,13 @@ describe( 'HistoryPage', () => {
 			const [ link ] = await screen.findAllByRole( 'link' );
 			const line = link.querySelector( '[data-outcome]' )!;
 			expect( line ).toHaveAttribute( 'data-outcome', kind );
-			expect( line ).toHaveTextContent( `Site checks: ${ text }` );
+			expect( line.textContent ).toBe( text );
+			// Labelled apart from the configuration phases.
+			const label = within( link ).getByText( 'Site checks' );
+			expect( label.tagName ).toBe( 'DT' );
+			expect( label.nextElementSibling ).toContainElement(
+				line as HTMLElement
+			);
 			// The update's own status stays a separate badge.
 			expect( link ).toHaveTextContent( 'Update completed' );
 			expect( line ).not.toHaveTextContent( 'Update completed' );
@@ -267,7 +282,7 @@ describe( 'HistoryPage', () => {
 
 		const [ link ] = await screen.findAllByRole( 'link' );
 		expect( link.querySelector( '[data-outcome]' ) ).toHaveTextContent(
-			'Site checks: Not recorded for this update'
+			'Not recorded for this update'
 		);
 	} );
 

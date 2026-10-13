@@ -486,6 +486,22 @@ export function cronRemovalContext( finding: ImpactFinding ): string[] {
 	return notes;
 }
 
+/**
+ * The evidence label: "Based on Net result", "Based on Net result and site
+ * checks" when site checks were compared too, or "Based on site checks".
+ *
+ * @param net  Whether the Net result was evaluated.
+ * @param site Whether at least one site check was compared.
+ */
+export function impactSourceLabel( net: boolean, site: boolean ): string {
+	if ( site && net ) {
+		return __( 'Based on Net result and site checks', 'updatelens' );
+	}
+	return site
+		? __( 'Based on site checks', 'updatelens' )
+		: __( 'Based on Net result', 'updatelens' );
+}
+
 /** Overall state of the Potential Impact section. */
 export type ImpactState =
 	'findings' | 'none' | 'waiting' | 'expired' | 'unavailable';

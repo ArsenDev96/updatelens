@@ -362,7 +362,7 @@ function Report( {
 			<ReportGlance
 				report={ report }
 				counts={ counts }
-				onShowFinding={ showSiteFinding }
+				onShowImpact={ () => focusSoon( 'updatelens-impact-title' ) }
 			/>
 			{ /* Its own evidence, the same whatever phase is selected below. */ }
 			<SiteResponseChecks
@@ -489,7 +489,7 @@ function RefinedSignalView( {
 	const crumb =
 		'rounded font-medium text-primary no-underline hover:underline focus:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 	const separator = (
-		<span aria-hidden="true" className="text-slate-300">
+		<span aria-hidden="true" className="text-slate-600">
 			›
 		</span>
 	);
@@ -547,7 +547,7 @@ function RefinedSignalView( {
 							<span className="break-words font-medium text-slate-800">
 								{ pluginName( report.plugin ) }
 							</span>
-							<span className="tabular-nums text-slate-600 [&>[aria-hidden=true]]:mx-0.5 [&>[aria-hidden=true]]:text-slate-400">
+							<span className="tabular-nums text-slate-600 [&>[aria-hidden=true]]:mx-0.5">
 								<Versions plugin={ report.plugin } />
 							</span>
 							<StatusBadge
@@ -736,7 +736,7 @@ function ReportHeader( {
 						dot
 					/>
 				</div>
-				<p className="mt-1.5 text-[1.0625rem] font-medium tabular-nums text-slate-800 [&>[aria-hidden=true]]:mx-0.5 [&>[aria-hidden=true]]:text-slate-400">
+				<p className="mt-1.5 text-[1.0625rem] font-medium tabular-nums text-slate-800 [&>[aria-hidden=true]]:mx-0.5">
 					<Versions plugin={ report.plugin } />
 				</p>
 				{ /* The plugin file is in the technical details. */ }

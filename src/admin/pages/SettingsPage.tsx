@@ -141,7 +141,8 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 	return (
 		<section
 			aria-labelledby={ `${ id }-title` }
-			className="rounded-lg border bg-card"
+			// As wide as its text: no empty half of a card on wide screens.
+			className="max-w-3xl rounded-lg border bg-card"
 		>
 			<form
 				onSubmit={ onSubmit }
@@ -193,7 +194,7 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 							className="text-[13px] leading-5 text-slate-600"
 						>
 							{ __(
-								'Compare your homepage and WordPress REST API responses just before and after a plugin update. Each report shows the results in its “Site response checks” section.',
+								'Compare your homepage and WordPress REST API responses before and after a plugin update. Each report shows the results in its “Site response checks” section.',
 								'updatelens'
 							) }
 						</p>
@@ -589,7 +590,7 @@ function HowGroup( {
 function SettingsSkeleton() {
 	return (
 		<div
-			className="space-y-4 rounded-lg border bg-card p-4 sm:p-6"
+			className="max-w-3xl space-y-4 rounded-lg border bg-card p-4 sm:p-6"
 			aria-busy="true"
 		>
 			<p className="sr-only">

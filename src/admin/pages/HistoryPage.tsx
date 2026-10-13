@@ -181,25 +181,38 @@ function HistoryRow( {
 		<a
 			href={ href }
 			onClick={ onClick }
-			className="group grid gap-3 px-4 py-3 text-foreground no-underline outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+			className="group grid gap-x-6 gap-y-3 px-4 py-4 text-foreground no-underline outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[minmax(0,1fr)_auto] sm:px-5"
 		>
-			<div className="min-w-0 space-y-1">
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-					<span className="break-words font-medium">
+			<div className="min-w-0">
+				<div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+					<span className="break-words text-[15px] font-semibold leading-6 text-slate-900">
 						{ pluginName( item.plugin ) }
+					</span>
+					<span className="text-sm tabular-nums text-slate-600">
+						<Versions plugin={ item.plugin } />
 					</span>
 					<StatusBadge
 						status={ item.status }
 						settleOutcome={ item.settle_outcome }
 					/>
 				</div>
-				<p className="font-mono text-xs text-muted-foreground">
-					<Versions plugin={ item.plugin } />
-				</p>
-				<PhaseChanges item={ item } />
-				<SiteChecksLine item={ item } />
+				{ /* Configuration and site responses: two separate observations, each labelled. */ }
+				<dl className="mt-2 grid text-xs leading-5 sm:grid-cols-[6.5rem_minmax(0,1fr)] sm:gap-x-3 sm:gap-y-1.5">
+					<dt className="font-medium text-slate-600">
+						{ __( 'Configuration', 'updatelens' ) }
+					</dt>
+					<dd className="min-w-0">
+						<PhaseChanges item={ item } />
+					</dd>
+					<dt className="mt-2 font-medium text-slate-600 sm:mt-0">
+						{ __( 'Site checks', 'updatelens' ) }
+					</dt>
+					<dd className="min-w-0">
+						<SiteChecksLine item={ item } />
+					</dd>
+				</dl>
 			</div>
-			<div className="flex items-center justify-between gap-4 text-sm sm:flex-col sm:items-end sm:justify-center sm:gap-1">
+			<div className="flex items-center justify-between gap-4 text-sm sm:flex-col sm:items-end sm:justify-start sm:gap-1.5">
 				{ date && (
 					<time
 						dateTime={ item.timestamps.started_at ?? undefined }
@@ -226,13 +239,13 @@ function HistoryRow( {
  */
 function PhaseChanges( { item }: { item: AnalysisHistoryItem } ) {
 	return (
-		<ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+		<ul className="flex flex-wrap gap-x-4 gap-y-0.5">
 			{ PHASE_KEYS.map( ( phase ) => {
 				const state = historyPhaseState( item.phases[ phase ] );
 				return (
 					<li
 						key={ phase }
-						className="inline-flex items-baseline gap-1.5"
+						className="inline-flex items-baseline gap-1.5 whitespace-nowrap"
 					>
 						<span className="text-muted-foreground">
 							{ phaseLabel( phase ) }
@@ -258,7 +271,9 @@ function PhaseChanges( { item }: { item: AnalysisHistoryItem } ) {
  * The update's site response checks, apart from its status badge: the same
  * outcome as the report summary (newly failing first, then pending,
  * passed, partly or not compared, off, unsupported or not recorded), so a
- * failing check is visible without opening the report.
+ * failing check is visible without opening the report. When the outcome
+ * alone is vague (compared with another result, partly compared, still
+ * failing), each check's own state follows it.
  *
  * @param props      Props.
  * @param props.item History item.
@@ -266,11 +281,11 @@ function PhaseChanges( { item }: { item: AnalysisHistoryItem } ) {
 function SiteChecksLine( { item }: { item: AnalysisHistoryItem } ) {
 	const outcome = siteCheckOutcome( item.site_checks );
 	const failing = outcome.kind === 'newly_failing';
+	const detail = [ 'compared', 'partial', 'failing' ].includes( outcome.kind )
+		? outcome.detail
+		: null;
 	return (
-		<p
-			data-outcome={ outcome.kind }
-			className="flex items-start gap-1.5 text-xs leading-5"
-		>
+		<p data-outcome={ outcome.kind } className="flex items-start gap-1.5">
 			<Icon
 				name={ outcome.icon }
 				className={ cn(
@@ -278,11 +293,7 @@ function SiteChecksLine( { item }: { item: AnalysisHistoryItem } ) {
 					TONE_ICON[ outcome.tone ]
 				) }
 			/>
-			<span>
-				<span className="text-muted-foreground">
-					{ __( 'Site checks', 'updatelens' ) }
-					<span className="sr-only">:</span>
-				</span>{ ' ' }
+			<span className="min-w-0">
 				<span
 					className={ cn(
 						failing
@@ -296,6 +307,12 @@ function SiteChecksLine( { item }: { item: AnalysisHistoryItem } ) {
 				>
 					{ outcome.value }
 				</span>
+				{ detail && (
+					<span className="text-muted-foreground">
+						{ ' · ' }
+						{ detail }
+					</span>
+				) }
 			</span>
 		</p>
 	);

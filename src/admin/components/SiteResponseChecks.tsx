@@ -39,7 +39,7 @@ import { Icon } from './Icon';
 /*
  * "Site response checks" on the report overview: what the administrator's
  * browser observed when it requested the homepage and the WordPress REST API
- * just before and just after the update. Not part of any phase and not a
+ * in the minutes before and shortly after the update. Not part of any phase and not a
  * configuration change, so it has its own section above the phase tabs.
  *
  * One row per check, always shown (also when both passed): the API's
@@ -140,7 +140,7 @@ export function SiteResponseChecks( {
 		<section
 			aria-labelledby="updatelens-site-checks-title"
 			className={ cn(
-				'rounded-xl border bg-card px-5 shadow-surface sm:px-8',
+				'rounded-xl border bg-card px-4 shadow-surface sm:px-8',
 				unused ? 'py-4' : 'py-5 sm:py-6'
 			) }
 		>
@@ -156,10 +156,7 @@ export function SiteResponseChecks( {
 				{ /* Only for checks that ran: not for turned off, unsupported or unrecorded ones. */ }
 				{ ! unused && (
 					<span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
-						{ __(
-							'Just before and after the update',
-							'updatelens'
-						) }
+						{ __( 'Before and after the update', 'updatelens' ) }
 					</span>
 				) }
 			</div>
@@ -191,7 +188,7 @@ export function SiteResponseChecks( {
 				<>
 					<p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-700">
 						{ __(
-							'Your browser requested the homepage and the WordPress REST API just before and after the update. These checks are separate from the configuration phases below, and they do not test every page or feature.',
+							'Your browser requested the homepage and the WordPress REST API in the minutes before the update and again shortly after it; each check shows when it ran. These checks are separate from the configuration phases below, and they do not test every page or feature.',
 							'updatelens'
 						) }
 					</p>

@@ -386,7 +386,10 @@ export interface SiteCheckOutcome {
 	tone: Tone;
 	icon: IconName;
 	value: string;
-	/** Each check's own state ("Homepage: newly failing · REST API: …"). */
+	/**
+	 * Each check's own state ("Homepage: newly failing · REST API: …"); null
+	 * when both are in the same state, which the value already says.
+	 */
 	detail: string | null;
 	/** Checks listed as findings (newly failing, or now redirecting). */
 	findings: SiteCheckId[];
@@ -492,16 +495,22 @@ export function siteCheckOutcome(
 		( check ) => evaluation.checks[ check ] !== undefined
 	);
 	const of = ( check: SiteCheckId ) => evaluation.checks[ check ];
-	const detail = checks
-		.map( ( check ) =>
-			sprintf(
-				/* translators: 1: a label, e.g. an observation phase ("Net result") or a check ("Homepage"). 2: what it says, e.g. "3 changes". */
-				__( '%1$s: %2$s', 'updatelens' ),
-				siteCheckSubject( check ),
-				shortState( of( check ) )
-			)
-		)
-		.join( ' · ' );
+	// Each check's own state, only when they differ: the same state for both
+	// would repeat the outcome ("Passed before and after").
+	const states = checks.map( ( check ) => shortState( of( check ) ) );
+	const detail =
+		new Set( states ).size > 1
+			? checks
+					.map( ( check, index ) =>
+						sprintf(
+							/* translators: 1: a label, e.g. an observation phase ("Net result") or a check ("Homepage"). 2: what it says, e.g. "3 changes". */
+							__( '%1$s: %2$s', 'updatelens' ),
+							siteCheckSubject( check ),
+							states[ index ]
+						)
+					)
+					.join( ' · ' )
+			: null;
 	const findings = checks.filter(
 		( check ) => ( of( check ).finding_count ?? 0 ) > 0
 	);

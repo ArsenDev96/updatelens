@@ -441,16 +441,20 @@ export function mountReadinessLine(
 	const line = doc.createElement( other ? 'p' : 'span' );
 	line.className = 'updatelens-site-check-status';
 	line.style.cssText = other
-		? 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:4px 0 0;max-width:60em;font-size:13px;line-height:1.5;color:#3c434a;'
-		: 'display:inline-flex;align-items:center;gap:4px;margin:0 0 0 12px;vertical-align:middle;font-size:13px;line-height:1.5;color:#3c434a;';
+		? 'display:flex;align-items:flex-start;gap:4px;margin:4px 0 0;max-width:60em;font-size:13px;line-height:1.5;color:#3c434a;'
+		: 'display:inline-flex;align-items:flex-start;gap:4px;margin:0 0 0 12px;vertical-align:middle;font-size:13px;line-height:1.5;color:#3c434a;';
 	const icon = doc.createElement( 'span' );
 	icon.setAttribute( 'aria-hidden', 'true' );
-	icon.style.cssText = 'font-size:18px;width:18px;height:18px;';
+	icon.style.cssText =
+		'flex-shrink:0;font-size:18px;width:18px;height:18px;margin-top:1px;';
 	const prefix = doc.createElement( 'strong' );
 	prefix.style.fontWeight = '600';
 	prefix.textContent = labels.prefix;
 	const text = doc.createElement( 'span' );
-	line.append( icon, prefix, ' ', text );
+	// One inline run, so a narrow screen wraps the words, not a column.
+	const words = doc.createElement( 'span' );
+	words.append( prefix, ' ', text );
+	line.append( icon, words );
 
 	if ( other ) {
 		// A fixed note, not a live region: nothing on it changes.
@@ -462,7 +466,7 @@ export function mountReadinessLine(
 			const link = doc.createElement( 'a' );
 			link.href = settings.plugins_url;
 			link.textContent = labels.plugins_link;
-			line.append( ' ', link );
+			words.append( ' ', link );
 		}
 		wrap.insertBefore( line, anchor );
 		return {

@@ -1,9 +1,15 @@
 import { __, _n, sprintf } from '@wordpress/i18n';
 
 import type { IconName } from '../components/Icon';
-import type { AnalysisReport, PhaseKey, SiteCheckId } from '../types/api';
+import type { AnalysisReport, PhaseKey } from '../types/api';
 import type { PhaseChangeCounts } from './changes';
 import { formatCount } from './format';
+import {
+	impactHeadline,
+	impactSourceLabel,
+	impactState,
+	type ImpactState,
+} from './impact';
 import {
 	actionSchedulerNotDetectedText,
 	listText,
@@ -13,16 +19,17 @@ import {
 	signalUnavailableText,
 	type Tone,
 } from './labels';
-import { SITE_CHECKS, siteCheckSubject } from './siteCheckImpact';
+import { siteChecksEvaluated } from './siteCheckImpact';
 import { siteCheckOutcome, type SiteCheckOutcome } from './siteChecks';
 
 /*
  * The report overview's summary below the header: three separate facts,
  * never one verdict about the update. Configuration changes (the Net result
  * total), the site response checks (their outcome, shared with History) and
- * the observation coverage (what was observed: configuration sources and
- * site responses on separate lines). Everything comes from the API's states
- * and summary counts; nothing here is a judgement of the update.
+ * Potential Impact (its findings to review, or why there are none), with the
+ * observation coverage of the configuration sources below them. Everything
+ * comes from the API's states and summary counts; nothing here is a
+ * judgement of the update.
  */
 
 /** One item of the summary. */
@@ -140,6 +147,40 @@ export function siteChecksGlance( report: AnalysisReport ): GlanceItem & {
 	};
 }
 
+/**
+ * Potential Impact: how many findings there are to review, or why there are
+ * none, in the section's own words (impactHeadline()), with what it was
+ * based on. Never a verdict: no findings is not "no problems".
+ *
+ * @param report Report.
+ */
+export function impactGlance( report: AnalysisReport ): GlanceItem & {
+	state: ImpactState;
+} {
+	const impact = report.potential_impact;
+	const state = impactState( impact );
+	const evaluated = state === 'findings' || state === 'none';
+	const look: Record< ImpactState, [ Tone, IconName ] > = {
+		findings: [ 'caution', 'caution' ],
+		none: [ 'neutral', 'info' ],
+		waiting: [ 'progress', 'progress' ],
+		expired: [ 'neutral', 'info' ],
+		unavailable: [ 'neutral', 'info' ],
+	};
+	return {
+		state,
+		tone: look[ state ][ 0 ],
+		icon: look[ state ][ 1 ],
+		value: impactHeadline( impact, state ),
+		detail: evaluated
+			? impactSourceLabel(
+					impact.status !== 'not_evaluated',
+					siteChecksEvaluated( impact )
+				)
+			: null,
+	};
+}
+
 /** One line of the observation coverage. */
 export interface CoverageLine {
 	label: string;
@@ -149,31 +190,15 @@ export interface CoverageLine {
 }
 
 /**
- * Observation coverage, as two separate lines that name what was observed:
- * the configuration sources (Options & autoload, WP-Cron, Action Scheduler)
- * and the site responses (the homepage and one REST API request). Never one
- * "complete": a source that is not installed is named as such, one that
- * could not be observed with why, and site checks that were off,
- * unsupported or not recorded say they did not cover anything.
+ * Observation coverage of the configuration sources: which were observed in
+ * the Net result, which is not installed, which could not be observed and
+ * why. Never one "complete". (The site responses' coverage is the site
+ * response checks item itself.)
  *
  * @param report Report.
  * @param counts Change counts per phase.
  */
-export function coverageLines(
-	report: AnalysisReport,
-	counts: Record< PhaseKey, PhaseChangeCounts >
-): CoverageLine[] {
-	return [ configurationCoverage( report, counts ), siteCoverage( report ) ];
-}
-
-/**
- * The configuration sources' line: which were observed in the Net result,
- * which is not installed, which could not be observed and why.
- *
- * @param report Report.
- * @param counts Change counts per phase.
- */
-function configurationCoverage(
+export function coverageLine(
 	report: AnalysisReport,
 	counts: Record< PhaseKey, PhaseChangeCounts >
 ): CoverageLine {
@@ -269,106 +294,4 @@ function configurationCoverage(
 		gaps > 0 ? 'caution' : 'check',
 		parts.join( ' · ' )
 	);
-}
-
-/**
- * The site responses' line: which of the two checks were compared, or that
- * none covered this update (off, unsupported, not recorded).
- *
- * @param report Report.
- */
-function siteCoverage( report: AnalysisReport ): CoverageLine {
-	const line = ( tone: Tone, icon: IconName, text: string ) => ( {
-		label: __( 'Site responses', 'updatelens' ),
-		tone,
-		icon,
-		text,
-	} );
-	const evaluation =
-		report.site_checks === undefined
-			? undefined
-			: report.potential_impact.site_checks;
-	const outcome = siteCheckOutcome( evaluation );
-	switch ( outcome.kind ) {
-		case 'disabled':
-			return line(
-				'neutral',
-				'info',
-				__( 'Not checked: site checks were off', 'updatelens' )
-			);
-		case 'unsupported':
-			return line(
-				'neutral',
-				'info',
-				__( 'Not checked: not supported on this site', 'updatelens' )
-			);
-		case 'not_recorded':
-			return line(
-				'neutral',
-				'info',
-				__( 'Not checked: not recorded for this update', 'updatelens' )
-			);
-		case 'pending':
-			return line(
-				'progress',
-				'progress',
-				__( 'Waiting for the checks after the update', 'updatelens' )
-			);
-	}
-	const checks = SITE_CHECKS.filter(
-		( check ) => evaluation?.checks[ check ] !== undefined
-	);
-	const by = ( status: string ) =>
-		checks.filter(
-			( check ) => evaluation?.checks[ check ]?.status === status
-		);
-	const names = ( list: SiteCheckId[] ) =>
-		listText( list.map( siteCheckSubject ) );
-	const parts: string[] = [];
-	const compared = by( 'evaluated' );
-	const missing = by( 'not_evaluated' );
-	const waiting = by( 'pending' );
-	const unsupported = by( 'not_applicable' );
-	if ( compared.length > 0 ) {
-		parts.push(
-			sprintf(
-				/* translators: %s: check names, e.g. "Homepage" or "Homepage and REST API". */
-				__( '%s compared', 'updatelens' ),
-				names( compared )
-			)
-		);
-	}
-	if ( missing.length > 0 ) {
-		parts.push(
-			sprintf(
-				/* translators: %s: check names, e.g. "Homepage" or "Homepage and REST API". */
-				__( '%s not compared', 'updatelens' ),
-				names( missing )
-			)
-		);
-	}
-	if ( waiting.length > 0 ) {
-		parts.push(
-			sprintf(
-				/* translators: %s: check names, e.g. "Homepage" or "Homepage and REST API". */
-				__( '%s waiting for results', 'updatelens' ),
-				names( waiting )
-			)
-		);
-	}
-	if ( unsupported.length > 0 ) {
-		parts.push(
-			sprintf(
-				/* translators: %s: check names, e.g. "Homepage" or "Homepage and REST API". */
-				__( '%s not supported', 'updatelens' ),
-				names( unsupported )
-			)
-		);
-	}
-	if ( missing.length > 0 ) {
-		return line( 'caution', 'caution', parts.join( ' · ' ) );
-	}
-	return waiting.length > 0
-		? line( 'progress', 'progress', parts.join( ' · ' ) )
-		: line( 'neutral', 'check', parts.join( ' · ' ) );
 }

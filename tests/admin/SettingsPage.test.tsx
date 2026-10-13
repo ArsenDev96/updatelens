@@ -117,7 +117,7 @@ describe( 'Settings page', () => {
 		).toBeInTheDocument();
 		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
 		expect( checkbox() ).toHaveAccessibleDescription(
-			'Compare your homepage and WordPress REST API responses just before and after a plugin update. Each report shows the results in its “Site response checks” section.'
+			'Compare your homepage and WordPress REST API responses before and after a plugin update. Each report shows the results in its “Site response checks” section.'
 		);
 		// The workflow, visible without opening anything.
 		expect(

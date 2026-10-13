@@ -44,6 +44,7 @@ import {
 	impactDescription,
 	impactHeadline,
 	impactSignalText,
+	impactSourceLabel,
 	impactState,
 	thresholdText,
 	whatChanged,
@@ -174,17 +175,19 @@ export function PotentialImpact( {
 	return (
 		<section
 			aria-labelledby="updatelens-impact-title"
-			className="rounded-xl border bg-card px-5 py-5 shadow-surface sm:px-8 sm:py-6"
+			className="rounded-xl border bg-card px-4 py-5 shadow-surface sm:px-8 sm:py-6"
 		>
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
 				<h3
 					id="updatelens-impact-title"
-					className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600"
+					// The report summary's "Go to findings" moves focus here.
+					tabIndex={ -1 }
+					className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600 focus:outline-none"
 				>
 					{ __( 'Potential impact', 'updatelens' ) }
 				</h3>
 				<span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
-					{ sourceLabel( netEvaluated, siteEvaluated ) }
+					{ impactSourceLabel( netEvaluated, siteEvaluated ) }
 				</span>
 			</div>
 			{ elsewhere && (
@@ -193,7 +196,7 @@ export function PotentialImpact( {
 						? sprintf(
 								/* translators: %s: selected phase, e.g. "During update". */
 								__(
-									'You are viewing %s. These findings do not come from that phase: Potential Impact uses the Net result (before the update compared with after it) and site checks taken just before and after the update.',
+									'You are viewing %s. These findings do not come from that phase: Potential Impact uses the Net result (before the update compared with after it) and site checks taken before and after the update.',
 									'updatelens'
 								),
 								phaseLabel( selectedPhase )
@@ -576,22 +579,6 @@ function CheckedRow( {
 			</dd>
 		</div>
 	);
-}
-
-/**
- * The evidence label: "Based on Net result", "Based on Net result and site
- * checks" when site checks were compared too, or "Based on site checks".
- *
- * @param net  Whether the Net result was evaluated.
- * @param site Whether at least one site check was compared.
- */
-function sourceLabel( net: boolean, site: boolean ): string {
-	if ( site && net ) {
-		return __( 'Based on Net result and site checks', 'updatelens' );
-	}
-	return site
-		? __( 'Based on site checks', 'updatelens' )
-		: __( 'Based on Net result', 'updatelens' );
 }
 
 /**

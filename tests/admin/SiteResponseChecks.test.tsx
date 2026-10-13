@@ -93,9 +93,7 @@ describe( 'Site response checks on the report overview', () => {
 				name: 'Site response checks',
 			} )
 		).toBeInTheDocument();
-		expect( section() ).toHaveTextContent(
-			'Just before and after the update'
-		);
+		expect( section() ).toHaveTextContent( 'Before and after the update' );
 		// The brief statement of what these checks cover stays visible.
 		expect( section() ).toHaveTextContent(
 			'These checks are separate from the configuration phases below, and they do not test every page or feature.'
@@ -326,7 +324,7 @@ describe( 'Site response checks on the report overview', () => {
 		await renderReport( withSiteChecks( COMPLETED, 'disabled' ) );
 		expect( checkRows() ).toBeNull();
 		expect( section() ).not.toHaveTextContent(
-			'Just before and after the update'
+			'Before and after the update'
 		);
 		expect( section() ).toHaveTextContent(
 			'Site checks were turned off when this update ran, so the homepage and the REST API were not checked.'
@@ -347,7 +345,7 @@ describe( 'Site response checks on the report overview', () => {
 		);
 		expect( section().querySelector( '.bg-amber-50\\/70' ) ).toBeNull();
 		expect( section() ).not.toHaveTextContent(
-			'Just before and after the update'
+			'Before and after the update'
 		);
 	} );
 
@@ -383,7 +381,7 @@ describe( 'Site response checks on the report overview', () => {
 			'They were not checked and are not counted as passed.'
 		);
 		expect( section() ).not.toHaveTextContent(
-			'Just before and after the update'
+			'Before and after the update'
 		);
 	} );
 

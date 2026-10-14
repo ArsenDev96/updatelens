@@ -21,10 +21,15 @@ defined( 'ABSPATH' ) || exit;
  * signal either available with the lists its codec decoded, or unavailable
  * with a reason), never reads WordPress or stored rows, and stores nothing.
  *
- * Findings are observations worth a look, not problems: no severity, no
- * score, and never attribution to the updated plugin. A signal without a Net
- * result is `not_evaluated` with the phase's reason, never "no findings";
- * only an Action Scheduler absent throughout is `not_applicable`.
+ * Findings are observations worth a look, not problems: no score, and never
+ * attribution to the updated plugin. Each finding has a fixed `priority` by
+ * its rule (PRIORITIES): `high` only for a site check whose verified pass
+ * before the update was followed by a failure both requests confirmed after
+ * it; `review` for every other rule. assess() summarizes them with the
+ * observed changes no rule matched (`informational`) and what could not be
+ * assessed, kept apart from the priorities. A signal without a Net result is
+ * `not_evaluated` with the phase's reason, never "no findings"; only an
+ * Action Scheduler absent throughout is `not_applicable`.
  *
  * Rules:
  *
@@ -142,6 +147,33 @@ final class PotentialImpact {
 	const SIGNAL_SITE_CHECKS = 'site_checks';
 
 	/**
+	 * Finding priorities. `high`: strong, confirmed evidence that something
+	 * observable stopped working (a verified pass before the update and a
+	 * failure both requests confirmed after it). `review`: a supported pattern
+	 * that merits a look. Changes no rule matched are informational and are
+	 * not findings; observations that could not be assessed have no priority.
+	 */
+	const PRIORITY_HIGH   = 'high';
+	const PRIORITY_REVIEW = 'review';
+
+	/**
+	 * Priority of each rule's findings.
+	 */
+	const PRIORITIES = array(
+		self::SITE_CHECK_NEWLY_FAILING     => self::PRIORITY_HIGH,
+		self::SITE_CHECK_CHANGED           => self::PRIORITY_REVIEW,
+		self::LARGE_AUTOLOADED_OPTION      => self::PRIORITY_REVIEW,
+		self::RECURRING_CRON_EVENT_REMOVED => self::PRIORITY_REVIEW,
+		self::RECURRING_SCHEDULE_CHANGED   => self::PRIORITY_REVIEW,
+	);
+
+	/**
+	 * Net result reasons that mean the observation is still running: the
+	 * signal will be assessed, it is not missing.
+	 */
+	const WAITING_REASONS = array( UnavailableReason::UPDATE_IN_PROGRESS, UnavailableReason::AWAITING_SETTLE );
+
+	/**
 	 * Site check evaluation status while the AFTER result may still arrive.
 	 */
 	const PENDING = 'pending';
@@ -251,7 +283,8 @@ final class PotentialImpact {
 			$found = array();
 			foreach ( $rules as $rule ) {
 				foreach ( self::run( $rule, $signal, $data ) as $finding ) {
-					$found[] = $finding;
+					$finding['priority'] = self::PRIORITIES[ $finding['code'] ];
+					$found[]             = $finding;
 				}
 			}
 
@@ -370,6 +403,135 @@ final class PotentialImpact {
 	}
 
 	/**
+	 * Summarize an evaluated report for the decision at the top of a report.
+	 *
+	 * Counts findings by priority, and the Net result changes no finding
+	 * covers (`informational`: observed, no rule matched; never "safe"),
+	 * from the summaries' record counts (added, removed, changed, plus
+	 * rescheduled for WP-Cron and Action Scheduler) minus the records each
+	 * finding is about (an option; a hook's removed and replacing recurring
+	 * instances; a changed entry). `informational` is null when no signal was
+	 * evaluated. What could not be assessed is listed apart, never as a
+	 * priority: signals and site checks `not_evaluated`, with their reason;
+	 * `pending` lists those still being observed (the Net result while the
+	 * observation runs, site checks whose result may still arrive).
+	 * `not_applicable` ones (Action Scheduler absent throughout, site checks
+	 * not used) are in neither list.
+	 *
+	 * @param array $impact `potential_impact` (evaluate() with `site_checks`
+	 *                      from evaluate_site_checks()).
+	 * @param array $phases Report phases (the same as evaluate()'s).
+	 * @return array{high_priority: int, needs_review: int, informational: int|null, not_assessed: array<int, array>, pending: array<int, array>}
+	 */
+	public function assess( array $impact, array $phases ) {
+		$final    = isset( $phases[ ObservationPhase::FINAL ] ) && is_array( $phases[ ObservationPhase::FINAL ] ) ? $phases[ ObservationPhase::FINAL ] : array();
+		$site     = isset( $impact['site_checks'] ) && is_array( $impact['site_checks'] ) ? $impact['site_checks'] : array();
+		$findings = array_merge(
+			isset( $impact['findings'] ) && is_array( $impact['findings'] ) ? $impact['findings'] : array(),
+			isset( $site['findings'] ) && is_array( $site['findings'] ) ? $site['findings'] : array()
+		);
+
+		$priorities = array(
+			self::PRIORITY_HIGH   => 0,
+			self::PRIORITY_REVIEW => 0,
+		);
+		$covered    = array();
+		foreach ( $findings as $finding ) {
+			++$priorities[ self::PRIORITY_HIGH === $finding['priority'] ? self::PRIORITY_HIGH : self::PRIORITY_REVIEW ];
+			$signal             = $finding['signal'];
+			$covered[ $signal ] = ( isset( $covered[ $signal ] ) ? $covered[ $signal ] : 0 ) + self::covered_records( $finding );
+		}
+
+		$informational = null;
+		$not_assessed  = array();
+		$pending       = array();
+		$signals       = isset( $impact['signals'] ) && is_array( $impact['signals'] ) ? $impact['signals'] : array();
+		foreach ( array_keys( self::RULES ) as $signal ) {
+			$status = isset( $signals[ $signal ]['status'] ) ? $signals[ $signal ]['status'] : self::NOT_EVALUATED;
+			$reason = isset( $signals[ $signal ]['reason'] ) ? $signals[ $signal ]['reason'] : null;
+			if ( self::EVALUATED === $status && isset( $final[ $signal ]['summary'] ) && is_array( $final[ $signal ]['summary'] ) ) {
+				$changes       = self::change_count( $signal, $final[ $signal ]['summary'] );
+				$informational = (int) $informational + max( 0, $changes - ( isset( $covered[ $signal ] ) ? $covered[ $signal ] : 0 ) );
+			} elseif ( self::NOT_EVALUATED === $status ) {
+				if ( in_array( $reason, self::WAITING_REASONS, true ) ) {
+					$pending[] = array(
+						'type' => 'signal',
+						'name' => $signal,
+					);
+				} else {
+					$not_assessed[] = array(
+						'type'   => 'signal',
+						'name'   => $signal,
+						'reason' => $reason,
+					);
+				}
+			}
+		}
+
+		$checks = isset( $site['checks'] ) && is_array( $site['checks'] ) ? $site['checks'] : array();
+		foreach ( $checks as $check => $data ) {
+			if ( self::PENDING === $data['status'] ) {
+				$pending[] = array(
+					'type' => 'site_check',
+					'name' => (string) $check,
+				);
+			} elseif ( self::NOT_EVALUATED === $data['status'] ) {
+				$not_assessed[] = array(
+					'type'   => 'site_check',
+					'name'   => (string) $check,
+					'reason' => $data['reason'],
+				);
+			}
+		}
+
+		return array(
+			'high_priority' => $priorities[ self::PRIORITY_HIGH ],
+			'needs_review'  => $priorities[ self::PRIORITY_REVIEW ],
+			'informational' => $informational,
+			'not_assessed'  => $not_assessed,
+			'pending'       => $pending,
+		);
+	}
+
+	/**
+	 * Observed change records of a signal's Net result summary.
+	 *
+	 * @param string $signal  Signal.
+	 * @param array  $summary Decoded summary.
+	 * @return int
+	 */
+	private static function change_count( $signal, array $summary ) {
+		$keys = array( 'added_count', 'removed_count', 'changed_count' );
+		if ( self::SIGNAL_OPTIONS !== $signal ) {
+			$keys[] = 'rescheduled_count';
+		}
+		$count = 0;
+		foreach ( $keys as $key ) {
+			$count += isset( $summary[ $key ] ) ? (int) $summary[ $key ] : 0;
+		}
+
+		return $count;
+	}
+
+	/**
+	 * Change records of the Net result a configuration finding is about.
+	 *
+	 * @param array $finding Finding.
+	 * @return int 0 for site check findings (not diff records).
+	 */
+	private static function covered_records( array $finding ) {
+		switch ( $finding['code'] ) {
+			case self::RECURRING_CRON_EVENT_REMOVED:
+				return (int) $finding['evidence']['removed_recurring_count'] + (int) $finding['evidence']['added_recurring_count'];
+			case self::LARGE_AUTOLOADED_OPTION:
+			case self::RECURRING_SCHEDULE_CHANGED:
+				return 1;
+			default:
+				return 0;
+		}
+	}
+
+	/**
 	 * Kind of a `changed` comparison, from the two verdicts, or null.
 	 *
 	 * @param array $data The check in the report.
@@ -438,6 +600,7 @@ final class PotentialImpact {
 			'evidence' => $evidence,
 			'before'   => $before,
 			'after'    => $after,
+			'priority' => self::PRIORITIES[ $code ],
 		);
 	}
 

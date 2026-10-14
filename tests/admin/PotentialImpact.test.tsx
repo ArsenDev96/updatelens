@@ -84,7 +84,7 @@ async function renderReport(
 }
 
 /** The Potential Impact section. */
-const impact = () => screen.getByRole( 'region', { name: 'Potential impact' } );
+const impact = () => screen.getByRole( 'region', { name: 'Findings' } );
 
 /** Finding groups (rule and signal). */
 const groups = () =>
@@ -126,11 +126,21 @@ const checkTexts = () =>
 			)
 		);
 
-/** Checks shown outside "What was checked" because they did not run. */
-const incompleteTexts = () =>
-	within( impact() )
-		.queryByRole( 'list', { name: 'Checks that did not run' } )
-		?.querySelectorAll( 'li' ) ?? [];
+/** The report summary. */
+const summary = () => screen.getByRole( 'region', { name: 'Report summary' } );
+
+/**
+ * One row of the summary (its answer and action), or null.
+ *
+ * @param label Row label, e.g. "Findings".
+ */
+const summaryRow = ( label: string ) =>
+	within( summary() )
+		.queryAllByRole( 'term' )
+		.find( ( term ) => term.textContent === label )?.parentElement ?? null;
+
+/** Sources that could not be assessed, always visible in the summary. */
+const notAssessed = () => summaryRow( 'Not assessed' );
 
 /** Wording that must never appear: no verdicts, no attribution. */
 const FORBIDDEN =
@@ -141,32 +151,41 @@ describe( 'Potential Impact', () => {
 		apiFetchMock.mockReset();
 	} );
 
-	it( 'sits between the update summary and the signal cards', async () => {
+	it( 'comes right after the summary, before site checks and configuration changes', async () => {
 		await renderReport( IMPACT );
 
-		const summary = screen.getByRole( 'region', {
+		const configuration = screen.getByRole( 'region', {
 			name: 'Configuration changes',
 		} );
-		const cards = screen.getByRole( 'list', { name: 'Signals' } );
-		expect(
-			summary.compareDocumentPosition( impact() ) &
+		const following = ( a: Element, b: Element ) =>
+			Boolean(
+				a.compareDocumentPosition( b ) &
 				Node.DOCUMENT_POSITION_FOLLOWING
-		).toBeTruthy();
+			);
+		expect( following( summary(), impact() ) ).toBe( true );
 		expect(
-			impact().compareDocumentPosition( cards ) &
-				Node.DOCUMENT_POSITION_FOLLOWING
-		).toBeTruthy();
+			following(
+				impact(),
+				screen.getByRole( 'region', { name: 'Site checks' } )
+			)
+		).toBe( true );
+		expect( following( impact(), configuration ) ).toBe( true );
+		// The summary counts them by priority and leads to them.
+		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+			/^Findings5 need review/
+		);
 	} );
 
 	it( 'starts with compact group rows: title, count, signal, names and one sentence', async () => {
 		await renderReport( IMPACT );
 
 		expect(
-			within( impact() ).getByText( '5 findings to review' )
-		).toBeInTheDocument();
-		expect(
 			within( impact() ).getByText( 'Based on Net result' )
 		).toBeInTheDocument();
+		// Every row carries the priority the API gave it.
+		expect(
+			groups().map( ( group ) => group.getAttribute( 'data-priority' ) )
+		).toEqual( [ 'review', 'review', 'review', 'review' ] );
 
 		// The count is part of each button's name.
 		expect(
@@ -179,14 +198,14 @@ describe( 'Potential Impact', () => {
 				.getAllByRole( 'button', { expanded: false } )
 				.map( ( button ) => button.textContent )
 		).toEqual( [
-			'Large autoloaded options2, 2 findings',
-			'Recurring WP-Cron event no longer observed1, 1 finding',
-			'Recurring WP-Cron schedule changed1, 1 finding',
-			'Recurring Action Scheduler schedule changed1, 1 finding',
+			'Large autoloaded options2, 2 findings, Needs review',
+			'Recurring WP-Cron event no longer observed1, 1 finding, Needs review',
+			'Recurring WP-Cron schedule changed1, 1 finding, Needs review',
+			'Recurring Action Scheduler schedule changed1, 1 finding, Needs review',
 		] );
 		expect(
 			screen.getByRole( 'button', {
-				name: 'Large autoloaded options, 2 findings',
+				name: 'Large autoloaded options, 2 findings, Needs review',
 			} )
 		).toHaveAccessibleDescription(
 			// Stored data now autoloaded across the options: one became
@@ -351,38 +370,28 @@ describe( 'Potential Impact', () => {
 			'WP-Cron: recurring events no longer observed, and recurring schedules that changed.'
 		);
 		expect( details ).toHaveTextContent( 'Checks use the Net result only' );
-		// Every check ran: nothing is shown as incomplete.
-		expect( incompleteTexts() ).toHaveLength( 0 );
+		// Every check ran: nothing is shown as not assessed.
+		expect( notAssessed() ).toBeNull();
 	} );
 
-	it( 'is the same whichever phase is selected, and offers the Net result', async () => {
+	it( 'is the same whichever phase is selected', async () => {
 		const user = userEvent.setup();
 		await renderReport( IMPACT, { phase: 'during_update' } );
 
+		// Outside the phase tabs: labelled with its source, never a phase.
+		expect( within( impact() ).queryByRole( 'tabpanel' ) ).toBeNull();
 		expect(
-			within( impact() ).getByText( '5 findings to review' )
+			within( impact() ).getByText( 'Based on Net result' )
 		).toBeInTheDocument();
-		// Said before the findings, in the section itself.
-		expect( impact() ).toHaveTextContent(
-			'You are viewing During update. These findings do not come from that phase: Potential Impact always uses the Net result (before the update compared with after it).'
-		);
-		await user.click(
-			within( impact() ).getByRole( 'button', {
-				name: 'Show the Net result phase',
-			} )
-		);
+		const before = groups().map( ( group ) => group.textContent );
+		await user.click( tab( /^Net result/ ) );
 		expect( tab( /^Net result/ ) ).toHaveAttribute(
 			'aria-selected',
 			'true'
 		);
-		expect(
-			within( impact() ).queryByRole( 'button', {
-				name: 'Show the Net result phase',
-			} )
-		).not.toBeInTheDocument();
-		expect(
-			within( impact() ).getByText( '5 findings to review' )
-		).toBeInTheDocument();
+		expect( groups().map( ( group ) => group.textContent ) ).toEqual(
+			before
+		);
 		expect( impact() ).not.toHaveTextContent( 'You are viewing' );
 	} );
 
@@ -419,7 +428,7 @@ describe( 'Potential Impact', () => {
 			'data-updatelens-located',
 			'exact'
 		);
-		expect( rows[ 0 ] ).toHaveTextContent( 'From Potential Impact' );
+		expect( rows[ 0 ] ).toHaveTextContent( 'From Findings' );
 		expect( rows[ 0 ] ).toHaveTextContent( 'acme_sync_feeds' );
 
 		await user.click(
@@ -484,7 +493,7 @@ describe( 'Potential Impact', () => {
 			'group'
 		);
 		expect( rows[ 0 ] ).toHaveTextContent( 'Same hook as the finding' );
-		expect( rows[ 0 ] ).not.toHaveTextContent( 'From Potential Impact' );
+		expect( rows[ 0 ] ).not.toHaveTextContent( 'From Findings' );
 		expect(
 			screen.getByRole( 'region', {
 				name: 'Located from Potential Impact',
@@ -544,9 +553,7 @@ describe( 'Potential Impact', () => {
 			item: 'stress_option_0025',
 		} );
 
-		expect( screen.getAllByText( 'From Potential Impact' ) ).toHaveLength(
-			1
-		);
+		expect( screen.getAllByText( 'From Findings' ) ).toHaveLength( 1 );
 		expect(
 			screen.getByRole( 'button', { name: /Show fewer added options/ } )
 		).toHaveAttribute( 'aria-expanded', 'true' );
@@ -561,14 +568,10 @@ describe( 'Potential Impact', () => {
 			kind: 'removed',
 			finding: 2,
 		} );
-		expect(
-			screen.getByText( 'From Potential Impact' )
-		).toBeInTheDocument();
+		expect( screen.getByText( 'From Findings' ) ).toBeInTheDocument();
 
 		await user.click( tab( /^During update/ ) );
-		expect(
-			screen.queryByText( 'From Potential Impact' )
-		).not.toBeInTheDocument();
+		expect( screen.queryByText( 'From Findings' ) ).not.toBeInTheDocument();
 		expect( window.location.search ).not.toContain( 'item=' );
 	} );
 
@@ -616,7 +619,7 @@ describe( 'Potential Impact', () => {
 			expect( rows ).toHaveLength( 1 );
 			expect( rows[ 0 ].precision ).toBe( 'exact' );
 			expect( rows[ 0 ].text ).toMatch( /hourly/ );
-			expect( rows[ 0 ].text ).toContain( 'From Potential Impact' );
+			expect( rows[ 0 ].text ).toContain( 'From Findings' );
 			expect( notice() ).toHaveTextContent(
 				'Showing the Net result with the entry of this finding highlighted: acme_cleanup'
 			);
@@ -648,7 +651,7 @@ describe( 'Potential Impact', () => {
 			for ( const row of rows ) {
 				expect( row.precision ).toBe( 'group' );
 				expect( row.text ).toContain( 'Same hook as the finding' );
-				expect( row.text ).not.toContain( 'From Potential Impact' );
+				expect( row.text ).not.toContain( 'From Findings' );
 			}
 			expect( notice() ).toHaveTextContent(
 				'2 entries of this hook match this finding. Arguments are not shown, so UpdateLens cannot tell which one the finding refers to'
@@ -791,9 +794,9 @@ describe( 'Potential Impact', () => {
 		it( 'one finding, Action Scheduler not applicable', async () => {
 			await renderReport( ONE_FINDING );
 
-			expect(
-				within( impact() ).getByText( '1 finding to review' )
-			).toBeInTheDocument();
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				/^Findings1 needs review/
+			);
 			expect( groups() ).toHaveLength( 1 );
 			expect( groupButton( groups()[ 0 ] ) ).toHaveAttribute(
 				'aria-expanded',
@@ -806,26 +809,29 @@ describe( 'Potential Impact', () => {
 				// Recorded before site checks: one quiet row, not a warning.
 				'Not captured · This update was observed before UpdateLens recorded site checks.',
 			] );
-			// Not applicable is not an incomplete check.
-			expect( incompleteTexts() ).toHaveLength( 0 );
+			// Not applicable is not "not assessed".
+			expect( notAssessed() ).toBeNull();
 			expect( impact().textContent ).not.toMatch( /Not checked/ );
 		} );
 
 		it( 'evaluated without findings: compact, no verdict', async () => {
 			await renderReport( RANK_MATH );
 
-			expect(
-				within( impact() ).getByText(
-					'No findings matched the completed observations.'
-				)
-			).toBeInTheDocument();
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				'No findings matched the completed observations.'
+			);
+			// Said once: the section explains what it means, not the headline again.
+			expect( impact() ).not.toHaveTextContent(
+				'No findings matched the completed observations.'
+			);
 			expect( impact() ).toHaveTextContent(
 				'Only a few specific patterns are checked, so this does not show that the update had no other effects.'
 			);
 			expect(
 				within( impact() ).queryByRole( 'list', { name: 'Findings' } )
 			).not.toBeInTheDocument();
-			expect( incompleteTexts() ).toHaveLength( 0 );
+			expect( notAssessed() ).toBeNull();
+			expect( summary().textContent ).not.toMatch( FORBIDDEN );
 			// Statuses and limitations wait in "What was checked".
 			expect( impact().querySelector( 'details' )!.open ).toBe( false );
 			expect( impact().querySelector( 'details' ) ).toHaveTextContent(
@@ -837,16 +843,12 @@ describe( 'Potential Impact', () => {
 		it( 'partial: a failed provider stays visible with its reason', async () => {
 			await renderReport( MALFORMED_CRON );
 
-			expect(
-				within( impact() ).getByText(
-					'No findings in completed observations; some checks were unavailable.'
-				)
-			).toBeInTheDocument();
-			const [ cron ] = incompleteTexts();
-			expect( incompleteTexts() ).toHaveLength( 1 );
-			expect( cron ).toHaveAttribute( 'data-category', 'failed' );
-			expect( cron ).toHaveTextContent(
-				'WP-Cron: Not checked (failed) · WP-Cron analysis unavailable'
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				'No findings in completed observations; some checks were unavailable.'
+			);
+			// Kept apart from the priorities, with its reason.
+			expect( notAssessed() ).toHaveTextContent(
+				/^Not assessedWP-Cron: WP-Cron analysis unavailable$/
 			);
 			expect( checkTexts()[ 1 ] ).toBe(
 				'Not checked (failed) · WP-Cron analysis unavailable'
@@ -856,13 +858,11 @@ describe( 'Potential Impact', () => {
 		it( 'partial: Action Scheduler no longer detected is unavailable, not "not applicable"', async () => {
 			await renderReport( AS_GONE );
 
-			const [ actionScheduler ] = incompleteTexts();
-			expect( actionScheduler ).toHaveAttribute(
-				'data-category',
-				'unavailable'
+			expect( notAssessed() ).toHaveTextContent(
+				'Action Scheduler: Action Scheduler no longer detected'
 			);
-			expect( actionScheduler ).toHaveTextContent(
-				'Action Scheduler: Not checked (unavailable) · Action Scheduler no longer detected'
+			expect( checkTexts()[ 2 ] ).toBe(
+				'Not checked (unavailable) · Action Scheduler no longer detected'
 			);
 			expect( impact() ).not.toHaveTextContent( 'Not applicable' );
 		} );
@@ -873,30 +873,33 @@ describe( 'Potential Impact', () => {
 			expect( checkTexts()[ 2 ] ).toBe(
 				'Not checked (unavailable) · Action Scheduler newly detected'
 			);
-			expect( incompleteTexts() ).toHaveLength( 1 );
+			expect( notAssessed() ).toHaveTextContent(
+				'Action Scheduler: Action Scheduler newly detected'
+			);
 			expect( impact() ).not.toHaveTextContent( 'Not applicable' );
 		} );
 
 		it( 'historical report: absence at every capture is not claimed', async () => {
 			await renderReport( HISTORICAL_NOT_INSTALLED );
 
-			expect( incompleteTexts()[ 0 ] ).toHaveTextContent(
-				'Action Scheduler: Not checked (unavailable) · This report cannot confirm that Action Scheduler was absent throughout the update.'
+			expect( notAssessed() ).toHaveTextContent(
+				'Action Scheduler not detected (not confirmed for the whole update)'
+			);
+			expect( checkTexts()[ 2 ] ).toBe(
+				'Not checked (unavailable) · This report cannot confirm that Action Scheduler was absent throughout the update.'
 			);
 			expect( impact() ).not.toHaveTextContent( 'Not applicable' );
-			expect(
-				within( impact() ).getByText( '1 finding to review' )
-			).toBeInTheDocument();
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				/^Findings1 needs review/
+			);
 		} );
 
 		it( 'with every signal: evaluated, zero findings', async () => {
 			await renderReport( WOOCOMMERCE );
 
-			expect(
-				within( impact() ).getByText(
-					'No findings matched the completed observations.'
-				)
-			).toBeInTheDocument();
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				'No findings matched the completed observations.'
+			);
 			expect( checkTexts() ).toEqual( [
 				'Checked · no findings',
 				'Checked · no findings',
@@ -909,16 +912,12 @@ describe( 'Potential Impact', () => {
 		it( 'awaiting the settled observation', async () => {
 			await renderReport( AWAITING );
 
-			expect(
-				within( impact() ).getByText( 'Waiting for the Net result' )
-			).toBeInTheDocument();
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				'Waiting for the Net result'
+			);
 			expect( impact() ).toHaveTextContent( 'Refresh the report later' );
-			// The Net result has nothing to show yet: no shortcut to it.
-			expect(
-				within( impact() ).queryByRole( 'button', {
-					name: 'Show the Net result phase',
-				} )
-			).not.toBeInTheDocument();
+			// Still observing is not "not assessed".
+			expect( notAssessed() ).toBeNull();
 			expect( checkTexts()[ 0 ] ).toBe(
 				'Not checked yet (waiting for the settled capture)'
 			);
@@ -930,28 +929,30 @@ describe( 'Potential Impact', () => {
 		it( 'expired observation', async () => {
 			await renderReport( EXPIRED );
 
-			expect(
-				within( impact() ).getByText( 'Not available for this report' )
-			).toBeInTheDocument();
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				'Not available for this report'
+			);
 			expect( impact() ).toHaveTextContent(
 				'The post-update observation was not captured within 5 minutes, so there is no Net result to check.'
 			);
 			expect( checkTexts()[ 0 ] ).toBe(
 				'Not checked (observation expired)'
 			);
-			// It opens on During update, but there are no findings to set apart.
+			// It opens on During update; the missing Net result is not assessed.
 			expect( tab( /^During update/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
 			);
-			expect( impact() ).not.toHaveTextContent( 'You are viewing' );
+			expect( notAssessed() ).toHaveTextContent(
+				/^Not assessedOptions & autoload: /
+			);
 		} );
 
 		it( 'is left out when no phase is available (failed update)', async () => {
 			await renderReport( FAILED );
 
 			expect(
-				screen.queryByRole( 'region', { name: 'Potential impact' } )
+				screen.queryByRole( 'region', { name: 'Findings' } )
 			).not.toBeInTheDocument();
 		} );
 	} );
@@ -961,17 +962,15 @@ describe( 'Potential Impact', () => {
 			const user = userEvent.setup();
 			await renderReport( manyFindings( 1200, 300 ) );
 
-			expect(
-				within( impact() ).getByText(
-					`${ formatCount( 1500 ) } findings to review`
-				)
-			).toBeInTheDocument();
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				`${ formatCount( 1500 ) } need review`
+			);
 			const [ options, cron ] = groups();
 			expect(
 				screen.getByRole( 'button', {
 					name: `Large autoloaded options, ${ formatCount(
 						1200
-					) } findings`,
+					) } findings, Needs review`,
 				} )
 			).toBeInTheDocument();
 			expect( options ).toHaveTextContent(
@@ -1297,6 +1296,7 @@ describe( 'Potential Impact group wording', () => {
 	): LargeAutoloadedOptionFinding => ( {
 		code: 'large_autoloaded_option',
 		signal: 'options',
+		priority: 'review',
 		option,
 		evidence: {
 			transition:

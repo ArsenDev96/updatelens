@@ -125,9 +125,6 @@ describe( 'report clarity', () => {
 				'No changes',
 				'Not available',
 			] );
-			expect( phasePanel() ).toHaveTextContent(
-				'Changes were observed in Options & autoload. No changes were observed in WP-Cron. Action Scheduler was not available for this phase.'
-			);
 			expect( tab( /^During update/ ) ).toHaveTextContent(
 				/^During update, 0 changes$/
 			);
@@ -165,7 +162,7 @@ describe( 'report clarity', () => {
 				'Net result, 6 changes'
 			);
 			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-				/^WP-CronEvents scheduled with WordPress cron\.Not available WP-Cron analysis unavailable/
+				/^WP-CronNot available · WP-Cron analysis unavailable/
 			);
 			cleanup();
 
@@ -234,7 +231,7 @@ describe( 'report clarity', () => {
 			] );
 			// No breakdowns on cards without changes.
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-				/^Options & autoloadStored settings in wp_options, including autoloaded data\.No changes View details$/
+				/^Options & autoloadNo changes$/
 			);
 		} );
 
@@ -282,7 +279,7 @@ describe( 'report clarity', () => {
 				'No tracked changes observed'
 			);
 			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-				/^WP-CronEvents scheduled with WordPress cron\.No changes View details$/
+				/^WP-CronNo changes$/
 			);
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
 				'5 changes'

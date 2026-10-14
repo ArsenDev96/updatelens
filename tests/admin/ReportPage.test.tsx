@@ -123,9 +123,6 @@ describe( 'ReportPage', () => {
 			expect(
 				within( panel() ).getByText( '11 observed changes' )
 			).toBeVisible();
-			expect( panel() ).toHaveTextContent(
-				'Changes were observed in Options & autoload and WP-Cron. Action Scheduler was not available for this phase.'
-			);
 			// The selected tab names the phase; its description is technical
 			// detail, not a second block in the summary.
 			expect( panel() ).not.toHaveTextContent( 'Observation period' );
@@ -136,9 +133,9 @@ describe( 'ReportPage', () => {
 
 			// One card per signal, in order, as links to their details.
 			expect( cardTexts() ).toEqual( [
-				'Options & autoloadStored settings in wp_options, including autoloaded data.6 changes Added 2 · Removed 1 · Changed 3View details',
-				'WP-CronEvents scheduled with WordPress cron.5 changes Added 2 · No longer present 1 · Rescheduled 2View details',
-				'Action SchedulerPending and in-progress background actions.Not available Action Scheduler not detectedView details',
+				'Options & autoload6 changes · Added 2 · Removed 1 · Changed 3',
+				'WP-Cron5 changes · Added 2 · No longer present 1 · Rescheduled 2',
+				'Action SchedulerNot available · Action Scheduler not detected',
 			] );
 			const options = screen.getByRole( 'link', {
 				name: 'Options & autoload',
@@ -148,10 +145,10 @@ describe( 'ReportPage', () => {
 				'/wp-admin/admin.php?page=updatelens&analysis=1&signal=options'
 			);
 			expect( options ).toHaveAccessibleDescription(
-				'6 changes Added 2 · Removed 1 · Changed 3'
+				'6 changes · Added 2 · Removed 1 · Changed 3'
 			);
 			expect(
-				screen.getByRole( 'heading', { level: 3, name: 'WP-Cron' } )
+				screen.getByRole( 'heading', { level: 4, name: 'WP-Cron' } )
 			).toBeInTheDocument();
 
 			// No change rows, lists or site totals on the overview.
@@ -192,7 +189,7 @@ describe( 'ReportPage', () => {
 			);
 			expect( panel() ).toHaveTextContent( '2 observed changes' );
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-				'1 change Added 1'
+				'1 change · Added 1'
 			);
 			// The phase is in the URL (replacing the entry) and in the card links.
 			expect( window.location.search ).toBe(
@@ -273,7 +270,7 @@ describe( 'ReportPage', () => {
 				'No eligible admin request occurred within 5 minutes of the update.'
 			);
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-				'Not available Not captured'
+				'Not available · Not captured'
 			);
 			expect( panel() ).not.toHaveTextContent( 'settle_expired' );
 		} );
@@ -390,13 +387,10 @@ describe( 'ReportPage', () => {
 			// Options is unreadable here; WP-Cron keeps its count.
 			await user.click( tab( /After update/ ) );
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-				/^Options & autoloadStored settings in wp_options, including autoloaded data\.Not available/
+				/^Options & autoloadNot available/
 			);
 			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
 				/WP-Cron[^\d]*\d+ changes?/
-			);
-			expect( panel() ).toHaveTextContent(
-				'Changes were observed in WP-Cron. Options & autoload and Action Scheduler were not available for this phase.'
 			);
 			expect( panel() ).not.toHaveTextContent( 'data_corrupt' );
 		} );

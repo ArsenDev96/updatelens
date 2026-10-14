@@ -13,11 +13,11 @@ import { cn } from '@/lib/utils';
 
 import type {
 	ActionScheduleType,
+	FindingPriority,
 	ImpactActionSide,
 	ImpactCronInstance,
 	ImpactCronSide,
 	ImpactFinding,
-	PhaseKey,
 	PotentialImpact as PotentialImpactData,
 	SiteCheckFinding,
 	SiteCheckId,
@@ -42,10 +42,10 @@ import {
 	groupSubjects,
 	groupSummary,
 	impactDescription,
-	impactHeadline,
 	impactSignalText,
 	impactSourceLabel,
 	impactState,
+	priorityLabel,
 	thresholdText,
 	whatChanged,
 	whatToCheck,
@@ -63,9 +63,7 @@ import {
 	siteCheckLimitations,
 	siteCheckName,
 	siteCheckPatterns,
-	siteChecksApplicable,
 	siteChecksEvaluated,
-	siteChecksIncompleteText,
 	siteChecksNotUsed,
 	siteCheckSubject,
 	siteCheckSummary,
@@ -75,7 +73,6 @@ import {
 } from '../utils/siteCheckImpact';
 import {
 	actionScheduleTypeLabel,
-	phaseLabel,
 	PROVIDERS,
 	providerLabel,
 } from '../utils/labels';
@@ -85,17 +82,19 @@ import { Icon, type IconName } from './Icon';
 import { Identifier, RowDetails } from './SignalParts';
 
 /*
- * Potential Impact on the report overview: review rules the API evaluated on
- * the Net result, whatever phase is selected.
+ * Findings on the report overview: the review rules the API evaluated on the
+ * Net result and on the site checks, whatever phase is selected below.
  *
- * Progressive disclosure: findings are grouped by rule and signal, and each
- * group starts as one compact row (title, count, signal, the first names and
- * one actionable sentence). Its details (one row per finding with the exact
- * before → after evidence and a link to the located entry, why it might
- * matter, what to check next) are rendered only while it is expanded, a few
- * findings at a time. Checks that did not complete stay visible above the
- * groups; everything that was checked, and what a result cannot show, is in
- * "What was checked".
+ * Highest priority first, each with the priority the API gave it (`high`,
+ * `review`). Progressive disclosure: findings are grouped by rule and
+ * signal, and each group starts as one compact row (priority, title, count,
+ * signal, the first names and one actionable sentence). Its details (what
+ * changed, why it might matter, what to check next, and the evidence: one
+ * row per finding with the exact before → after values and a link to the
+ * located entry) are rendered only while it is expanded, a few findings at a
+ * time. Observations that could not be assessed are listed in the report
+ * summary, never here as a priority; everything that was checked, and what a
+ * result cannot show, is in "What was checked".
  */
 
 /** Findings shown when a group is expanded, before "Show more". */
@@ -105,19 +104,17 @@ export const DEFAULT_VISIBLE_FINDINGS = 3;
 const FINDINGS_STEP = 50;
 
 /**
- * The Potential Impact section.
+ * The Findings section.
  *
  * @param props                 Props.
  * @param props.impact          API evaluation.
+ * @param props.siteChecks      The report's site checks (timing of compared checks).
  * @param props.windowSeconds   Observation window length from the API.
  * @param props.findingHref     Link target of a finding's signal details.
  * @param props.onOpenFinding   Opens a finding's signal details in the app.
- * @param props.onShowNetResult Selects the Net result phase; null if it is
- *                              selected or has no data.
- * @param props.selectedPhase   Phase selected in the report's tabs.
  * @param props.view            Expanded groups and disclosures.
  * @param props.onViewChange    Updates them.
- * @param props.onShowSiteCheck Opens a check in "Site response checks".
+ * @param props.onShowSiteCheck Opens a check in "Site checks".
  */
 export function PotentialImpact( {
 	impact,
@@ -125,8 +122,6 @@ export function PotentialImpact( {
 	windowSeconds,
 	findingHref,
 	onOpenFinding,
-	onShowNetResult,
-	selectedPhase,
 	view,
 	onViewChange,
 	onShowSiteCheck,
@@ -136,8 +131,6 @@ export function PotentialImpact( {
 	windowSeconds: number;
 	findingHref: ( finding: ImpactFinding ) => string;
 	onOpenFinding: ( finding: ImpactFinding ) => void;
-	onShowNetResult: ( () => void ) | null;
-	selectedPhase: PhaseKey;
 	view: ImpactView;
 	onViewChange: ( view: ImpactView ) => void;
 	onShowSiteCheck: ( check: SiteCheckId ) => void;
@@ -158,10 +151,14 @@ export function PotentialImpact( {
 			),
 		[ impact.findings ]
 	);
-	const evaluated = state === 'findings' || state === 'none';
-	// With another phase selected, say first that these results are not from
-	// it. Without a Net result there are none, and the headline says why.
-	const elsewhere = evaluated && selectedPhase !== 'final';
+	// Highest priority first: confirmed newly failing site checks, then the
+	// rules that merit a review (configuration, then site check changes).
+	const highSite = siteFindings.filter(
+		( finding ) => finding.priority === 'high'
+	);
+	const reviewSite = siteFindings.filter(
+		( finding ) => finding.priority !== 'high'
+	);
 	const setVisible = ( key: string, visible: number | null ) => {
 		const open = { ...view.open };
 		if ( visible === null ) {
@@ -172,105 +169,53 @@ export function PotentialImpact( {
 		onViewChange( { ...view, open } );
 	};
 
+	const siteItem = ( finding: SiteCheckFinding ) => {
+		const key = `site_check:${ finding.check }`;
+		const expanded = view.open[ key ] !== undefined;
+		return (
+			<SiteCheckFindingItem
+				key={ key }
+				finding={ finding }
+				onShowSiteCheck={ onShowSiteCheck }
+				expanded={ expanded }
+				onToggle={ () =>
+					setVisible(
+						key,
+						expanded ? null : DEFAULT_VISIBLE_FINDINGS
+					)
+				}
+			/>
+		);
+	};
+
 	return (
 		<section
 			aria-labelledby="updatelens-impact-title"
-			className="rounded-xl border bg-card px-4 py-5 shadow-surface sm:px-8 sm:py-6"
+			className="rounded-xl border bg-card px-4 py-4 shadow-surface sm:px-6"
 		>
-			<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+			<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
 				<h3
 					id="updatelens-impact-title"
 					// The report summary's "Go to findings" moves focus here.
 					tabIndex={ -1 }
-					className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600 focus:outline-none"
+					className="text-base font-semibold text-slate-900 focus:outline-none"
 				>
-					{ __( 'Potential impact', 'updatelens' ) }
+					{ __( 'Findings', 'updatelens' ) }
 				</h3>
-				<span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200">
+				<p className="text-[13px] leading-5 text-muted-foreground">
 					{ impactSourceLabel( netEvaluated, siteEvaluated ) }
-				</span>
-			</div>
-			{ elsewhere && (
-				<p className="mt-3 max-w-3xl rounded-lg bg-slate-50 px-3 py-2 text-[13px] leading-5 text-slate-700 ring-1 ring-inset ring-slate-200">
-					{ siteEvaluated
-						? sprintf(
-								/* translators: %s: selected phase, e.g. "During update". */
-								__(
-									'You are viewing %s. These findings do not come from that phase: Potential Impact uses the Net result (before the update compared with after it) and site checks taken before and after the update.',
-									'updatelens'
-								),
-								phaseLabel( selectedPhase )
-							)
-						: sprintf(
-								/* translators: %s: selected phase, e.g. "During update". */
-								__(
-									'You are viewing %s. These findings do not come from that phase: Potential Impact always uses the Net result (before the update compared with after it).',
-									'updatelens'
-								),
-								phaseLabel( selectedPhase )
-							) }
-					{ onShowNetResult && (
-						<>
-							{ ' ' }
-							<button
-								type="button"
-								onClick={ onShowNetResult }
-								className="rounded font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-							>
-								{ __(
-									'Show the Net result phase',
-									'updatelens'
-								) }
-							</button>
-						</>
-					) }
 				</p>
-			) }
-			<p
-				className={ cn(
-					'mt-2 font-semibold tracking-tight text-slate-900',
-					state === 'findings'
-						? 'text-2xl tabular-nums'
-						: 'text-lg leading-snug sm:text-xl'
-				) }
-			>
-				{ impactHeadline( impact, state ) }
-			</p>
-			<p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-slate-700 sm:text-[15px]">
+			</div>
+			{ /* Without findings, the summary already says why (impactHeadline()): only what it means here. */ }
+			<p className="mt-1 max-w-3xl text-[13px] leading-5 text-slate-600">
 				{ impactDescription( impact, state, windowSeconds ) }
 			</p>
-			{ evaluated && (
-				<IncompleteChecks
-					impact={ impact }
-					windowSeconds={ windowSeconds }
-				/>
-			) }
 			{ groups.length + siteFindings.length > 0 && (
 				<ul
 					aria-label={ __( 'Findings', 'updatelens' ) }
-					className="mt-5 space-y-2.5"
+					className="mt-3 space-y-2"
 				>
-					{ /* Site checks first: they describe how the site responds. */ }
-					{ siteFindings.map( ( finding ) => {
-						const key = `site_check:${ finding.check }`;
-						const expanded = view.open[ key ] !== undefined;
-						return (
-							<SiteCheckFindingItem
-								key={ key }
-								finding={ finding }
-								onShowSiteCheck={ onShowSiteCheck }
-								expanded={ expanded }
-								onToggle={ () =>
-									setVisible(
-										key,
-										expanded
-											? null
-											: DEFAULT_VISIBLE_FINDINGS
-									)
-								}
-							/>
-						);
-					} ) }
+					{ highSite.map( ( finding ) => siteItem( finding ) ) }
 					{ groups.map( ( group ) => (
 						<FindingGroupItem
 							key={ group.key }
@@ -284,6 +229,7 @@ export function PotentialImpact( {
 							onOpenFinding={ onOpenFinding }
 						/>
 					) ) }
+					{ reviewSite.map( ( finding ) => siteItem( finding ) ) }
 				</ul>
 			) }
 			<WhatWasChecked
@@ -294,103 +240,6 @@ export function PotentialImpact( {
 				onToggle={ ( checks ) => onViewChange( { ...view, checks } ) }
 			/>
 		</section>
-	);
-}
-
-/**
- * Signals whose checks did not run, always visible (also while every group
- * is collapsed): partial results must never read as complete.
- *
- * Site checks that were used but not compared (or are still pending) are
- * one line naming them: their states and reasons are in "Site response
- * checks" above, so they are not repeated here.
- *
- * @param props               Props.
- * @param props.impact        API evaluation.
- * @param props.windowSeconds Observation window length from the API.
- */
-function IncompleteChecks( {
-	impact,
-	windowSeconds,
-}: {
-	impact: PotentialImpactData;
-	windowSeconds: number;
-} ) {
-	const incomplete = PROVIDERS.filter(
-		( signal ) => impact.signals[ signal ].status === 'not_evaluated'
-	);
-	// Site checks that were used but not compared (never those turned off or
-	// recorded before site checks existed: no warning on every old report).
-	const sites = siteChecksApplicable( impact )
-		? SITE_CHECKS.filter( ( check ) =>
-				[ 'pending', 'not_evaluated' ].includes(
-					impact.site_checks.checks[ check ]?.status
-				)
-			)
-		: [];
-	if ( incomplete.length + sites.length === 0 ) {
-		return null;
-	}
-	return (
-		<ul
-			aria-label={ __( 'Checks that did not run', 'updatelens' ) }
-			className="mt-3 space-y-1 rounded-lg bg-amber-50/70 px-3 py-2 text-[13px] leading-5 text-amber-900 ring-1 ring-inset ring-amber-200"
-		>
-			{ incomplete.map( ( signal ) => {
-				const text = impactSignalText( signal, impact, windowSeconds );
-				return (
-					<li
-						key={ signal }
-						data-category={ text.category }
-						className="flex gap-2"
-					>
-						<Icon
-							name={ signal }
-							className="mt-0.5 size-4 shrink-0 text-amber-700"
-						/>
-						<span>
-							<span className="font-medium">
-								{ providerLabel( signal ) }
-							</span>
-							{ ': ' }
-							{ text.status }
-							{ text.detail && (
-								<>
-									{ ' · ' }
-									{ text.detail }
-								</>
-							) }
-						</span>
-					</li>
-				);
-			} ) }
-			{ sites.length > 0 && (
-				<li
-					data-category={
-						sites.every(
-							( check ) =>
-								impact.site_checks.checks[ check ]?.status ===
-								'pending'
-						)
-							? 'waiting'
-							: 'unavailable'
-					}
-					className="flex gap-2"
-				>
-					<Icon
-						name="site_checks"
-						className="mt-0.5 size-4 shrink-0 text-amber-700"
-					/>
-					<span>
-						<span className="font-medium">
-							{ __( 'Site response checks', 'updatelens' ) }
-						</span>
-						{ ': ' }
-						{ siteChecksIncompleteText( sites, impact ) }
-					</span>
-				</li>
-			) }
-		</ul>
 	);
 }
 
@@ -614,6 +463,7 @@ function FindingGroupItem( {
 	return (
 		<CompactRow
 			icon={ group.signal }
+			priority={ group.findings[ 0 ].priority }
 			title={ findingGroupTitle( group ) }
 			count={ group.findings.length }
 			source={
@@ -698,6 +548,7 @@ function SiteCheckFindingItem( {
 	return (
 		<CompactRow
 			icon="site_checks"
+			priority={ finding.priority }
 			title={ siteCheckFindingTitle( finding ) }
 			count={ 1 }
 			buttonId={ siteCheckFindingButtonId( finding.check ) }
@@ -714,13 +565,26 @@ function SiteCheckFindingItem( {
 			details={ () => (
 				<div className="border-t">
 					<div className="px-4 pt-3 sm:px-5">
-						<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+						<DetailHeading>
 							{ __( 'What changed', 'updatelens' ) }
-						</h5>
-						<p className="mt-1.5 text-sm leading-6 text-slate-800">
+						</DetailHeading>
+						<p className="mt-1 text-sm leading-6 text-slate-800">
 							{ siteCheckWhatChanged( finding ) }
 						</p>
-						<p className="mt-1.5 text-[13px] leading-5">
+					</div>
+					<Guidance
+						why={ siteCheckWhyItMatters( finding ) }
+						next={ siteCheckWhatToCheck( finding ) }
+					/>
+					<div className="border-t px-4 py-3 sm:px-5">
+						<DetailHeading>
+							{ __( 'Evidence', 'updatelens' ) }
+						</DetailHeading>
+						<p className="mt-1 text-[13px] leading-5 text-slate-700">
+							{ __(
+								'The requests before and after the update, with their responses and verification, are in Site checks.',
+								'updatelens'
+							) }{ ' ' }
 							<button
 								type="button"
 								onClick={ () =>
@@ -730,20 +594,16 @@ function SiteCheckFindingItem( {
 							>
 								{ finding.check === 'home'
 									? __(
-											'Show the homepage requests in Site response checks',
+											'Show the homepage requests',
 											'updatelens'
 										)
 									: __(
-											'Show the REST API requests in Site response checks',
+											'Show the REST API requests',
 											'updatelens'
 										) }
 							</button>
 						</p>
 					</div>
-					<Guidance
-						why={ siteCheckWhyItMatters( finding ) }
-						next={ siteCheckWhatToCheck( finding ) }
-					/>
 				</div>
 			) }
 		/>
@@ -757,6 +617,7 @@ function SiteCheckFindingItem( {
  *
  * @param props          Props.
  * @param props.icon     Icon of the source.
+ * @param props.priority Priority from the API.
  * @param props.title    Title.
  * @param props.count    Number of findings.
  * @param props.source   Source line (signal and subjects).
@@ -768,6 +629,7 @@ function SiteCheckFindingItem( {
  */
 function CompactRow( {
 	icon,
+	priority,
 	title,
 	count,
 	buttonId,
@@ -778,6 +640,7 @@ function CompactRow( {
 	details,
 }: {
 	icon: IconName;
+	priority: FindingPriority;
 	title: string;
 	count: number;
 	buttonId?: string;
@@ -795,14 +658,20 @@ function CompactRow( {
 	return (
 		<li
 			aria-labelledby={ titleId }
+			data-priority={ priority }
 			className={ cn(
-				'overflow-hidden rounded-xl border bg-card transition-colors',
-				expanded ? 'border-slate-300' : 'hover:border-slate-300'
+				'overflow-hidden rounded-lg border border-l-4 bg-card transition-colors',
+				priority === 'high'
+					? 'border-l-rose-500'
+					: 'border-l-amber-400',
+				expanded
+					? 'border-y-slate-300 border-r-slate-300'
+					: 'hover:border-y-slate-300 hover:border-r-slate-300'
 			) }
 		>
 			<div
 				className={ cn(
-					'relative flex items-start gap-3 px-4 py-3.5 sm:px-5',
+					'relative flex items-start gap-3 px-4 py-3 sm:px-5',
 					! expanded && 'hover:bg-slate-50/60'
 				) }
 			>
@@ -811,9 +680,10 @@ function CompactRow( {
 					<Icon name={ icon } className="size-[1.125rem]" />
 				</span>
 				<div className="min-w-0 flex-1">
+					<PriorityBadge priority={ priority } />
 					<h4
 						id={ titleId }
-						className="text-[15px] font-semibold leading-6 text-slate-900"
+						className="mt-1 text-[15px] font-semibold leading-6 text-slate-900"
 					>
 						<button
 							type="button"
@@ -843,6 +713,8 @@ function CompactRow( {
 									),
 									formatCount( count )
 								) }
+								{ ', ' }
+								{ priorityLabel( priority ) }
 							</span>
 						</button>
 					</h4>
@@ -890,11 +762,11 @@ function CompactRow( {
  */
 function Guidance( { why, next }: { why: string[]; next: string[] } ) {
 	return (
-		<div className="grid gap-x-8 gap-y-4 px-4 py-4 sm:px-5 md:grid-cols-2">
+		<div className="grid gap-x-8 gap-y-3 px-4 py-3 sm:px-5 md:grid-cols-2">
 			<div>
-				<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+				<DetailHeading>
 					{ __( 'Why it might matter', 'updatelens' ) }
-				</h5>
+				</DetailHeading>
 				<div className="mt-1.5 space-y-1.5 text-sm leading-relaxed text-slate-700">
 					{ why.map( ( sentence ) => (
 						<p key={ sentence }>{ sentence }</p>
@@ -902,9 +774,9 @@ function Guidance( { why, next }: { why: string[]; next: string[] } ) {
 				</div>
 			</div>
 			<div>
-				<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+				<DetailHeading>
 					{ __( 'What to check next', 'updatelens' ) }
-				</h5>
+				</DetailHeading>
 				<ul className="mt-1.5 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-700 marker:text-slate-400">
 					{ next.map( ( step ) => (
 						<li key={ step }>{ step }</li>
@@ -916,8 +788,48 @@ function Guidance( { why, next }: { why: string[]; next: string[] } ) {
 }
 
 /**
- * An expanded group: what changed (a few findings at a time), why it might
- * matter and what to check next.
+ * A heading inside an expanded finding.
+ *
+ * @param props          Props.
+ * @param props.children Text.
+ */
+function DetailHeading( { children }: { children: ReactNode } ) {
+	return (
+		<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+			{ children }
+		</h5>
+	);
+}
+
+/**
+ * The priority the API gave a finding, as a small label.
+ *
+ * @param props          Props.
+ * @param props.priority Priority.
+ */
+function PriorityBadge( { priority }: { priority: FindingPriority } ) {
+	return (
+		<span
+			aria-hidden="true"
+			className={ cn(
+				'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
+				priority === 'high'
+					? 'bg-rose-50 text-rose-800 ring-rose-200'
+					: 'bg-amber-50 text-amber-900 ring-amber-200'
+			) }
+		>
+			<Icon
+				name={ priority === 'high' ? 'failure' : 'caution' }
+				className="size-3.5"
+			/>
+			{ priorityLabel( priority ) }
+		</span>
+	);
+}
+
+/**
+ * An expanded group: what changed, why it might matter, what to check next,
+ * and the evidence (a few findings at a time).
  *
  * @param props                 Props.
  * @param props.group           Findings of one rule and signal.
@@ -966,9 +878,14 @@ function GroupDetails( {
 	return (
 		<div className="border-t">
 			<div className="px-4 pt-3 sm:px-5">
-				<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+				<DetailHeading>
 					{ __( 'What changed', 'updatelens' ) }
-				</h5>
+				</DetailHeading>
+				{ total === 1 && (
+					<p className="mt-1 text-sm leading-6 text-slate-800">
+						{ whatChanged( group.findings[ 0 ] ) }
+					</p>
+				) }
 				{ facts.rows.length > 0 && (
 					<RowDetails boxed rows={ facts.rows } />
 				) }
@@ -978,7 +895,16 @@ function GroupDetails( {
 					</p>
 				) }
 			</div>
-			<ul id={ listId } className="mt-2 divide-y border-y bg-slate-50/50">
+			<Guidance
+				why={ whyItMatters( group ) }
+				next={ whatToCheck( group ) }
+			/>
+			<div className="border-t px-4 pt-3 sm:px-5">
+				<DetailHeading>
+					{ __( 'Evidence', 'updatelens' ) }
+				</DetailHeading>
+			</div>
+			<ul id={ listId } className="mt-2 divide-y border-t bg-slate-50/50">
 				{ visible.map( ( finding ) => {
 					const index = indexes.get( finding ) ?? -1;
 					return (
@@ -986,6 +912,7 @@ function GroupDetails( {
 							key={ index }
 							index={ index }
 							finding={ finding }
+							single={ total === 1 }
 							href={ findingHref( finding ) }
 							onOpen={ () => onOpenFinding( finding ) }
 						/>
@@ -1048,10 +975,6 @@ function GroupDetails( {
 					) }
 				</div>
 			) }
-			<Guidance
-				why={ whyItMatters( group ) }
-				next={ whatToCheck( group ) }
-			/>
 		</div>
 	);
 }
@@ -1063,17 +986,20 @@ function GroupDetails( {
  * @param props         Props.
  * @param props.index   Position in the API's findings (focus on return).
  * @param props.finding Finding.
+ * @param props.single  The group's only finding (its sentence is above).
  * @param props.href    Link target of the signal's details.
  * @param props.onOpen  Opens the details in the app.
  */
 function FindingRow( {
 	index,
 	finding,
+	single,
 	href,
 	onOpen,
 }: {
 	index: number;
 	finding: ImpactFinding;
+	single: boolean;
 	href: string;
 	onOpen: () => void;
 } ) {
@@ -1115,9 +1041,11 @@ function FindingRow( {
 				<Icon name="arrow-right" className="size-4" />
 			</AppLink>
 			<div className="min-w-0 space-y-1.5">
-				<p className="text-sm leading-6 text-slate-800">
-					{ whatChanged( finding ) }
-				</p>
+				{ ! single && (
+					<p className="text-sm leading-6 text-slate-800">
+						{ whatChanged( finding ) }
+					</p>
+				) }
 				<RowDetails boxed rows={ evidenceRows( finding ) } />
 				{ context.length > 0 && (
 					<p className="text-[13px] leading-5 text-slate-600">

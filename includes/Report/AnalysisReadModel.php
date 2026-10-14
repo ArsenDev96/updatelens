@@ -297,6 +297,7 @@ final class AnalysisReadModel {
 		$site_checks                     = SiteCheckReport::build( $row, (float) call_user_func( $this->now ) );
 		$potential_impact                = $this->potential_impact->evaluate( $phases, $absent );
 		$potential_impact['site_checks'] = $this->potential_impact->evaluate_site_checks( $site_checks );
+		$potential_impact['assessment']  = $this->potential_impact->assess( $potential_impact, $phases );
 
 		return array(
 			'id'                         => $metadata['id'],

@@ -490,6 +490,7 @@ final class PotentialImpactTest extends TestCase {
 						'autoload'      => 'on',
 						'is_autoloaded' => true,
 					),
+					'priority' => 'review',
 				),
 			),
 			$this->option_findings( array(), array( 'acme_cache' => array( self::bytes( 180000 ), 'on' ) ) )
@@ -634,6 +635,7 @@ final class PotentialImpactTest extends TestCase {
 						'autoload'      => 'on',
 						'is_autoloaded' => true,
 					),
+					'priority' => 'review',
 				),
 			),
 			$this->option_findings( array( 'acme_cache' => array( $value, 'off' ) ), array( 'acme_cache' => array( $value, 'on' ) ) )
@@ -756,6 +758,7 @@ final class PotentialImpactTest extends TestCase {
 						),
 					),
 					'after'    => array( 'added_recurring' => array() ),
+					'priority' => 'review',
 				),
 			),
 			$this->cron_findings(
@@ -1068,6 +1071,7 @@ final class PotentialImpactTest extends TestCase {
 						'interval'     => 3600,
 						'is_recurring' => true,
 					),
+					'priority' => 'review',
 				),
 			),
 			$this->cron_findings(
@@ -1140,6 +1144,7 @@ final class PotentialImpactTest extends TestCase {
 						'cron_expression' => null,
 						'is_recurring'    => true,
 					),
+					'priority' => 'review',
 				),
 			),
 			$this->action_scheduler_findings(
@@ -1459,10 +1464,10 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertSame( array( 'phase', 'status', 'signals', 'findings' ), array_keys( $result ) );
 		$this->assertSame(
 			array(
-				array( 'code', 'signal', 'option', 'evidence', 'before', 'after' ),
-				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after' ),
-				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after' ),
-				array( 'code', 'signal', 'hook', 'group', 'evidence', 'before', 'after' ),
+				array( 'code', 'signal', 'option', 'evidence', 'before', 'after', 'priority' ),
+				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after', 'priority' ),
+				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after', 'priority' ),
+				array( 'code', 'signal', 'hook', 'group', 'evidence', 'before', 'after', 'priority' ),
 			),
 			array_map( 'array_keys', $result['findings'] )
 		);

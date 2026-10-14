@@ -13,7 +13,7 @@ import type {
 } from '@/admin/types/api';
 
 import cases from '../fixtures/site-check-impact-cases.json';
-import { COMPLETED, EXPIRED, historyItem } from './fixtures';
+import { COMPLETED, EXPIRED, historyItem, withSiteCheckCase } from './fixtures';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
@@ -53,14 +53,11 @@ const printedReport = ( report: AnalysisReport ): Printed => ( {
 
 const pendingReport = (): AnalysisReport => {
 	const data = cases.cases.pending;
-	return {
-		...COMPLETED,
-		site_checks: data.site_checks as SiteChecks,
-		potential_impact: {
-			...COMPLETED.potential_impact,
-			site_checks: data.potential_impact_site_checks as SiteCheckImpact,
-		},
-	};
+	return withSiteCheckCase(
+		COMPLETED,
+		data.site_checks as SiteChecks,
+		data.potential_impact_site_checks as SiteCheckImpact
+	);
 };
 
 describe( 'Initial data printed by the admin page', () => {
@@ -227,7 +224,7 @@ describe( 'Initial data printed by the admin page', () => {
 		print( printedReport( report ) );
 		render( <App /> );
 		const section = await screen.findByRole( 'region', {
-			name: 'Site response checks',
+			name: 'Site checks',
 		} );
 
 		await act( () =>
@@ -236,13 +233,18 @@ describe( 'Initial data printed by the admin page', () => {
 		expect( section ).toHaveTextContent(
 			'Refreshing the results failed; this report tries again in a few seconds. The results shown are from the last successful read, and checks still waiting stay unresolved.'
 		);
-		// The report is still shown, still waiting, never passed.
+		// The report is still shown, still waiting, never passed: each row
+		// shows its earlier result and "Waiting" as the comparison.
+		const rows = within( section ).getAllByRole( 'listitem' );
 		expect(
-			within( section ).getAllByText(
-				'Waiting for the check after the update'
+			rows.map(
+				( row ) =>
+					within( row ).getAllByRole( 'definition' )[ 2 ].textContent
 			)
-		).toHaveLength( 2 );
-		expect( section.textContent ).not.toMatch( /Passed/ );
+		).toEqual( [ 'Waiting', 'Waiting' ] );
+		expect( section.textContent ).not.toMatch(
+			/Passed both|Passed before and after/
+		);
 		expect( screen.queryByRole( 'alert' ) ).toBeNull();
 		expect( pageLoad.reload ).not.toHaveBeenCalled();
 	} );

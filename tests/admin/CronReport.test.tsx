@@ -84,7 +84,7 @@ describe( 'WP-Cron in reports', () => {
 			)
 		).toEqual( [ 'options', 'cron', 'action_scheduler' ] );
 		expect( cardTexts()[ 1 ] ).toBe(
-			'WP-CronEvents scheduled with WordPress cron.5 changes Added 2 · No longer present 1 · Rescheduled 2View details'
+			'WP-Cron5 changes · Added 2 · No longer present 1 · Rescheduled 2'
 		);
 		// No rows of any signal on the overview.
 		expect( document.body ).not.toHaveTextContent(
@@ -135,10 +135,10 @@ describe( 'WP-Cron in reports', () => {
 		);
 		expect( tab( /Net result/ ) ).not.toHaveTextContent( 'Not available' );
 		expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-			/^WP-CronEvents scheduled with WordPress cron\.\d+ changes?/
+			/^WP-Cron\d+ changes?/
 		);
 		expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-			/^Options & autoloadStored settings in wp_options, including autoloaded data\.Not available/
+			/^Options & autoloadNot available/
 		);
 	} );
 
@@ -468,7 +468,7 @@ describe( 'WP-Cron in reports', () => {
 			'6 changes'
 		);
 		expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-			'Not available Not captured'
+			'Not available · Not captured'
 		);
 		cleanup();
 

@@ -15,6 +15,7 @@ import type {
 
 import cases from '../fixtures/site-check-impact-cases.json';
 import { IMPACT } from './impact-fixtures';
+import { withSiteCheckCase } from './fixtures';
 import { openReport, tab } from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
@@ -35,14 +36,11 @@ type CaseName = keyof typeof cases.cases;
  */
 function report( name: CaseName ): AnalysisReport {
 	const data = cases.cases[ name ];
-	return {
-		...IMPACT,
-		site_checks: data.site_checks as SiteChecks,
-		potential_impact: {
-			...IMPACT.potential_impact,
-			site_checks: data.potential_impact_site_checks as SiteCheckImpact,
-		},
-	};
+	return withSiteCheckCase(
+		IMPACT,
+		data.site_checks as SiteChecks,
+		data.potential_impact_site_checks as SiteCheckImpact
+	);
 }
 
 /**
@@ -70,10 +68,9 @@ async function wait( ms: number ) {
 	} );
 }
 
-const impact = () => screen.getByRole( 'region', { name: 'Potential impact' } );
+const impact = () => screen.getByRole( 'region', { name: 'Findings' } );
 /** The site response checks section (pending results and their refresh). */
-const site = () =>
-	screen.getByRole( 'region', { name: 'Site response checks' } );
+const site = () => screen.getByRole( 'region', { name: 'Site checks' } );
 
 /** Titles of the finding rows. */
 const rowTitles = () =>
@@ -174,10 +171,11 @@ describe( 'Pending site check results', () => {
 			1 + PENDING_REFRESH_MAX_REQUESTS
 		);
 
-		// Still pending: never shown as passed.
-		expect( impact() ).toHaveTextContent(
-			'Site response checks: Homepage and REST API waiting for results'
-		);
+		// Still pending: visible in the summary and the section, never passed.
+		expect( site() ).toHaveTextContent( 'Waiting' );
+		expect(
+			screen.getByRole( 'region', { name: 'Report summary' } )
+		).toHaveTextContent( 'Waiting for results' );
 		expect( impact().textContent ).not.toMatch( /Passed at both/ );
 		again.focus();
 		fireEvent.click( again );
@@ -208,7 +206,10 @@ describe( 'Pending site check results', () => {
 		expect( site() ).toHaveTextContent(
 			"Automatic checking stopped: refreshed results are unavailable. The results shown are from the last successful read, and checks still waiting stay unresolved and are not counted as passed. The site's REST API answered with something other than data, for example PHP output, an error page or a firewall page. Stored reports are not affected."
 		);
-		expect( site().textContent ).not.toMatch( /Passed/ );
+		// Each row keeps its earlier result; the comparison is never "passed".
+		expect( site().textContent ).not.toMatch(
+			/Passed both|Passed before and after/
+		);
 		expect( screen.queryByRole( 'alert' ) ).not.toBeInTheDocument();
 		expect( document.body ).not.toHaveTextContent( 'not a valid JSON' );
 		expect( rowTitles() ).toHaveLength( 4 );

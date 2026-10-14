@@ -5,12 +5,6 @@ import type { AnalysisReport, PhaseKey } from '../types/api';
 import type { PhaseChangeCounts } from './changes';
 import { formatCount } from './format';
 import {
-	impactHeadline,
-	impactSourceLabel,
-	impactState,
-	type ImpactState,
-} from './impact';
-import {
 	actionSchedulerNotDetectedText,
 	listText,
 	PROVIDERS,
@@ -19,17 +13,16 @@ import {
 	signalUnavailableText,
 	type Tone,
 } from './labels';
-import { siteChecksEvaluated } from './siteCheckImpact';
 import { siteCheckOutcome, type SiteCheckOutcome } from './siteChecks';
 
 /*
- * The report overview's summary below the header: three separate facts,
- * never one verdict about the update. Configuration changes (the Net result
- * total), the site response checks (their outcome, shared with History) and
- * Potential Impact (its findings to review, or why there are none), with the
- * observation coverage of the configuration sources below them. Everything
- * comes from the API's states and summary counts; nothing here is a
- * judgement of the update.
+ * Wording of the report overview's summary (ReportSummary) and of the
+ * configuration section's coverage line: separate facts, never one verdict
+ * about the update. Configuration changes (the Net result total), the site
+ * checks (their outcome, shared with History), what could not be assessed
+ * (from the API's assessment) and the observation coverage of the
+ * configuration sources. Everything comes from the API's states and summary
+ * counts; nothing here is a judgement of the update.
  */
 
 /** One item of the summary. */
@@ -148,37 +141,41 @@ export function siteChecksGlance( report: AnalysisReport ): GlanceItem & {
 }
 
 /**
- * Potential Impact: how many findings there are to review, or why there are
- * none, in the section's own words (impactHeadline()), with what it was
- * based on. Never a verdict: no findings is not "no problems".
+ * Configuration sources the API could not assess for this report (its
+ * `assessment.not_assessed` signals), with why, as one line; null when every
+ * applicable source was assessed or is still being observed. Site checks are
+ * not listed: the summary's site check row is their own coverage.
  *
  * @param report Report.
  */
-export function impactGlance( report: AnalysisReport ): GlanceItem & {
-	state: ImpactState;
-} {
-	const impact = report.potential_impact;
-	const state = impactState( impact );
-	const evaluated = state === 'findings' || state === 'none';
-	const look: Record< ImpactState, [ Tone, IconName ] > = {
-		findings: [ 'caution', 'caution' ],
-		none: [ 'neutral', 'info' ],
-		waiting: [ 'progress', 'progress' ],
-		expired: [ 'neutral', 'info' ],
-		unavailable: [ 'neutral', 'info' ],
-	};
-	return {
-		state,
-		tone: look[ state ][ 0 ],
-		icon: look[ state ][ 1 ],
-		value: impactHeadline( impact, state ),
-		detail: evaluated
-			? impactSourceLabel(
-					impact.status !== 'not_evaluated',
-					siteChecksEvaluated( impact )
-				)
-			: null,
-	};
+export function notAssessedText( report: AnalysisReport ): string | null {
+	const parts = report.potential_impact.assessment.not_assessed.flatMap(
+		( entry ) => {
+			if ( entry.type !== 'signal' ) {
+				return [];
+			}
+			if (
+				entry.name === 'action_scheduler' &&
+				entry.reason === 'not_installed'
+			) {
+				// Absent at one capture only: not confirmed for the whole update.
+				return [ actionSchedulerNotDetectedText( false ) ];
+			}
+			return [
+				sprintf(
+					/* translators: 1: a label, e.g. an observation phase ("Net result") or a check ("Homepage"). 2: what it says, e.g. "3 changes". */
+					__( '%1$s: %2$s', 'updatelens' ),
+					providerLabel( entry.name ),
+					signalUnavailableText(
+						entry.name,
+						report.phases.final,
+						report.observation_window_seconds
+					)?.title ?? __( 'Not available', 'updatelens' )
+				),
+			];
+		}
+	);
+	return parts.length > 0 ? parts.join( ' · ' ) : null;
 }
 
 /** One line of the observation coverage. */

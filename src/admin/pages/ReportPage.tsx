@@ -1,4 +1,4 @@
-import { __, sprintf } from '@wordpress/i18n';
+import { _n, __, sprintf } from '@wordpress/i18n';
 import {
 	useCallback,
 	useEffect,
@@ -20,17 +20,22 @@ import {
 	findingListKind,
 	locate,
 	LocatedProvider,
+	matchedRows,
+	MatchedRowsProvider,
 	type Located,
+	type MatchedRows,
 } from '../utils/highlight';
 import { LoadError } from '../components/LoadError';
 import { PhaseTabs } from '../components/PhaseTabs';
-import { ReportGlance } from '../components/ReportGlance';
 import {
 	DEFAULT_VISIBLE_FINDINGS,
-	ReportOverview,
-} from '../components/ReportOverview';
+	PotentialImpact,
+} from '../components/PotentialImpact';
+import { ConfigurationChanges } from '../components/ReportOverview';
+import { ReportSummary } from '../components/ReportSummary';
 import { SiteResponseChecks } from '../components/SiteResponseChecks';
 import { SignalDetail } from '../components/SignalDetail';
+import { SummaryExtraProvider } from '../components/SignalParts';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { Icon, type IconName } from '../components/Icon';
@@ -359,11 +364,36 @@ function Report( {
 					onFocus={ onStatusFocus }
 				/>
 			) }
-			<ReportGlance
+			<ReportSummary
 				report={ report }
 				counts={ counts }
-				onShowImpact={ () => focusSoon( 'updatelens-impact-title' ) }
+				onShowFindings={ () => focusSoon( 'updatelens-impact-title' ) }
+				onShowConfiguration={ () =>
+					focusSoon( 'updatelens-configuration-title' )
+				}
+				onShowSiteChecks={ () =>
+					focusSoon( 'updatelens-site-checks-title' )
+				}
 			/>
+			{ /* Findings: the Net result and the site checks, whatever phase is selected below; none without any phase (a failed update). */ }
+			{ selected && (
+				<PotentialImpact
+					impact={ report.potential_impact }
+					siteChecks={ report.site_checks }
+					onShowSiteCheck={ showSiteCheck }
+					windowSeconds={ report.observation_window_seconds }
+					findingHref={ ( finding ) =>
+						href( findingRoute( finding ) )
+					}
+					onOpenFinding={ ( finding ) => {
+						returnTo.current =
+							report.potential_impact.findings.indexOf( finding );
+						onNavigate( findingRoute( finding ) );
+					} }
+					view={ impactView }
+					onViewChange={ setImpactView }
+				/>
+			) }
 			{ /* Its own evidence, the same whatever phase is selected below. */ }
 			<SiteResponseChecks
 				siteChecks={ report.site_checks }
@@ -373,51 +403,18 @@ function Report( {
 				onViewChange={ setImpactView }
 				onShowFinding={ showSiteFinding }
 			/>
-			{ selected && (
-				<PhaseTabs
-					counts={ {
-						during_update: counts.during_update.total,
-						post_update: counts.post_update.total,
-						final: counts.final.total,
-					} }
-					selected={ selected }
-					onSelect={ selectPhase }
-				>
-					<ReportOverview
-						data={ report.phases[ selected ] }
-						phase={ selected }
-						counts={ counts[ selected ] }
-						windowSeconds={ report.observation_window_seconds }
-						signalHref={ ( provider: Provider ) =>
-							href( at( { signal: provider } ) )
-						}
-						onOpenSignal={ ( provider: Provider ) =>
-							onNavigate( at( { signal: provider } ) )
-						}
-						impact={ report.potential_impact }
-						siteChecks={ report.site_checks }
-						onShowSiteCheck={ showSiteCheck }
-						findingHref={ ( finding ) =>
-							href( findingRoute( finding ) )
-						}
-						onOpenFinding={ ( finding ) => {
-							returnTo.current =
-								report.potential_impact.findings.indexOf(
-									finding
-								);
-							onNavigate( findingRoute( finding ) );
-						} }
-						impactView={ impactView }
-						onImpactViewChange={ setImpactView }
-						onShowNetResult={
-							// Offered only when the Net result has data to show.
-							selected === 'final' || counts.final.total === null
-								? null
-								: () => selectPhase( 'final' )
-						}
-					/>
-				</PhaseTabs>
-			) }
+			<ConfigurationChanges
+				report={ report }
+				counts={ counts }
+				selected={ selected }
+				onSelectPhase={ selectPhase }
+				signalHref={ ( provider: Provider ) =>
+					href( at( { signal: provider } ) )
+				}
+				onOpenSignal={ ( provider: Provider ) =>
+					onNavigate( at( { signal: provider } ) )
+				}
+			/>
 			<TechnicalDetails
 				report={ report }
 				signal={ null }
@@ -485,6 +482,11 @@ function RefinedSignalView( {
 	const located = useMemo(
 		() => ( item === null ? null : locate( report, signal, item ) ),
 		[ report, signal, item ]
+	);
+	// Review rules are evaluated on the Net result only: its rows are marked.
+	const matched = useMemo(
+		() => ( selected === 'final' ? matchedRows( report, signal ) : null ),
+		[ report, signal, selected ]
 	);
 	const crumb =
 		'rounded font-medium text-primary no-underline hover:underline focus:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -583,15 +585,31 @@ function RefinedSignalView( {
 							selected={ selected }
 							onSelect={ onSelectPhase }
 						>
-							<SignalDetail
-								provider={ signal }
-								phase={ selected }
-								data={ report.phases[ selected ] }
-								count={ counts[ selected ][ signal ] }
-								windowSeconds={
-									report.observation_window_seconds
-								}
-							/>
+							<MatchedRowsProvider value={ matched }>
+								<SummaryExtraProvider
+									value={
+										<RulesLine
+											report={ report }
+											signal={ signal }
+											phase={ selected }
+											count={
+												counts[ selected ][ signal ]
+											}
+											matched={ matched }
+										/>
+									}
+								>
+									<SignalDetail
+										provider={ signal }
+										phase={ selected }
+										data={ report.phases[ selected ] }
+										count={ counts[ selected ][ signal ] }
+										windowSeconds={
+											report.observation_window_seconds
+										}
+									/>
+								</SummaryExtraProvider>
+							</MatchedRowsProvider>
 						</PhaseTabs>
 					</LocatedProvider>
 				) }
@@ -602,6 +620,91 @@ function RefinedSignalView( {
 				/>
 			</article>
 		</div>
+	);
+}
+
+/**
+ * Whether review rules matched this signal's changes, in one quiet line
+ * above them (only with changes): the findings of the Net result marked on
+ * their rows, or none, so the other changes are informational. Never "safe":
+ * no rule matching does not show that a change had no effect.
+ *
+ * @param props        Props.
+ * @param props.report Report.
+ * @param props.signal Signal of the page.
+ * @param props.phase  Selected phase.
+ * @param props.count   Changes of the signal in the phase, null if unavailable.
+ * @param props.matched Rows a finding is about (Net result), or null.
+ */
+function RulesLine( {
+	report,
+	signal,
+	phase,
+	count,
+	matched,
+}: {
+	report: AnalysisReport;
+	signal: Provider;
+	phase: PhaseKey;
+	count: number | null;
+	matched: MatchedRows | null;
+} ) {
+	if ( count === null || count === 0 ) {
+		return null;
+	}
+	// Rows a finding is about (its own entries, or its hook's), never guessed.
+	const marked = matched?.size ?? 0;
+	const others = Math.max( 0, count - marked );
+	let text: string;
+	if ( phase !== 'final' ) {
+		text = __(
+			'Review rules are checked on the Net result only, not on this phase.',
+			'updatelens'
+		);
+	} else if (
+		report.potential_impact.signals[ signal ].status !== 'evaluated'
+	) {
+		text = __(
+			'Review rules could not be checked for these changes.',
+			'updatelens'
+		);
+	} else if ( marked > 0 ) {
+		text = sprintf(
+			/* translators: %s: number of changes a review rule matched. */
+			_n(
+				'Review rules matched %s change; it is marked below.',
+				'Review rules matched %s changes; they are marked below.',
+				marked,
+				'updatelens'
+			),
+			formatCount( marked )
+		);
+		if ( others > 0 ) {
+			text += ` ${ sprintf(
+				/* translators: %s: number of changes no review rule matched. */
+				_n(
+					'%s other change matched no rule (informational).',
+					'%s other changes matched no rule (informational).',
+					others,
+					'updatelens'
+				),
+				formatCount( others )
+			) }`;
+		}
+	} else {
+		text = __(
+			'No review rule matched these changes (informational). That does not show they had no effect.',
+			'updatelens'
+		);
+	}
+	return (
+		<p className="flex gap-2 text-[13px] leading-5 text-slate-600">
+			<Icon
+				name="info"
+				className="mt-0.5 size-4 shrink-0 text-slate-500"
+			/>
+			<span>{ text }</span>
+		</p>
 	);
 }
 

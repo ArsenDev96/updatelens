@@ -445,6 +445,15 @@ export interface ImpactOptionSide {
 	is_autoloaded: boolean;
 }
 
+/**
+ * Priority of a finding, fixed per rule by the API (PotentialImpact::PRIORITIES):
+ * `high` only for a site check that passed (verified) before the update and
+ * failed after it, confirmed by both requests; `review` for every other rule.
+ * Changes no rule matched are not findings (informational, see
+ * ImpactAssessment); observations that could not be assessed have no priority.
+ */
+export type FindingPriority = 'high' | 'review';
+
 export interface LargeAutoloadedOptionFinding {
 	code: 'large_autoloaded_option';
 	signal: 'options';
@@ -460,6 +469,7 @@ export interface LargeAutoloadedOptionFinding {
 	/** Null if added. */
 	before: ImpactOptionSide | null;
 	after: ImpactOptionSide;
+	priority: FindingPriority;
 }
 
 /** A recurring WP-Cron instance (arguments never included). */
@@ -490,6 +500,7 @@ export interface RecurringCronEventRemovedFinding {
 	};
 	before: { removed_recurring: ImpactCronInstance[] };
 	after: { added_recurring: ImpactCronInstance[] };
+	priority: FindingPriority;
 }
 
 export type ScheduleChange =
@@ -512,6 +523,7 @@ export interface CronScheduleChangedFinding {
 	evidence: { change: ScheduleChange };
 	before: ImpactCronSide;
 	after: ImpactCronSide;
+	priority: FindingPriority;
 }
 
 export interface ImpactActionSide {
@@ -530,6 +542,7 @@ export interface ActionScheduleChangedFinding {
 	evidence: { change: ScheduleChange };
 	before: ImpactActionSide;
 	after: ImpactActionSide;
+	priority: FindingPriority;
 }
 
 export type ImpactFinding =
@@ -618,6 +631,7 @@ export interface SiteCheckNewlyFailingFinding {
 	evidence: { failure: string; attempt_count: number };
 	before: SiteCheckSide;
 	after: SiteCheckSide;
+	priority: FindingPriority;
 }
 
 /**
@@ -634,6 +648,7 @@ export interface SiteCheckChangedFinding {
 	evidence: { change: 'redirect_appeared'; attempt_count: number };
 	before: SiteCheckSide;
 	after: SiteCheckSide;
+	priority: FindingPriority;
 }
 
 export type SiteCheckFinding =
@@ -674,6 +689,27 @@ export interface SiteCheckImpact {
  * is shown), plus the site checks taken around the update. Findings are
  * observations worth a look, not problems.
  */
+/** A signal or site check in the assessment's lists. */
+export type AssessmentSource =
+	| { type: 'signal'; name: Provider }
+	| { type: 'site_check'; name: SiteCheckId };
+
+/**
+ * The report's decision summary (PotentialImpact::assess()): findings by
+ * priority, the Net result changes no rule matched, and what could not be
+ * assessed (never counted as a priority) or is still being observed.
+ */
+export interface ImpactAssessment {
+	high_priority: number;
+	needs_review: number;
+	/** Net result changes no finding covers; null when no signal was evaluated. Never "safe". */
+	informational: number | null;
+	/** Not evaluated (missing, unsupported, inconclusive), with the reason. */
+	not_assessed: Array< AssessmentSource & { reason: string | null } >;
+	/** Still being observed: the Net result while open, site checks that may still arrive. */
+	pending: AssessmentSource[];
+}
+
 export interface PotentialImpact {
 	phase: 'final';
 	/** `evaluated`: every applicable signal; `partial`: some; `not_evaluated`: none. */
@@ -681,6 +717,7 @@ export interface PotentialImpact {
 	signals: Record< Provider, ImpactSignal >;
 	findings: ImpactFinding[];
 	site_checks: SiteCheckImpact;
+	assessment: ImpactAssessment;
 }
 
 /** GET /updatelens/v1/analyses/{id}. */

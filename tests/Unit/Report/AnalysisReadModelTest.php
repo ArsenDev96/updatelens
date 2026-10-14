@@ -1101,8 +1101,12 @@ final class AnalysisReadModelTest extends TestCase {
 			)
 		)['potential_impact'];
 
-		$this->assertSame( array( 'phase', 'status', 'signals', 'findings', 'site_checks' ), array_keys( $with ) );
-		$this->assertSame( array_diff_key( $without, array( 'site_checks' => true ) ), array_diff_key( $with, array( 'site_checks' => true ) ) );
+		$this->assertSame( array( 'phase', 'status', 'signals', 'findings', 'site_checks', 'assessment' ), array_keys( $with ) );
+		// Site checks never change the Net result's evaluation; only the summary counts them.
+		$evaluated = array_flip( array( 'phase', 'status', 'signals', 'findings' ) );
+		$this->assertSame( array_intersect_key( $without, $evaluated ), array_intersect_key( $with, $evaluated ) );
+		$this->assertSame( array( 1, 1 ), array( $with['assessment']['high_priority'], $with['assessment']['needs_review'] ) );
+		$this->assertSame( array( 0, 1 ), array( $without['assessment']['high_priority'], $without['assessment']['needs_review'] ) );
 		$this->assertSame( array( 'large_autoloaded_option' ), array_column( $with['findings'], 'code' ) );
 		$this->assertSame( 'evaluated', $with['site_checks']['status'] );
 		$this->assertSame( array( 'site_check_newly_failing' ), array_column( $with['site_checks']['findings'], 'code' ) );

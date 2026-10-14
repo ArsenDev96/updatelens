@@ -625,16 +625,27 @@ function RescheduledEventRow( { event }: { event: RescheduledCronEvent } ) {
 			<RowDetails
 				rows={ [
 					[
+						__( 'What changed', 'updatelens' ),
+						delta
+							? sprintf(
+									/* translators: %s: how far the next run moved, e.g. "+1 minute". */
+									__(
+										'Only the next run moved (%s); the recurrence is unchanged.',
+										'updatelens'
+									),
+									delta
+								)
+							: __(
+									'Only the next run moved; the recurrence is unchanged.',
+									'updatelens'
+								),
+					],
+					[
 						__( 'Next run', 'updatelens' ),
 						<span key="t" className="tabular-nums">
 							<Time timestamp={ event.before_timestamp } />
 							<To />
 							<Time timestamp={ event.after_timestamp } />
-							{ delta && (
-								<span className="ml-1.5 text-muted-foreground">
-									({ delta })
-								</span>
-							) }
 						</span>,
 					],
 				] }

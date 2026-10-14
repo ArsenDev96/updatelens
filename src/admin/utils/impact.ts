@@ -1,6 +1,7 @@
 import { _n, __, sprintf } from '@wordpress/i18n';
 
 import type {
+	FindingPriority,
 	ImpactFinding,
 	LargeAutoloadedOptionFinding,
 	PotentialImpact,
@@ -106,6 +107,20 @@ export function findingGroupTitle( group: FindingGroup ): string {
 						'updatelens'
 					);
 	}
+}
+
+/**
+ * Title of one finding's rule ("Large autoloaded option").
+ *
+ * @param finding Finding.
+ */
+export function findingTitle( finding: ImpactFinding ): string {
+	return findingGroupTitle( {
+		key: '',
+		code: finding.code,
+		signal: finding.signal,
+		findings: [ finding ],
+	} );
 }
 
 /**
@@ -487,6 +502,19 @@ export function cronRemovalContext( finding: ImpactFinding ): string[] {
 }
 
 /**
+ * A finding's priority as the API gave it: "High priority" (a site check
+ * that passed before the update and failed after it, confirmed) or "Needs
+ * review" (a pattern worth a look).
+ *
+ * @param priority Priority.
+ */
+export function priorityLabel( priority: FindingPriority ): string {
+	return priority === 'high'
+		? __( 'High priority', 'updatelens' )
+		: __( 'Needs review', 'updatelens' );
+}
+
+/**
  * The evidence label: "Based on Net result", "Based on Net result and site
  * checks" when site checks were compared too, or "Based on site checks".
  *
@@ -646,7 +674,7 @@ export function impactDescription(
 					);
 				case 'partial':
 					return __(
-						'Checks that could not be completed are listed below and are not counted as passed. Only a few specific patterns are checked, so this does not show that the update had no other effects.',
+						'Observations that could not be assessed are not counted as passed. Only a few specific patterns are checked, so this does not show that the update had no other effects.',
 						'updatelens'
 					);
 				default:

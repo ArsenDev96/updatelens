@@ -43,6 +43,60 @@ export interface Located {
 
 const LocatedContext = createContext< Located | null >( null );
 
+/** A row a finding is about: its own entry (`exact`) or one of its hook. */
+export interface MatchedFinding {
+	finding: ImpactFinding;
+	precision: LocatedPrecision;
+}
+
+/** Rows of the Net result with the finding each one matched. */
+export type MatchedRows = ReadonlyMap< object, MatchedFinding >;
+
+const MatchedContext = createContext< MatchedRows | null >( null );
+
+export const MatchedRowsProvider = MatchedContext.Provider;
+
+/** The finding a row matched, if any. */
+export function useMatched(
+	record: object | undefined
+): MatchedFinding | null {
+	const matched = useContext( MatchedContext );
+	return ( record !== undefined && matched?.get( record ) ) || null;
+}
+
+/**
+ * Every Net result row of a signal that a finding of the report is about,
+ * located exactly as a finding's link would (locate()): the finding's own
+ * entries when its evidence identifies them, else the entries of its hook.
+ * A row keeps an exact match over a hook match.
+ *
+ * @param report Loaded report.
+ * @param signal Signal of the page.
+ */
+export function matchedRows(
+	report: AnalysisReport,
+	signal: Provider
+): MatchedRows {
+	const rows = new Map< object, MatchedFinding >();
+	report.potential_impact.findings.forEach( ( finding, index ) => {
+		if ( finding.signal !== signal ) {
+			return;
+		}
+		const located = locate( report, signal, {
+			name: findingSubject( finding ),
+			group: finding.signal === 'action_scheduler' ? finding.group : null,
+			kind: findingListKind( finding ),
+			finding: index,
+		} );
+		located.rows.forEach( ( record ) => {
+			if ( rows.get( record )?.precision !== 'exact' ) {
+				rows.set( record, { finding, precision: located.precision } );
+			}
+		} );
+	} );
+	return rows;
+}
+
 export const LocatedProvider = LocatedContext.Provider;
 
 /** The rows located on this page, if any. */

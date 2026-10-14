@@ -28,14 +28,15 @@ interface TabsProps< K extends string > {
 }
 
 /*
- * A segmented control: the selected tab is filled in the accent color;
- * labels and counts stack on phones.
+ * A quiet segmented control (secondary to the report's summary): the
+ * selected tab is a white segment with dark text on a light track; labels
+ * and counts stack on phones.
  */
 const TAB = {
-	list: 'grid grid-cols-3 gap-1 rounded-xl border bg-card p-1 shadow-surface sm:inline-grid sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none',
-	tab: 'flex min-h-11 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-center text-sm font-medium leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:flex-row sm:gap-2 sm:px-4',
-	selected: 'bg-primary text-primary-foreground shadow-sm',
-	idle: 'text-slate-600 hover:bg-slate-100 hover:text-foreground',
+	list: 'grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1 ring-1 ring-inset ring-slate-200 sm:inline-grid sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none',
+	tab: 'flex min-h-10 flex-col items-center justify-center gap-1 rounded-md px-2 py-1.5 text-center text-sm font-medium leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 sm:flex-row sm:gap-2 sm:px-4',
+	selected: 'bg-card text-slate-900 shadow-sm ring-1 ring-slate-200',
+	idle: 'text-slate-600 hover:bg-white/60 hover:text-foreground',
 };
 
 /**
@@ -50,9 +51,11 @@ function indicatorClassName(
 ): string {
 	return cn(
 		'inline-block whitespace-nowrap rounded-full px-2 text-xs leading-5 tabular-nums',
-		// On the selected (accent) tab: a light pill with accent text. A
-		// translucent white pill left white text below 4.5:1.
-		isSelected && 'bg-primary-foreground font-semibold text-primary',
+		// On the selected (white) tab: the accent pill when there are changes.
+		isSelected &&
+			( tone === 'changes'
+				? 'bg-tint-strong font-semibold text-tint-foreground'
+				: 'font-normal text-slate-600' ),
 		! isSelected &&
 			( tone === 'changes'
 				? 'bg-tint-strong font-semibold text-tint-foreground'
@@ -105,7 +108,7 @@ export function Tabs< K extends string >( {
 	};
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-3">
 			<div
 				role="tablist"
 				aria-label={ label }

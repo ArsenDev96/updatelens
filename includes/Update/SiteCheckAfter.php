@@ -391,6 +391,9 @@ final class SiteCheckAfter {
 		if ( SettleOutcome::EXPIRED === $outcome ) {
 			return AfterReason::SETTLE_EXPIRED;
 		}
+		if ( SettleOutcome::NEXT_UPDATE === $outcome ) {
+			return AfterReason::NEXT_UPDATE; // Another update began right after this one.
+		}
 		if ( SettleOutcome::FOLLOW_UP !== $outcome ) {
 			return AfterReason::NOT_FOLLOWED_UP;
 		}

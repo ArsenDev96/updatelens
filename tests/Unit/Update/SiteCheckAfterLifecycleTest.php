@@ -734,7 +734,8 @@ final class SiteCheckAfterLifecycleTest extends TestCase {
 			),
 			$this->states( $first )
 		);
-		$this->assertSame( 'not_followed_up', $this->report( $first )['checks']['home']['after']['reason'] );
+		// Ended by the queued update, not by another route: its own reason.
+		$this->assertSame( 'next_update', $this->report( $first )['checks']['home']['after']['reason'] );
 		$this->assertSame( array( 'intervening_update', 'no_baseline' ), array( $this->report( $second )['checks']['home']['before']['reason'], $this->report( $second )['checks']['home']['after']['reason'] ) );
 	}
 

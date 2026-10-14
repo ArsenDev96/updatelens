@@ -1218,8 +1218,8 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 			foreach ( array_keys( $output[1]['phases'] ) as $phase ) {
 				unset( $output[0]['items'][0]['phases'][ $phase ]['action_scheduler'], $output[1]['phases'][ $phase ]['action_scheduler'] );
 			}
-			// Potential Impact: the overall status summarizes all signals; the others' evaluation and findings stay the same.
-			unset( $output[1]['potential_impact']['status'], $output[1]['potential_impact']['signals']['action_scheduler'] );
+			// Potential Impact: the overall status and the assessment summarize all signals; the others' evaluation and findings stay the same.
+			unset( $output[1]['potential_impact']['status'], $output[1]['potential_impact']['signals']['action_scheduler'], $output[1]['potential_impact']['assessment'] );
 			$output[1]['potential_impact']['findings'] = array_values(
 				array_filter(
 					$output[1]['potential_impact']['findings'],
@@ -1235,6 +1235,12 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 		$this->assertSame( 'not_installed', $outputs[1][1]['phases']['final']['action_scheduler']['reason'] );
 		$this->assertSame( array( 'evaluated', 'evaluated' ), array( $outputs[0][1]['potential_impact']['status'], $outputs[0][1]['potential_impact']['signals']['action_scheduler']['status'] ) );
 		$this->assertSame( array( 'evaluated', 'not_applicable', 'not_installed' ), array( $outputs[1][1]['potential_impact']['status'], $outputs[1][1]['potential_impact']['signals']['action_scheduler']['status'], $outputs[1][1]['potential_impact']['signals']['action_scheduler']['reason'] ) );
+		// The Action Scheduler finding and its changes are counted; an absent Action Scheduler is not "not assessed".
+		$with_assessment    = $outputs[0][1]['potential_impact']['assessment'];
+		$without_assessment = $outputs[1][1]['potential_impact']['assessment'];
+		$this->assertSame( $without_assessment['needs_review'] + 1, $with_assessment['needs_review'] );
+		$this->assertGreaterThan( $without_assessment['informational'], $with_assessment['informational'] );
+		$this->assertSame( array( array(), array() ), array( $with_assessment['not_assessed'], $without_assessment['not_assessed'] ) );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- Unit test.
 		$json = json_encode( $outputs[0] );
 		foreach ( array( self::FAKE_SECRET, 'hooks.example.test', 'token', 'fingerprint', 'as-args-hmac', 'snapshot' ) as $needle ) {

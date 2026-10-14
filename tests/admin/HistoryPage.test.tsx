@@ -274,6 +274,28 @@ describe( 'HistoryPage', () => {
 		}
 	);
 
+	it( 'marks confirmed high priority findings, and nothing else', async () => {
+		apiFetchMock.mockResolvedValue(
+			listResponse( [
+				historyItem( COMPLETED, { id: 2, high_priority: 1 } ),
+				historyItem( COMPLETED, { id: 1, high_priority: 0 } ),
+			] )
+		);
+		renderHistory();
+
+		const [ flagged, quiet ] = await screen.findAllByRole( 'link' );
+		expect(
+			flagged.querySelector( '[data-priority="high"]' )
+		).toHaveTextContent( /^1 high priority$/ );
+		// The link's name includes it as text, not only color.
+		expect( flagged ).toHaveAccessibleName( /1 high priority/ );
+		expect( quiet.querySelector( '[data-priority]' ) ).toBeNull();
+		// No overall verdict and no badge for ordinary findings.
+		expect( document.body ).not.toHaveTextContent(
+			/needs review|safe|no issues/i
+		);
+	} );
+
 	it( 'an older API without site checks reads as not recorded', async () => {
 		const { site_checks: omitted, ...older } = historyItem( COMPLETED );
 		void omitted;

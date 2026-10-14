@@ -379,12 +379,12 @@ describe( 'Action Scheduler in reports', () => {
 			],
 			[
 				'settle_expired',
-				'Not captured',
+				'Observation expired',
 				'Post-update Action Scheduler state was not captured within 5 minutes of the update.',
 			],
 			[
 				'not_captured',
-				'Not captured',
+				'Not recorded for this report',
 				'Action Scheduler was not captured for this phase.',
 			],
 			[
@@ -448,7 +448,9 @@ describe( 'Action Scheduler in reports', () => {
 			} );
 
 			expect( tab( /^Net result/ ) ).toHaveTextContent( 'Not available' );
-			expect( signalPanel() ).toHaveTextContent( 'Not captured' );
+			expect( signalPanel() ).toHaveTextContent(
+				'Not recorded for this report'
+			);
 			expect( signalPanel() ).not.toHaveTextContent( 'No changes' );
 		} );
 

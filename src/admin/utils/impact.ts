@@ -20,7 +20,6 @@ import {
 	cronUnavailableReasonText,
 	providerLabel,
 	unavailableReasonText,
-	windowText,
 } from './labels';
 import { siteCheckFindings } from './siteCheckImpact';
 
@@ -619,7 +618,7 @@ export function impactHeadline(
 					);
 				case 'partial':
 					return __(
-						'No findings in completed observations; some checks were unavailable.',
+						'No findings in the completed observations; some observations were not assessed.',
 						'updatelens'
 					);
 				default:
@@ -631,6 +630,7 @@ export function impactHeadline(
 		case 'waiting':
 			return __( 'Waiting for the Net result', 'updatelens' );
 		case 'expired':
+			return __( 'Not assessed in this partial report', 'updatelens' );
 		case 'unavailable':
 			return __( 'Not available for this report', 'updatelens' );
 	}
@@ -689,13 +689,10 @@ export function impactDescription(
 				'updatelens'
 			);
 		case 'expired':
-			return sprintf(
-				/* translators: %s: observation window length, e.g. "5 minutes". */
-				__(
-					'The post-update observation was not captured within %s, so there is no Net result to check. Changes observed during the update are still listed in the During update phase.',
-					'updatelens'
-				),
-				windowText( windowSeconds )
+			// Why is said once, in the status at the top of the report.
+			return __(
+				'Review rules need the Net result, which this partial report does not have. Changes observed during the update are listed in the During update phase.',
+				'updatelens'
 			);
 		case 'unavailable':
 			return sprintf(

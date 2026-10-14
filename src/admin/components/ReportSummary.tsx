@@ -8,7 +8,7 @@ import type { PhaseChangeCounts } from '../utils/changes';
 import { formatCount } from '../utils/format';
 import {
 	configurationGlance,
-	notAssessedText,
+	notAssessedLines,
 	siteChecksGlance,
 	type GlanceItem,
 } from '../utils/glance';
@@ -52,7 +52,12 @@ export function ReportSummary( {
 	const { assessment } = impact;
 	const state = impactState( impact );
 	const findings = assessment.high_priority + assessment.needs_review;
-	const notAssessed = notAssessedText( report );
+	const notAssessed = notAssessedLines( report );
+	const informational = informationalText( report );
+	// Only when a phase has changes to inspect.
+	const hasChanges = ( Object.values( counts ) as PhaseChangeCounts[] ).some(
+		( phase ) => ( phase.total ?? 0 ) > 0
+	);
 	const siteChecks = siteChecksGlance( report );
 
 	return (
@@ -108,18 +113,25 @@ export function ReportSummary( {
 							{ impactHeadline( impact, state ) }
 						</span>
 					) }
-					{ informationalText( assessment.informational ) && (
+					{ informational && (
 						<span className="mt-0.5 block text-[13px] leading-5 text-slate-600">
-							{ informationalText( assessment.informational ) }
+							{ informational }
 						</span>
 					) }
 				</Row>
 				<Row
 					label={ __( 'Configuration', 'updatelens' ) }
-					action={ {
-						label: __( 'Inspect changes', 'updatelens' ),
-						onClick: onShowConfiguration,
-					} }
+					action={
+						hasChanges
+							? {
+									label: __(
+										'Inspect changes',
+										'updatelens'
+									),
+									onClick: onShowConfiguration,
+								}
+							: null
+					}
 				>
 					<Fact item={ configurationGlance( report, counts ) } />
 				</Row>
@@ -143,7 +155,7 @@ export function ReportSummary( {
 						<Fact item={ siteChecks } />
 					</span>
 				</Row>
-				{ notAssessed && (
+				{ notAssessed.length > 0 && (
 					<Row
 						label={ __( 'Not assessed', 'updatelens' ) }
 						action={ null }
@@ -153,7 +165,15 @@ export function ReportSummary( {
 								name="info"
 								className="mt-0.5 size-4 shrink-0 text-slate-500"
 							/>
-							<span>{ notAssessed }</span>
+							{ notAssessed.length === 1 ? (
+								<span>{ notAssessed[ 0 ] }</span>
+							) : (
+								<ul className="space-y-0.5">
+									{ notAssessed.map( ( line ) => (
+										<li key={ line }>{ line }</li>
+									) ) }
+								</ul>
+							) }
 						</span>
 					</Row>
 				) }
@@ -163,24 +183,43 @@ export function ReportSummary( {
 }
 
 /**
- * "3 other observed changes matched no review rule (informational)", or null.
+ * How many Net result configuration changes matched no review rule, out of
+ * those assessed, from the API's exact per-record counts: "2 of 5
+ * configuration changes in the Net result matched no review rule
+ * (informational)." When some sources were not assessed, it says the count
+ * covers the assessed ones only. Null without informational changes.
  *
- * @param count Informational changes from the API; null when not assessed.
+ * @param report Report.
  */
-function informationalText( count: number | null ): string | null {
-	if ( count === null || count === 0 ) {
+function informationalText( report: AnalysisReport ): string | null {
+	const impact = report.potential_impact;
+	const { informational, assessed_changes: assessed } = impact.assessment;
+	if ( ! informational || ! assessed ) {
 		return null;
 	}
-	return sprintf(
-		/* translators: %s: number of observed changes that matched no review rule. */
-		_n(
-			'%s observed change matched no review rule (informational).',
-			'%s observed changes matched no review rule (informational).',
-			count,
-			'updatelens'
-		),
-		formatCount( count )
-	);
+	return impact.status === 'evaluated'
+		? sprintf(
+				/* translators: 1: changes no review rule matched. 2: all configuration changes in the Net result. */
+				_n(
+					'%1$s of %2$s configuration change in the Net result matched no review rule (informational).',
+					'%1$s of %2$s configuration changes in the Net result matched no review rule (informational).',
+					assessed,
+					'updatelens'
+				),
+				formatCount( informational ),
+				formatCount( assessed )
+			)
+		: sprintf(
+				/* translators: 1: changes no review rule matched. 2: configuration changes in the sources that were assessed. */
+				_n(
+					'%1$s of %2$s configuration change in the assessed sources of the Net result matched no review rule (informational).',
+					'%1$s of %2$s configuration changes in the assessed sources of the Net result matched no review rule (informational).',
+					assessed,
+					'updatelens'
+				),
+				formatCount( informational ),
+				formatCount( assessed )
+			);
 }
 
 /**

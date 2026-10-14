@@ -248,7 +248,9 @@ describe( 'ReportPage', () => {
 			const user = userEvent.setup();
 
 			expect(
-				await screen.findByText( 'Post-update observation expired' )
+				await screen.findByText(
+					'Partial report: the observation after the update expired'
+				)
 			).toBeInTheDocument();
 			expect( tab( /During update/ ) ).toHaveAttribute(
 				'aria-selected',
@@ -270,7 +272,7 @@ describe( 'ReportPage', () => {
 				'No eligible admin request occurred within 5 minutes of the update.'
 			);
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-				'Not available · Not captured'
+				'Not available · Observation expired'
 			);
 			expect( panel() ).not.toHaveTextContent( 'settle_expired' );
 		} );
@@ -289,7 +291,9 @@ describe( 'ReportPage', () => {
 				expect( header ).not.toHaveTextContent( 'Completed' );
 				// The amber explanation stays.
 				expect(
-					screen.getByText( 'Post-update observation expired' )
+					screen.getByText(
+						'Partial report: the observation after the update expired'
+					)
 				).toBeInTheDocument();
 				cleanup();
 			}

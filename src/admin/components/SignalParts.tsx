@@ -191,12 +191,12 @@ export function ChangeRow( {
 						{ priorityLabel( matched.finding.priority ) }
 					</span>
 					<span>
-						{ matched.precision === 'exact'
+						{ matched.role === 'subject'
 							? findingTitle( matched.finding )
 							: sprintf(
 									/* translators: %s: review rule, e.g. "Recurring WP-Cron event no longer observed". */
 									__(
-										'Same hook as a finding: %s',
+										'Counted as a replacement in: %s',
 										'updatelens'
 									),
 									findingTitle( matched.finding )

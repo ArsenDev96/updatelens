@@ -134,7 +134,9 @@ describe( 'Initial data printed by the admin page', () => {
 		render( <App /> );
 
 		expect(
-			await screen.findByText( 'Post-update observation expired' )
+			await screen.findByText(
+				'Partial report: the observation after the update expired'
+			)
 		).toBeInTheDocument();
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 1 );
 	} );

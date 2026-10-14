@@ -228,7 +228,7 @@ describe( 'WP-Cron in reports', () => {
 		} );
 		const rows = within( section ).getAllByRole( 'listitem' );
 		expect( rows[ 0 ] ).toHaveTextContent( 'ul_fixture_cleanup' );
-		expect( rows[ 0 ] ).toHaveTextContent( '(+2 hours)' );
+		expect( rows[ 0 ] ).toHaveTextContent( '(2 hours later)' );
 		expect( rows[ 0 ] ).toHaveTextContent( 'Recurring · daily' );
 		const times = rows[ 0 ].querySelectorAll( 'time' );
 		expect( times[ 0 ] ).toHaveAttribute( 'datetime', iso( T + 3600 ) );
@@ -238,7 +238,7 @@ describe( 'WP-Cron in reports', () => {
 		expect( rows[ 1 ] ).toHaveTextContent(
 			'wp_privacy_delete_old_export_files'
 		);
-		expect( rows[ 1 ] ).toHaveTextContent( '(+1 hour)' );
+		expect( rows[ 1 ] ).toHaveTextContent( '(1 hour later)' );
 		expect( document.body ).not.toHaveTextContent(
 			/caused|created by|plugin rescheduled|warning|danger|regression/i
 		);
@@ -263,8 +263,8 @@ describe( 'WP-Cron in reports', () => {
 				name: 'Rescheduled (2)',
 			} )
 		).getAllByRole( 'listitem' );
-		expect( rows[ 0 ] ).toHaveTextContent( '(+2 xhours)' );
-		expect( rows[ 1 ] ).toHaveTextContent( '(+1 xhour)' );
+		expect( rows[ 0 ] ).toHaveTextContent( '(2 xhours later)' );
+		expect( rows[ 1 ] ).toHaveTextContent( '(1 xhour later)' );
 
 		await openCron( /Net result/ );
 		const task = within( signalPanel() )
@@ -447,7 +447,7 @@ describe( 'WP-Cron in reports', () => {
 		expect(
 			within(
 				screen.getByRole( 'region', { name: 'Analysis status' } )
-			).getByText( /within 10 minutes of the update/ )
+			).getByText( /within 10 minutes, and none arrived/ )
 		).toBeInTheDocument();
 		expect( document.body ).not.toHaveTextContent( '5 minutes' );
 	} );
@@ -468,7 +468,7 @@ describe( 'WP-Cron in reports', () => {
 			'6 changes'
 		);
 		expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-			'Not available · Not captured'
+			'Not available · Not recorded for this report'
 		);
 		cleanup();
 

@@ -1,4 +1,4 @@
-import { __ } from '@wordpress/i18n';
+import { __, _n, sprintf } from '@wordpress/i18n';
 import { useCallback, useEffect, useRef, type MouseEvent } from 'react';
 
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,7 +17,7 @@ import { usePageLoadFallback } from '../hooks/use-page-load-fallback';
 import { useRequest } from '../hooks/use-request';
 import type { AnalysisHistoryItem } from '../types/api';
 import { historyPhaseState } from '../utils/changes';
-import { formatDateTime } from '../utils/format';
+import { formatCount, formatDateTime } from '../utils/format';
 import { historyPhaseText, PHASE_KEYS, phaseLabel } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
 import { siteCheckOutcome } from '../utils/siteChecks';
@@ -195,6 +195,29 @@ function HistoryRow( {
 						status={ item.status }
 						settleOutcome={ item.settle_outcome }
 					/>
+					{ /* Only the API's confirmed high priority findings; other findings stay in the report. */ }
+					{ ( item.high_priority ?? 0 ) > 0 && (
+						<span
+							data-priority="high"
+							className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-800 ring-1 ring-inset ring-rose-200"
+						>
+							<Icon
+								name="failure"
+								className="size-3.5"
+								aria-hidden="true"
+							/>
+							{ sprintf(
+								/* translators: %s: number of high priority findings. */
+								_n(
+									'%s high priority',
+									'%s high priority',
+									item.high_priority ?? 0,
+									'updatelens'
+								),
+								formatCount( item.high_priority ?? 0 )
+							) }
+						</span>
+					) }
 				</div>
 				{ /* Configuration and site responses: two separate observations, each labelled. */ }
 				<dl className="mt-2 grid text-xs leading-5 sm:grid-cols-[6.5rem_minmax(0,1fr)] sm:gap-x-3 sm:gap-y-1.5">

@@ -165,7 +165,7 @@ export function siteCheckRow(
 
 /**
  * The comparison of one check in two or three words, for the compact row
- * (Before → After → Result). From the API's state only: "Passed both" only
+ * (Before → After → Result). From the API's state only: "Passed before and after" only
  * for a check the API compared as passed.
  *
  * @param comparison The check in the report's `site_checks`.
@@ -182,11 +182,11 @@ export function siteCheckResultLabel(
 	}
 	switch ( comparison.state ) {
 		case 'passed_both':
-			return __( 'Passed both', 'updatelens' );
+			return __( 'Passed before and after', 'updatelens' );
 		case 'newly_failing':
 			return __( 'Newly failing', 'updatelens' );
 		case 'failing_both':
-			return __( 'Failing both', 'updatelens' );
+			return __( 'Failed before and after', 'updatelens' );
 		case 'recovered':
 			return __( 'Recovered', 'updatelens' );
 		case 'changed':
@@ -229,6 +229,23 @@ export function siteCheckSideCell(
 }
 
 /**
+ * Why a check was not compared, in a few words, for the report summary:
+ * "no check before the update", "no check after the update" or "could not
+ * be compared". From the API's comparison state and which side is missing;
+ * the full reasons are in the Site checks section.
+ *
+ * @param comparison The check in the report's `site_checks`.
+ */
+export function siteCheckGapText( comparison: SiteCheckComparison ): string {
+	if ( comparison.state === 'not_comparable' ) {
+		return __( 'could not be compared', 'updatelens' );
+	}
+	return comparison.before.available
+		? __( 'no check after the update', 'updatelens' )
+		: __( 'no check before the update', 'updatelens' );
+}
+
+/**
  * The reason a check was not compared that says how to compare next time
  * (siteCheckNextTimeText()), or null.
  *
@@ -258,8 +275,9 @@ function changedRow(
 ): SiteCheckRowText {
 	switch ( change ) {
 		case 'redirect_appeared':
+			// A finding that needs review: the same amber as its finding.
 			return {
-				tone: 'neutral',
+				tone: finding ? 'caution' : 'neutral',
 				icon: 'changed',
 				status: __( 'Passed before, redirected after', 'updatelens' ),
 				detail: __(

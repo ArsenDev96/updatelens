@@ -122,15 +122,15 @@ describe( 'Site response checks on the report overview', () => {
 		);
 		// Before → after → result; a pass needs no explanation.
 		expect( checkRows() ).toEqual( {
-			Homepage: 'Passed both',
-			'WordPress REST API': 'Passed both',
+			Homepage: 'Passed before and after',
+			'WordPress REST API': 'Passed before and after',
 		} );
 		expect( sides( 'Homepage' ) ).toEqual( [
 			'Passed · HTTP 200',
 			'Passed · HTTP 200',
 		] );
 		expect( checkButton( 'Homepage' ) ).toHaveAccessibleDescription(
-			/^Before update Passed · HTTP.200 After update Passed · HTTP.200 Result Passed both$/
+			/^Before update Passed · HTTP.200 After update Passed · HTTP.200 Result Passed before and after$/
 		);
 		expect( checkButton( 'Homepage' ) ).toHaveAttribute(
 			'aria-expanded',
@@ -221,15 +221,14 @@ describe( 'Site response checks on the report overview', () => {
 				withSiteChecks( COMPLETED, 'home_newly_failing' )
 			);
 
-			expect( checkRows()!.Homepage ).toBe(
-				'Newly failing Both requests after the update returned HTTP 500.'
-			);
+			// The After cell says it; the sentence would repeat it.
+			expect( checkRows()!.Homepage ).toBe( 'Newly failing' );
 			expect( sides( 'Homepage' ) ).toEqual( [
 				'Passed · HTTP 200',
 				'Failed in both requests · HTTP 500',
 			] );
 			expect( checkRows()![ 'WordPress REST API' ] ).toBe(
-				'Passed both'
+				'Passed before and after'
 			);
 			await user.click( checkButton( 'Homepage' ) );
 			const row = checkButton( 'Homepage' ).closest( 'li' )!;
@@ -261,10 +260,8 @@ describe( 'Site response checks on the report overview', () => {
 
 	it( 'REST newly failing and both newly failing', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'rest_newly_failing' ) );
-		expect( checkRows()![ 'WordPress REST API' ] ).toBe(
-			'Newly failing Both requests after the update returned a response that was not valid JSON.'
-		);
-		expect( checkRows()!.Homepage ).toBe( 'Passed both' );
+		expect( checkRows()![ 'WordPress REST API' ] ).toBe( 'Newly failing' );
+		expect( checkRows()!.Homepage ).toBe( 'Passed before and after' );
 		expect(
 			checkButton( 'WordPress REST API' ).closest( 'li' )
 		).toHaveTextContent(
@@ -277,7 +274,7 @@ describe( 'Site response checks on the report overview', () => {
 	} );
 
 	it.each( [
-		[ 'failing_both', 'Failing both' ],
+		[ 'failing_both', 'Failed before and after' ],
 		[ 'recovered', 'Recovered' ],
 		[ 'home_redirect', 'Now redirects' ],
 		[ 'redirect_disappeared', 'No longer redirects' ],
@@ -343,7 +340,7 @@ describe( 'Site response checks on the report overview', () => {
 	it( 'one compared, one unavailable: each row says its own', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'one_unavailable' ) );
 		expect( checkRows() ).toEqual( {
-			Homepage: 'Passed both',
+			Homepage: 'Passed before and after',
 			'WordPress REST API':
 				'Not compared The update started before the check before it had finished.',
 		} );
@@ -410,7 +407,9 @@ describe( 'Site response checks on the report overview', () => {
 		expect( checkRows()!.Homepage ).toMatch(
 			/^Not supported The homepage is on a different address than wp-admin/
 		);
-		expect( checkRows()![ 'WordPress REST API' ] ).toBe( 'Passed both' );
+		expect( checkRows()![ 'WordPress REST API' ] ).toBe(
+			'Passed before and after'
+		);
 	} );
 
 	it( 'both on another origin: one sentence, never passed', async () => {
@@ -484,7 +483,7 @@ describe( 'Site response checks on the report overview', () => {
 				[ 'rest', 'WordPress REST API' ],
 			] as const ) {
 				const status = checkRows()?.[ label ] ?? '';
-				expect( status.startsWith( 'Passed both' ) ).toBe(
+				expect( status.startsWith( 'Passed before and after' ) ).toBe(
 					states[ check ].state === 'passed_both'
 				);
 			}

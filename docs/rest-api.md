@@ -37,6 +37,7 @@ Body: an array of history items. Diffs are never decoded or returned for the lis
 `recorded` without changes is a successful observation with nothing to show, not missing data. A site without Action Scheduler has `action_scheduler.recorded: false`; the phase is then described by the other signals. Only the report decodes diffs, so only the report can find a stored diff unreadable (`data_corrupt`). No Cron or Action Scheduler hooks, groups, reasons or arguments are part of the history.
 
 - `site_checks`: the report's site check evaluation (`potential_impact.site_checks`, see below) without `findings`, computed from the same stored results on every read: `status` (`evaluated`, `partial`, `pending`, `not_evaluated`, `not_applicable`) and per check (`home`, `rest`) its `status`, comparison `state`, `change`, `reason` and `finding_count`. The list reads the site check result columns for this (small result facts and fixed reason codes), so History needs no request per row. Rows recorded before site checks existed read as `not_applicable` with reason `not_captured`.
+- `high_priority`: the report's `potential_impact.assessment.high_priority` (see [Classification](#classification)). Only site check rules are high priority, so it comes from the same evaluation as `site_checks` and no diff is decoded for the list. Other findings are not part of the history. Added later; additive.
 
 ```json
 [
@@ -403,13 +404,14 @@ Absence is resolved from both captures of a phase: a phase is `not_installed` on
 
 ### `potential_impact`
 
-Three fixed review rules evaluated on the **Net result** (`phases.final`) of the report, from the diffs already decoded for it (`Report\PotentialImpact`). Computed on every read; never stored, no extra data is collected. A finding is an observation that may be worth checking, not a confirmed problem, and never says that the updated plugin caused it. There are no severities or scores.
+Three fixed review rules evaluated on the **Net result** (`phases.final`) of the report, from the diffs already decoded for it (`Report\PotentialImpact`). Computed on every read; never stored, no extra data is collected. A finding is an observation that may be worth checking, not a confirmed problem, and never says that the updated plugin caused it. There are no scores and no overall verdict; each finding has a fixed `priority` by its rule (see [Classification](#classification)).
 
 - `phase`: always `final`.
 - `status`: `evaluated` (every applicable signal evaluated, at least one), `partial` (some evaluated, some not), `not_evaluated` (none). A `not_applicable` signal does not count either way. An evaluated report with no findings has `findings: []` and `finding_count: 0`; a signal that could not be checked has `finding_count: null`.
 - `signals.<signal>` (`options`, `cron`, `action_scheduler`): `status` (`evaluated`, `not_evaluated`, or for Action Scheduler only `not_applicable`), `reason` (the reason of `phases.final.<signal>`, see the tables above, e.g. `settle_expired`, `awaiting_settle`, `malformed_cron_state`, `not_installed`, `data_corrupt`, `not_captured`; `null` if evaluated), `rules` (the rule codes that signal runs), `finding_count`.
 - **Action Scheduler `not_applicable`**: only when Action Scheduler is known to have been absent at all three captures (BEFORE, IMMEDIATE and SETTLED): every phase recorded absence at both of its captures. There was no Action Scheduler state whose recurring schedules could change. Its `reason` is `not_installed`. Anything else is `not_evaluated` with the Net result's reason: Action Scheduler appearing (`newly_detected`) or disappearing (`no_longer_detected`) during the observation, capture or read failures, corrupt data, expired, failed or open observations, and analyses recorded before absence was resolved per phase (their `not_installed` cannot show absence at every capture). `not_evaluated` with `not_installed` therefore means "not detected in the Net result, absence throughout not shown".
-- `findings`: ordered by signal (`options`, `cron`, `action_scheduler`), then rule, then subject (option name or hook, byte-wise; schedule changes in the diff's order). Every finding has `code`, `signal`, its subject (`option`, or `hook` and for Action Scheduler `group`), `evidence`, `before` and `after`. Field sets are fixed per code.
+- `findings`: ordered by signal (`options`, `cron`, `action_scheduler`), then rule, then subject (option name or hook, byte-wise; schedule changes in the diff's order). Every finding has `code`, `signal`, its subject (`option`, or `hook` and for Action Scheduler `group`), `evidence`, `before`, `after`, `records` and `priority`. Field sets are fixed per code.
+- `records`: the Net result records the finding covers, as `{list, index, role}`: `list` (`added`, `removed`, `changed`, `rescheduled`) and `index` point into `phases.final.<signal>` of the same response; `role` is `subject` (the change the finding is about) or `replacement` (`recurring_cron_event_removed` only: a recurring instance of the same hook added in the Net result, which the rule weighed against the removed ones). Records are never shared between findings. Clients mark these rows and never match rows to evidence themselves; the assessment counts the same records. Added later; additive.
 
 | `code`                         | Signal                     | When                                                                                                                                                                                                        |
 | ------------------------------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -450,7 +452,9 @@ Never included: option values, arguments, argument fingerprints, md5 event keys,
       "option": "acme_feed_cache",
       "evidence": { "transition": "became_autoloaded", "threshold_bytes": 150000, "size_delta": 0, "value_changed": false },
       "before": { "size": 182340, "autoload": "off", "is_autoloaded": false },
-      "after": { "size": 182340, "autoload": "on", "is_autoloaded": true }
+      "after": { "size": 182340, "autoload": "on", "is_autoloaded": true },
+      "records": [{ "list": "changed", "index": 0, "role": "subject" }],
+      "priority": "review"
     },
     {
       "code": "recurring_cron_event_removed",
@@ -463,12 +467,53 @@ Never included: option values, arguments, argument fingerprints, md5 event keys,
         "other_recorded_changes": { "added_one_time": 1, "rescheduled": 0, "changed": 0 }
       },
       "before": { "removed_recurring": [{ "timestamp": 1791223800, "schedule": "hourly", "interval": 3600 }] },
-      "after": { "added_recurring": [] }
+      "after": { "added_recurring": [] },
+      "records": [{ "list": "removed", "index": 0, "role": "subject" }],
+      "priority": "review"
     }
   ],
-  "site_checks": { "status": "not_applicable", "checks": { … }, "findings": [] }
+  "site_checks": { "status": "not_applicable", "checks": { … }, "findings": [] },
+  "assessment": {
+    "high_priority": 0,
+    "needs_review": 2,
+    "informational": 3,
+    "assessed_changes": 5,
+    "net_result": {
+      "options": { "changes": 3, "matched": 1, "informational": 2 },
+      "cron": { "changes": 2, "matched": 1, "informational": 1 },
+      "action_scheduler": null
+    },
+    "not_assessed": [],
+    "pending": []
+  }
 }
 ```
+
+#### Classification
+
+Every finding has a fixed `priority` by its rule (`PotentialImpact::PRIORITIES`), and `potential_impact.assessment` (`PotentialImpact::assess()`) summarizes the report. PHP is the only source of these classifications; clients display them and never recount them.
+
+| Classification | Meaning                                                                                                                                                                                                                                |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| High priority  | `priority: "high"`: confirmed evidence that an observed response stopped working: `site_check_newly_failing` (a verified pass before the update, a failure both requests confirmed after it). Only site check rules are high priority. |
+| Needs review   | `priority: "review"`: an evidence-based pattern worth a look: `large_autoloaded_option`, `recurring_cron_event_removed`, `recurring_schedule_changed`, `site_check_changed` (a new homepage redirect).                                 |
+| Informational  | Net result change records no finding covers: observed, no review rule matched. A count, never a finding and never "safe".                                                                                                              |
+| Not assessed   | Observations that could not be assessed (`not_assessed`), with their reason and category. Never a priority, never "no changes" or "passed".                                                                                            |
+
+- `high_priority`, `needs_review`: findings by priority (configuration and site check findings).
+- `net_result.<signal>`: for each configuration signal evaluated on the Net result, `changes` (its change records: one per entry of `added`, `removed`, `changed`, and `rescheduled` for WP-Cron and Action Scheduler; the same total as the phase's summary counts), `matched` (the distinct `records` of its findings) and `informational` (`changes - matched`); `null` for a signal that was not evaluated or is not applicable. Exact per record: a hook with two recurring instances removed and one re-added has 3 matched records, and a one-time instance of the same hook removed with them stays informational.
+- `informational`, `assessed_changes`: the sums of `informational` and `changes` over the evaluated signals; `null` when none was evaluated. In a `partial` evaluation they cover the evaluated signals only.
+- `not_assessed`: `[{type, name, reason, category}]`: `type` `signal` (`options`, `cron`, `action_scheduler`) or `site_check` (`home`, `rest`); `reason` the signal's Net result reason or the check's evaluation reason; `category`:
+
+| `category`     | Meaning                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `expired`      | The observation after the update was not captured within the settle window (`settle_expired`): the Net result and the checks after the update are missing. Missing does not mean unchanged. |
+| `not_recorded` | The report predates the source (`not_captured`, `not_recorded`): a historical gap.                                                                                                          |
+| `unavailable`  | The source could not be collected, stored, read or compared (capture or storage failures, unsupported or malformed state, corrupt data, Action Scheduler not confirmed absent throughout).  |
+| `not_compared` | A site check without a usable check before and after the update (missing, inconclusive, another update in between, not followed up, …); `reason` says which.                                |
+
+- `pending`: `[{type, name}]` still being observed: the Net result while the analysis is open, site checks whose result may still arrive.
+- Not applicable sources (Action Scheduler absent throughout, site checks turned off, unsupported or not recorded) are in neither list.
 
 #### `potential_impact.site_checks`
 
@@ -515,7 +560,7 @@ Opt-in site checks (`updatelens_site_checks` = `enabled`) observed by the updati
   - `reason`: `null` when compared or pending; for `not_run`: `baseline_missing`, `after_missing`; for `not_comparable`: `overlapping_update` (other updater activity after this update ended, before the AFTER result was accepted), `update_order_unknown` (the updater activity ledger could not rule that out), `definition_changed`, `target_changed`, `different_user`, `different_login_session`, `baseline_after_update_start`, `baseline_expired`, `after_during_update`, `before_inconclusive`, `after_inconclusive` (e.g. a failure followed by a passing retry, maintenance mode, a cached page, a firewall), `redirected_both`.
   - `before` and `after`: `available`, `reason`, `started_at` / `completed_at` (the run's session start and the server's acceptance of its report, UTC, whole seconds), `result` (`verdict`: `pass`, `fail`, `redirect`, `inconclusive`; its `reason`; and per attempt the browser-observed facts: `outcome`, `status`, `duration_ms`, the marker codes `header` and `end_marker` (homepage) or `body` and `error_code` (REST), `origin`, the attempt's own `verdict` and `reason`), plus `before.age_seconds` (baseline age when the update started) and `after.delay_seconds` (from the settled observation to the AFTER run).
   - `before.reason` without a result: `disabled`, `no_login_session`, `cross_origin` (the check's target is on another origin — scheme, host or port — than wp-admin, so the browser cannot run it on this site; never a pass), `update_order_unknown`, `overlapping_update`, `missing`, `corrupt`, `definition_changed`, `target_changed`, `not_completed_before_update`, `expired`, `taken_during_update`, `intervening_update` (another update since the baseline, e.g. queued updates), `selection_failed`, `not_captured` (recorded before site checks), `data_corrupt`, `unknown`.
-  - `after.reason` without a result: `no_baseline` (nothing to compare with, so not run), `analysis_ended` (failed, abandoned or incompatible), `settle_expired`, `not_followed_up` (settled by a later page or the next update, not the browser's follow-up), `not_started` (the AFTER run never started in time: tab closed, request failed, site checks turned off), `not_reported` (started, no result accepted before its session ended: tab closed, site or admin-ajax unreachable), `overlapping_update` / `update_order_unknown` (seen at the AFTER start; nothing ran), `rate_limited`, `session_failed`, `not_captured`, `data_corrupt`, `unknown`. With a result, `after.reason` is `null`, or `overlapping_update` / `update_order_unknown`: the facts are shown, the check is not compared.
+  - `after.reason` without a result: `no_baseline` (nothing to compare with, so not run), `analysis_ended` (failed, abandoned or incompatible), `settle_expired`, `next_update` (another plugin update started right after this one: a second "Update now" queued behind it, or a bulk update, so the observation ended there and no check could run after this update alone), `not_followed_up` (settled by a later page load, not the browser's follow-up: the update ran from Dashboard → Updates, the page was left while it was updating, or the follow-up request did not arrive), `not_started` (the AFTER run never started in time: tab closed, request failed, site checks turned off), `not_reported` (started, no result accepted before its session ended: tab closed, site or admin-ajax unreachable), `overlapping_update` / `update_order_unknown` (seen at the AFTER start; nothing ran), `rate_limited`, `session_failed`, `not_captured`, `data_corrupt`, `unknown`. With a result, `after.reason` is `null`, or `overlapping_update` / `update_order_unknown`: the facts are shown, the check is not compared.
 
 A homepage that answers HTTP 500 twice after the update (REST unchanged; the REST check is shortened here as `{…}`, its sides have the same shape):
 

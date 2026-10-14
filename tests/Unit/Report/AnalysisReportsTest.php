@@ -264,6 +264,7 @@ final class AnalysisReportsTest extends TestCase {
 						)
 					),
 				),
+				'high_priority'     => 0,
 			),
 			$history['items'][0]
 		);
@@ -1081,7 +1082,7 @@ final class AnalysisReportsTest extends TestCase {
 		$this->cron_update( self::cron_before(), self::cron_immediate(), self::cron_settled() );
 		$items = $this->reports()->history( 1, 20 )['items'];
 
-		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'error', 'has_during_update', 'has_post_update', 'has_final', 'phases', 'site_checks' ), array_keys( $items[1] ) );
+		$this->assertSame( array( 'id', 'plugin', 'status', 'settle_outcome', 'timestamps', 'error', 'has_during_update', 'has_post_update', 'has_final', 'phases', 'site_checks', 'high_priority' ), array_keys( $items[1] ) );
 		$this->assertTrue( $items[1]['has_final'], 'Flags describe the options signal.' );
 		$this->assertSame(
 			array(

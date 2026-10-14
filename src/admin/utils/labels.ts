@@ -540,7 +540,7 @@ export function unavailableReasonText(
 			};
 		case 'settle_expired':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Observation expired', 'updatelens' ),
 				description: sprintf(
 					/* translators: %s: observation window length, e.g. "5 minutes". */
 					__(
@@ -640,7 +640,7 @@ export function cronUnavailableReasonText(
 			};
 		case 'settle_expired':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Observation expired', 'updatelens' ),
 				description: sprintf(
 					/* translators: %s: observation window length, e.g. "5 minutes". */
 					__(
@@ -660,7 +660,7 @@ export function cronUnavailableReasonText(
 			};
 		case 'not_captured':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Not recorded for this report', 'updatelens' ),
 				description: __(
 					'WP-Cron was not captured for this phase.',
 					'updatelens'
@@ -848,7 +848,7 @@ export function actionSchedulerUnavailableReasonText(
 			};
 		case 'settle_expired':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Observation expired', 'updatelens' ),
 				description: sprintf(
 					/* translators: %s: observation window length, e.g. "5 minutes". */
 					__(
@@ -868,7 +868,7 @@ export function actionSchedulerUnavailableReasonText(
 			};
 		case 'not_captured':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Not recorded for this report', 'updatelens' ),
 				description: __(
 					'Action Scheduler was not captured for this phase.',
 					'updatelens'
@@ -1090,21 +1090,29 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 	switch ( report.status ) {
 		case 'completed': {
 			if ( report.settle_outcome === 'expired' ) {
+				// The one full explanation of a partial report; the other
+				// sections only refer to it.
 				return {
 					...base,
 					tone: 'caution',
 					title: __(
-						'Post-update observation expired',
+						'Partial report: the observation after the update expired',
 						'updatelens'
 					),
 					description: sprintf(
 						/* translators: %s: observation window length, e.g. "5 minutes". */
 						__(
-							'The update itself was analyzed, but no eligible admin request occurred within %s of the update.',
+							'The update completed and the changes during it were recorded. To capture the state after it, UpdateLens needs a request from the browser that ran the update, or another admin page, within %s, and none arrived in time.',
 							'updatelens'
 						),
 						windowLength
 					),
+					details: [
+						__(
+							'So the After update and Net result phases, the review rules and the site checks after the update are missing. Missing does not mean unchanged.',
+							'updatelens'
+						),
+					],
 				};
 			}
 			const outcome = settleOutcomeText(

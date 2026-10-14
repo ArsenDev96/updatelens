@@ -70,6 +70,7 @@ const BECAME_AUTOLOADED = {
 
 export const LARGE_ADDED: LargeAutoloadedOptionFinding = {
 	code: 'large_autoloaded_option',
+	records: [],
 	signal: 'options',
 	priority: 'review',
 	option: 'acme_feed_index',
@@ -85,6 +86,7 @@ export const LARGE_ADDED: LargeAutoloadedOptionFinding = {
 
 export const LARGE_BECAME: LargeAutoloadedOptionFinding = {
 	code: 'large_autoloaded_option',
+	records: [],
 	signal: 'options',
 	priority: 'review',
 	option: 'acme_feed_cache',
@@ -100,6 +102,7 @@ export const LARGE_BECAME: LargeAutoloadedOptionFinding = {
 
 export const CRON_REMOVED: RecurringCronEventRemovedFinding = {
 	code: 'recurring_cron_event_removed',
+	records: [],
 	signal: 'cron',
 	priority: 'review',
 	hook: 'acme_sync_feeds',
@@ -123,6 +126,7 @@ export const CRON_REMOVED: RecurringCronEventRemovedFinding = {
 
 export const CRON_INTERVAL: CronScheduleChangedFinding = {
 	code: 'recurring_schedule_changed',
+	records: [],
 	signal: 'cron',
 	priority: 'review',
 	hook: 'acme_cleanup',
@@ -143,6 +147,7 @@ export const CRON_INTERVAL: CronScheduleChangedFinding = {
 
 export const AS_TYPE_CHANGED: ActionScheduleChangedFinding = {
 	code: 'recurring_schedule_changed',
+	records: [],
 	signal: 'action_scheduler',
 	priority: 'review',
 	hook: WPFORMS_SUMMARIES.hook,
@@ -415,6 +420,7 @@ export function cronChangeFinding(
 ): CronScheduleChangedFinding {
 	return {
 		code: 'recurring_schedule_changed',
+		records: [],
 		signal: 'cron',
 		priority: 'review',
 		hook: change.hook,

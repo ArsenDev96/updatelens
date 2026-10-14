@@ -395,7 +395,7 @@ describe( 'report clarity', () => {
 			// Rescheduled stays visible, quietly: no warning wording.
 			const rescheduled = section( 'Rescheduled (2)' );
 			expect( rescheduled ).toHaveTextContent( 'wordfence_daily_cron' );
-			expect( rescheduled ).toHaveTextContent( '(−1 day)' );
+			expect( rescheduled ).toHaveTextContent( '(1 day earlier)' );
 			expect( signalPanel() ).not.toHaveTextContent( /warning|problem/i );
 		} );
 

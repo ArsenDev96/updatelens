@@ -1024,7 +1024,7 @@ function notUsedText(
 				),
 			}
 		: {
-				status: __( 'Not captured', 'updatelens' ),
+				status: __( 'Not recorded', 'updatelens' ),
 				detail: __(
 					'This update was observed before UpdateLens recorded site checks.',
 					'updatelens'
@@ -1259,7 +1259,7 @@ export function afterReasonText( reason: string ): string {
 			);
 		case 'settle_expired':
 			return __(
-				'The observation after the update was not captured in time, so there was no check after it.',
+				'The observation after the update expired, so no check ran after it.',
 				'updatelens'
 			);
 		case 'next_update':

@@ -36,7 +36,7 @@ Not implemented (needs a decision): AFTER checks for Dashboard → Updates (the 
 - `PotentialImpact::assess()` → `potential_impact.assessment` (additive API field): `high_priority`, `needs_review`, `informational` (Net result changes no finding covers: summary record counts minus the records each finding is about; `null` when nothing was evaluated; never "safe"), `not_assessed` (signals and site checks `not_evaluated`, with reason), `pending` (still observing / AFTER may still arrive). `not_applicable` (Action Scheduler absent throughout, site checks off/unsupported/not recorded) is in neither list.
 - Rescheduling (e.g. a WP-Cron next run moved by one minute) is informational, never a finding.
 - Changed tests: `tests/Unit/Report/PotentialImpactAssessmentTest.php` (new), priority added to expected findings, `tests/fixtures/site-check-impact-cases.json` regenerated (only `priority` added).
-- CLAUDE.md still says "no severities" in Potential Impact rules: **update it once the model is approved.**
+- Approved in principle (2026-10-14); CLAUDE.md and `docs/rest-api.md` now describe it (see section 6).
 
 ## 3. Report redesign (state)
 
@@ -66,3 +66,22 @@ Not done: axe accessibility scan of the new views (the scan script was interrupt
 4. Decide on Dashboard → Updates AFTER coverage and the follow-up memory raise (section 1).
 5. Confirm on the real site which case ended the Duplicate Post report (Technical details → observation outcome).
 6. Only after approval: rebuild and revalidate a release ZIP (the current validated ZIP predates this work).
+
+## 6. Review fixes (2026-10-14, uncommitted on top of `c09091c`)
+
+From the visual review (`E:\updatelens-review\2026-10-14-report-ux\REVIEW.md`; before/after in `round2/`):
+
+- **Count disagreement fixed.** PHP's informational count was already exact; the signal page recomputed it in React (`count − rows located by evidence`), which missed a removed hook's re-added recurring instances (2 removed + 1 re-added: overview 1 informational, signal page 2). Now every configuration finding names its Net result records (`records`: list, index, role `subject`/`replacement`), `assess()` counts distinct records per signal (`assessment.net_result`, `assessed_changes`), and the signal page only displays those numbers and marks those records (`utils/highlight.ts` no longer matches evidence). Regression tests in PHP and Vitest.
+- **Partial reports**: one full explanation in the status line ("Partial report: the observation after the update expired" …, "Missing does not mean unchanged"); the summary, Findings, Site checks and coverage only refer to it. `settle_expired` reads "Observation expired", `not_captured` "Not recorded for this report" (no longer both "Not captured").
+- **Not assessed**: `not_assessed` entries carry a PHP `category` (`expired`, `not_recorded`, `unavailable`, `not_compared`); the summary row lists one line per category, site checks included ("Site checks not compared: Homepage and REST API (no check after the update)"). Historical gaps are no longer amber in the coverage line.
+- **Cleanup**: priority badge only for High priority or a mixed list, no "1" count pill; "Passed before and after" / "Failed before and after" in the table as in the summary; a new redirect is amber like its finding; the newly failing row no longer repeats HTTP 500; "Inspect changes" only with changes; schedule shifts in whole units ("about 1 hour later").
+- **History**: a rose "1 high priority" badge from the API's `high_priority` (site check evaluation only; a test fails if a configuration rule becomes high priority).
+
+Checks at this commit (PHP 8.1.10 locally): PHPUnit 1612 tests OK, PHPCS clean, `npm run check` clean, Vitest 733 passed. Screenshots (before/after at 1440, 390, 768 and 320 px) and `REVIEW-ROUND2.md` are outside the repository (`E:\updatelens-review\2026-10-14-report-ux\round2\`, ZIP `updatelens-report-ux-round2-2026-10-14.zip`).
+
+Still open after the review fixes (waiting for approval):
+
+1. "Not compared" is said in the summary, in both table rows and in the shared sentence; possibly one line when both checks share a reason.
+2. The partial report's status line is 8 lines at 390 px; possibly move its second sentence behind a disclosure.
+3. Not done: axe scan, keyboard walkthrough, WordPress 6.2 / PHP 7.4 run (PHPUnit on PHP 7.4 too), `.pot` regeneration.
+4. Section 5 items 4–6 (Dashboard → Updates AFTER coverage, follow-up memory raise, the real Duplicate Post site, a new release ZIP only after approval).

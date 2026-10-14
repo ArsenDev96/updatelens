@@ -5,7 +5,7 @@
  * `locale` and `timeZone` default to the browser's; tests pass fixed values.
  * Words (duration units) come from UpdateLens translations, not from `locale`.
  */
-import { _n, sprintf } from '@wordpress/i18n';
+import { __, _n, sprintf } from '@wordpress/i18n';
 
 const BYTE_UNITS = [ 'B', 'KB', 'MB', 'GB', 'TB' ];
 
@@ -240,6 +240,44 @@ export function formatDurationDelta(
 		return null;
 	}
 	return ( seconds > 0 ? '+' : MINUS ) + formatDuration( seconds, locale );
+}
+
+/**
+ * How far a scheduled time moved, for a sentence: whole units with the
+ * direction ("1 hour later", "2 minutes earlier"), and "about" when the
+ * movement was rounded ("about 1 hour later" for 59 min 28 s). A unit counts
+ * from 95 % of its length. Null for no movement.
+ *
+ * @param seconds Signed seconds (after - before).
+ * @param locale  Locale for the number.
+ */
+export function formatShift( seconds: number, locale?: string ): string | null {
+	if ( seconds === 0 ) {
+		return null;
+	}
+	const value = Math.abs( seconds );
+	const [ unit, size ] = DURATION_UNITS.find(
+		( [ , length ] ) => value >= length * 0.95
+	) ?? [ 'second', 1 ];
+	const count = Math.max( 1, Math.round( value / size ) );
+	const amount = durationUnitText(
+		unit,
+		count,
+		new Intl.NumberFormat( locale ).format( count )
+	);
+	const exact = count * size === value;
+	if ( seconds > 0 ) {
+		return exact
+			? /* translators: %s: duration, e.g. "1 hour". */
+				sprintf( __( '%s later', 'updatelens' ), amount )
+			: /* translators: %s: rounded duration, e.g. "1 hour". */
+				sprintf( __( 'about %s later', 'updatelens' ), amount );
+	}
+	return exact
+		? /* translators: %s: duration, e.g. "1 hour". */
+			sprintf( __( '%s earlier', 'updatelens' ), amount )
+		: /* translators: %s: rounded duration, e.g. "1 hour". */
+			sprintf( __( 'about %s earlier', 'updatelens' ), amount );
 }
 
 /**

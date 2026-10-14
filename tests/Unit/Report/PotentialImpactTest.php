@@ -490,6 +490,13 @@ final class PotentialImpactTest extends TestCase {
 						'autoload'      => 'on',
 						'is_autoloaded' => true,
 					),
+					'records'  => array(
+						array(
+							'list'  => 'added',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
 					'priority' => 'review',
 				),
 			),
@@ -635,6 +642,13 @@ final class PotentialImpactTest extends TestCase {
 						'autoload'      => 'on',
 						'is_autoloaded' => true,
 					),
+					'records'  => array(
+						array(
+							'list'  => 'changed',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
 					'priority' => 'review',
 				),
 			),
@@ -758,6 +772,13 @@ final class PotentialImpactTest extends TestCase {
 						),
 					),
 					'after'    => array( 'added_recurring' => array() ),
+					'records'  => array(
+						array(
+							'list'  => 'removed',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
 					'priority' => 'review',
 				),
 			),
@@ -1071,6 +1092,13 @@ final class PotentialImpactTest extends TestCase {
 						'interval'     => 3600,
 						'is_recurring' => true,
 					),
+					'records'  => array(
+						array(
+							'list'  => 'changed',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
 					'priority' => 'review',
 				),
 			),
@@ -1143,6 +1171,13 @@ final class PotentialImpactTest extends TestCase {
 						'interval'        => 86400,
 						'cron_expression' => null,
 						'is_recurring'    => true,
+					),
+					'records'  => array(
+						array(
+							'list'  => 'changed',
+							'index' => 0,
+							'role'  => 'subject',
+						),
 					),
 					'priority' => 'review',
 				),
@@ -1464,10 +1499,10 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertSame( array( 'phase', 'status', 'signals', 'findings' ), array_keys( $result ) );
 		$this->assertSame(
 			array(
-				array( 'code', 'signal', 'option', 'evidence', 'before', 'after', 'priority' ),
-				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after', 'priority' ),
-				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after', 'priority' ),
-				array( 'code', 'signal', 'hook', 'group', 'evidence', 'before', 'after', 'priority' ),
+				array( 'code', 'signal', 'option', 'evidence', 'before', 'after', 'records', 'priority' ),
+				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after', 'records', 'priority' ),
+				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after', 'records', 'priority' ),
+				array( 'code', 'signal', 'hook', 'group', 'evidence', 'before', 'after', 'records', 'priority' ),
 			),
 			array_map( 'array_keys', $result['findings'] )
 		);

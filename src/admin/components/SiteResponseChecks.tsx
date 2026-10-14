@@ -239,7 +239,13 @@ export function SiteResponseChecks( {
 								check={ check }
 								comparison={ comparison }
 								text={
-									shared ? { ...text, detail: null } : text
+									// A shared reason is said once below; a newly
+									// failing check's sentence would repeat its After
+									// cell (the requests are in its details).
+									shared ||
+									comparison.state === 'newly_failing'
+										? { ...text, detail: null }
+										: text
 								}
 								result={ siteCheckResultLabel(
 									comparison,

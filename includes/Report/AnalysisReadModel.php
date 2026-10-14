@@ -187,7 +187,9 @@ final class AnalysisReadModel {
 	 * (`has_changes`, null if not recorded). Only the report decodes diffs,
 	 * so it alone can find a stored diff unreadable. `site_checks` is the
 	 * report's site check evaluation (`potential_impact.site_checks` without
-	 * `findings`), computed from the same stored results on every read.
+	 * `findings`), computed from the same stored results on every read, and
+	 * `high_priority` the report's `potential_impact.assessment.high_priority`
+	 * (only site check rules are high priority).
 	 *
 	 * @param array<string, mixed> $row Analysis row.
 	 * @return array<string, mixed>
@@ -213,6 +215,9 @@ final class AnalysisReadModel {
 			'status' => $site_checks['status'],
 			'checks' => $site_checks['checks'],
 		);
+		// The report's `assessment.high_priority`: only site check rules are
+		// high priority, so no diff has to be decoded for it.
+		$item['high_priority'] = PotentialImpact::site_check_high_priority( $site_checks );
 
 		return $item;
 	}

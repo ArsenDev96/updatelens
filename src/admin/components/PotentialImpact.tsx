@@ -159,6 +159,14 @@ export function PotentialImpact( {
 	const reviewSite = siteFindings.filter(
 		( finding ) => finding.priority !== 'high'
 	);
+	// A "Needs review" badge on every row would only repeat the summary;
+	// it is shown when the list mixes priorities. High priority always is.
+	const mixed =
+		new Set(
+			[ ...impact.findings, ...siteFindings ].map(
+				( finding ) => finding.priority
+			)
+		).size > 1;
 	const setVisible = ( key: string, visible: number | null ) => {
 		const open = { ...view.open };
 		if ( visible === null ) {
@@ -177,6 +185,7 @@ export function PotentialImpact( {
 				key={ key }
 				finding={ finding }
 				onShowSiteCheck={ onShowSiteCheck }
+				showPriority={ mixed || finding.priority === 'high' }
 				expanded={ expanded }
 				onToggle={ () =>
 					setVisible(
@@ -227,6 +236,9 @@ export function PotentialImpact( {
 							indexes={ indexes }
 							findingHref={ findingHref }
 							onOpenFinding={ onOpenFinding }
+							showPriority={
+								mixed || group.findings[ 0 ].priority === 'high'
+							}
 						/>
 					) ) }
 					{ reviewSite.map( ( finding ) => siteItem( finding ) ) }
@@ -442,6 +454,7 @@ function CheckedRow( {
  * @param props.indexes         Position of each finding in the API's list.
  * @param props.findingHref     Link target of a finding's signal details.
  * @param props.onOpenFinding   Opens a finding's signal details in the app.
+ * @param props.showPriority    Whether its priority badge is shown.
  */
 function FindingGroupItem( {
 	group,
@@ -450,6 +463,7 @@ function FindingGroupItem( {
 	indexes,
 	findingHref,
 	onOpenFinding,
+	showPriority,
 }: {
 	group: FindingGroup;
 	visible: number | null;
@@ -457,6 +471,7 @@ function FindingGroupItem( {
 	indexes: ReadonlyMap< ImpactFinding, number >;
 	findingHref: ( finding: ImpactFinding ) => string;
 	onOpenFinding: ( finding: ImpactFinding ) => void;
+	showPriority: boolean;
 } ) {
 	const { names, more } = groupSubjects( group );
 
@@ -464,6 +479,7 @@ function FindingGroupItem( {
 		<CompactRow
 			icon={ group.signal }
 			priority={ group.findings[ 0 ].priority }
+			showPriority={ showPriority }
 			title={ findingGroupTitle( group ) }
 			count={ group.findings.length }
 			source={
@@ -533,22 +549,26 @@ function FindingGroupItem( {
  * @param props.expanded        Whether it is expanded.
  * @param props.onToggle        Expands or collapses it.
  * @param props.onShowSiteCheck Opens the check in "Site response checks".
+ * @param props.showPriority    Whether its priority badge is shown.
  */
 function SiteCheckFindingItem( {
 	finding,
 	expanded,
 	onToggle,
 	onShowSiteCheck,
+	showPriority,
 }: {
 	finding: SiteCheckFinding;
 	expanded: boolean;
 	onToggle: () => void;
 	onShowSiteCheck: ( check: SiteCheckId ) => void;
+	showPriority: boolean;
 } ) {
 	return (
 		<CompactRow
 			icon="site_checks"
 			priority={ finding.priority }
+			showPriority={ showPriority }
 			title={ siteCheckFindingTitle( finding ) }
 			count={ 1 }
 			buttonId={ siteCheckFindingButtonId( finding.check ) }
@@ -617,7 +637,8 @@ function SiteCheckFindingItem( {
  *
  * @param props          Props.
  * @param props.icon     Icon of the source.
- * @param props.priority Priority from the API.
+ * @param props.priority     Priority from the API (always in the accessible name).
+ * @param props.showPriority Whether the priority badge is shown.
  * @param props.title    Title.
  * @param props.count    Number of findings.
  * @param props.source   Source line (signal and subjects).
@@ -630,6 +651,7 @@ function SiteCheckFindingItem( {
 function CompactRow( {
 	icon,
 	priority,
+	showPriority,
 	title,
 	count,
 	buttonId,
@@ -641,6 +663,7 @@ function CompactRow( {
 }: {
 	icon: IconName;
 	priority: FindingPriority;
+	showPriority: boolean;
 	title: string;
 	count: number;
 	buttonId?: string;
@@ -680,10 +703,13 @@ function CompactRow( {
 					<Icon name={ icon } className="size-[1.125rem]" />
 				</span>
 				<div className="min-w-0 flex-1">
-					<PriorityBadge priority={ priority } />
+					{ showPriority && <PriorityBadge priority={ priority } /> }
 					<h4
 						id={ titleId }
-						className="mt-1 text-[15px] font-semibold leading-6 text-slate-900"
+						className={ cn(
+							'text-[15px] font-semibold leading-6 text-slate-900',
+							showPriority && 'mt-1'
+						) }
 					>
 						<button
 							type="button"
@@ -695,12 +721,15 @@ function CompactRow( {
 							className="text-left after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-ring"
 						>
 							{ title }
-							<span
-								aria-hidden="true"
-								className="ml-2 inline-flex min-w-6 justify-center rounded-full bg-slate-100 px-2 align-[1px] text-xs font-semibold tabular-nums leading-5 text-slate-700"
-							>
-								{ formatCount( count ) }
-							</span>
+							{ /* One finding needs no count. */ }
+							{ count > 1 && (
+								<span
+									aria-hidden="true"
+									className="ml-2 inline-flex min-w-6 justify-center rounded-full bg-slate-100 px-2 align-[1px] text-xs font-semibold tabular-nums leading-5 text-slate-700"
+								>
+									{ formatCount( count ) }
+								</span>
+							) }
 							<span className="sr-only">
 								{ ', ' }
 								{ sprintf(

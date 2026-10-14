@@ -16,6 +16,7 @@ import {
 	EXPIRED,
 	FAILED,
 	MALFORMED_CRON,
+	PRE_CRON,
 	withSiteCheckCase,
 } from './fixtures';
 import {
@@ -115,7 +116,7 @@ describe( 'Report summary', () => {
 		// No findings is worded by completeness; the changes no rule matched
 		// are informational, never "safe".
 		expect( rows().Findings ).toMatch(
-			/^No findings matched the completed observations\.\d+ observed changes? matched no review rule \(informational\)\.$/
+			/^No findings matched the completed observations\.\d+ of \d+ configuration changes? in the Net result matched no review rule \(informational\)\.$/
 		);
 		expect( rows().Configuration ).toMatch(
 			/^\d+ changes? observedNet result · /
@@ -234,7 +235,7 @@ describe( 'Report summary', () => {
 	it( 'checks that were not compared: no findings is not "no problems"', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'no_baseline' ) );
 		expect( rows().Findings ).toMatch(
-			/^No findings in completed observations; some checks were unavailable\./
+			/^No findings in the completed observations; some observations were not assessed\./
 		);
 	} );
 
@@ -266,18 +267,59 @@ describe( 'Report summary', () => {
 		);
 	} );
 
+	it.each( [
+		[
+			'no_baseline',
+			'Site checks not compared: Homepage and REST API (no check before the update)',
+		],
+		[
+			'after_not_reported',
+			'Site checks not compared: Homepage and REST API (no check after the update)',
+		],
+	] as Array< [ CaseName, string ] > )(
+		'%s: names the site checks that were not compared, apart from the priorities',
+		async ( name, line ) => {
+			await renderReport( withSiteChecks( COMPLETED, name ) );
+			expect( rows()[ 'Not assessed' ] ).toBe( line );
+			expect( rows().Findings ).not.toMatch( /priority|needs? review/ );
+			// Why is said once, in the Site checks section.
+			expect( rows()[ 'Site checks' ] ).toBe( 'Not compared' );
+		}
+	);
+
+	it( 'a historical report: sources it predates are not recorded, not unavailable', async () => {
+		await renderReport( PRE_CRON );
+		expect( rows()[ 'Not assessed' ] ).toMatch(
+			/^Not recorded for this report: WP-Cron/
+		);
+		expect( rows()[ 'Not assessed' ] ).not.toMatch(
+			/expired|unavailable/i
+		);
+		// The coverage line names the historical gap, without a warning.
+		const coverage = screen.getByRole( 'region', {
+			name: 'Configuration changes',
+		} );
+		expect( coverage ).toHaveTextContent(
+			'WP-Cron not recorded for this report'
+		);
+		expect( coverage ).not.toHaveTextContent( /not available/ );
+	} );
+
 	it( 'an expired observation: no Net result, and what was not assessed', async () => {
 		await renderReport( EXPIRED );
 		expect( rows().Configuration ).toMatch(
 			/^Net result not availableDuring update: \d+ changes?$/
 		);
-		expect( rows().Findings ).toBe( 'Not available for this report' );
-		expect( rows()[ 'Not assessed' ] ).toMatch( /^Options & autoload: / );
+		expect( rows().Findings ).toBe( 'Not assessed in this partial report' );
+		// One line naming what expired; why is in the status at the top.
+		expect( rows()[ 'Not assessed' ] ).toMatch(
+			/^Observation expired: Options & autoload and WP-Cron$/
+		);
 		// The configuration section says what was observed.
 		expect(
 			screen.getByRole( 'region', { name: 'Configuration changes' } )
 		).toHaveTextContent(
-			'Observed during the update only: the state after it was not captured in time.'
+			'During update only: the observation after the update expired.'
 		);
 	} );
 

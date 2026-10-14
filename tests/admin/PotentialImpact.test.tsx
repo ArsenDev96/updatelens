@@ -1,5 +1,5 @@
 import apiFetch from '@wordpress/api-fetch';
-import { screen, within } from '@testing-library/react';
+import { cleanup, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,7 +56,7 @@ import {
 	manyFindings,
 	ONE_FINDING,
 } from './impact-fixtures';
-import { openReport, tab } from './report-view';
+import { openReport, phasePanel, tab } from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
@@ -199,9 +199,9 @@ describe( 'Potential Impact', () => {
 				.map( ( button ) => button.textContent )
 		).toEqual( [
 			'Large autoloaded options2, 2 findings, Needs review',
-			'Recurring WP-Cron event no longer observed1, 1 finding, Needs review',
-			'Recurring WP-Cron schedule changed1, 1 finding, Needs review',
-			'Recurring Action Scheduler schedule changed1, 1 finding, Needs review',
+			'Recurring WP-Cron event no longer observed, 1 finding, Needs review',
+			'Recurring WP-Cron schedule changed, 1 finding, Needs review',
+			'Recurring Action Scheduler schedule changed, 1 finding, Needs review',
 		] );
 		expect(
 			screen.getByRole( 'button', {
@@ -364,7 +364,7 @@ describe( 'Potential Impact', () => {
 			'Checked · 2 findings',
 			'Checked · 1 finding',
 			// Recorded before site checks: one quiet row, not a warning.
-			'Not captured · This update was observed before UpdateLens recorded site checks.',
+			'Not recorded · This update was observed before UpdateLens recorded site checks.',
 		] );
 		expect( details ).toHaveTextContent(
 			'WP-Cron: recurring events no longer observed, and recurring schedules that changed.'
@@ -499,7 +499,7 @@ describe( 'Potential Impact', () => {
 				name: 'Located from Potential Impact',
 			} )
 		).toHaveTextContent(
-			'The exact entry of this finding could not be identified'
+			'This link no longer matches a finding of the report'
 		);
 	} );
 
@@ -625,8 +625,9 @@ describe( 'Potential Impact', () => {
 			);
 		} );
 
-		it( 'marks alike entries neutrally when the finding cannot tell them apart', async () => {
-			// Two events of one hook that differ only in their arguments.
+		it( 'highlights the entry the API names, even among entries that look alike', async () => {
+			// Two events of one hook that differ only in their arguments: the
+			// API names each finding's own record, so nothing is guessed.
 			const first = cronChange(
 				'acme_cleanup',
 				T + 600,
@@ -638,25 +639,26 @@ describe( 'Potential Impact', () => {
 				cronChangeFinding( first ),
 				cronChangeFinding( second ),
 			] );
+			expect(
+				report.potential_impact.findings.map(
+					( finding ) => finding.records[ 0 ].index
+				)
+			).toEqual( [ 0, 1 ] );
 			await renderReport( report, {
 				signal: 'cron',
 				phase: 'final',
 				item: 'acme_cleanup',
 				kind: 'changed',
-				finding: 0,
+				finding: 1,
 			} );
 
 			const rows = marked();
-			expect( rows ).toHaveLength( 2 );
-			for ( const row of rows ) {
-				expect( row.precision ).toBe( 'group' );
-				expect( row.text ).toContain( 'Same hook as the finding' );
-				expect( row.text ).not.toContain( 'From Findings' );
-			}
+			expect( rows ).toHaveLength( 1 );
+			expect( rows[ 0 ].precision ).toBe( 'exact' );
+			expect( rows[ 0 ].text ).toContain( 'From Findings' );
 			expect( notice() ).toHaveTextContent(
-				'2 entries of this hook match this finding. Arguments are not shown, so UpdateLens cannot tell which one the finding refers to'
+				'Showing the Net result with the entry of this finding highlighted: acme_cleanup'
 			);
-			expect( notice().textContent ).not.toMatch( /highlighted/ );
 		} );
 
 		it( 'highlights the removed recurring entries the finding counts, not other rows of the hook', async () => {
@@ -719,6 +721,75 @@ describe( 'Potential Impact', () => {
 			);
 		} );
 
+		it( 'regression: two instances removed and one re-added count the same on the overview and the signal page', async () => {
+			// The API names the records: both removed recurring instances
+			// (subjects) and the re-added one (a replacement it weighed). A
+			// one-time instance of the same hook is not covered.
+			const removed = [
+				recurring( 'acme_sync_feeds', T, 'hourly', 3600 ),
+				recurring( 'acme_sync_feeds', T + 60, 'hourly', 3600 ),
+				oneTime( 'acme_sync_feeds', T + 120 ),
+			];
+			const added = [
+				recurring( 'acme_sync_feeds', T + 200, 'hourly', 3600 ),
+			];
+			const finding: RecurringCronEventRemovedFinding = {
+				...CRON_REMOVED,
+				evidence: {
+					...CRON_REMOVED.evidence,
+					removed_recurring_count: 2,
+					added_recurring_count: 1,
+					not_replaced_count: 1,
+				},
+				records: [
+					{ list: 'removed', index: 0, role: 'subject' },
+					{ list: 'removed', index: 1, role: 'subject' },
+					{ list: 'added', index: 0, role: 'replacement' },
+				],
+			};
+			const report = cronFinal( { added, removed }, [ finding ] );
+			const { assessment } = report.potential_impact;
+			expect( assessment.net_result.cron ).toEqual( {
+				changes: 4,
+				matched: 3,
+				informational: 1,
+			} );
+
+			// Overview: the API's totals, never recounted.
+			await renderReport( report );
+			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+				`${ assessment.informational } of ${ assessment.assessed_changes } configuration changes in the Net result matched no review rule (informational).`
+			);
+
+			cleanup();
+			// Signal page: the same records, marked and counted.
+			await renderReport( report, { signal: 'cron', phase: 'final' } );
+			expect(
+				screen.getByText(
+					'Review rules matched 3 changes; they are marked below. 1 other change matched no rule (informational).'
+				)
+			).toBeInTheDocument();
+			const rowsOf = ( name: string ) =>
+				within(
+					within( phasePanel() ).getByRole( 'region', { name } )
+				).getAllByRole( 'listitem' );
+			// Both removed recurring instances are the finding's subjects…
+			expect(
+				rowsOf( 'Removed (2)' ).map( ( row ) =>
+					row.textContent?.includes(
+						'Needs reviewRecurring WP-Cron event no longer observed'
+					)
+				)
+			).toEqual( [ true, true ] );
+			// …the one-time instance of the same hook is informational.
+			expect(
+				rowsOf( 'No longer scheduled (1)' )[ 0 ]
+			).not.toHaveTextContent( 'Needs review' );
+			expect( rowsOf( 'Added (1)' )[ 0 ] ).toHaveTextContent(
+				'Counted as a replacement in: Recurring WP-Cron event no longer observed'
+			);
+		} );
+
 		it( 'keeps a long list navigable: expanded, marked, keyboard clearable', async () => {
 			const user = userEvent.setup();
 			const others = Array.from( { length: 12 }, ( _, i ) =>
@@ -747,7 +818,7 @@ describe( 'Potential Impact', () => {
 				finding: 12,
 			} );
 
-			expect( marked() ).toHaveLength( 2 );
+			expect( marked() ).toHaveLength( 1 );
 			expect(
 				screen.getByRole( 'button', {
 					name: 'Show fewer changed events',
@@ -807,7 +878,7 @@ describe( 'Potential Impact', () => {
 				'Checked · 1 finding',
 				'Not applicable · Action Scheduler was not detected during this update.',
 				// Recorded before site checks: one quiet row, not a warning.
-				'Not captured · This update was observed before UpdateLens recorded site checks.',
+				'Not recorded · This update was observed before UpdateLens recorded site checks.',
 			] );
 			// Not applicable is not "not assessed".
 			expect( notAssessed() ).toBeNull();
@@ -844,7 +915,7 @@ describe( 'Potential Impact', () => {
 			await renderReport( MALFORMED_CRON );
 
 			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				'No findings in completed observations; some checks were unavailable.'
+				'No findings in the completed observations; some observations were not assessed.'
 			);
 			// Kept apart from the priorities, with its reason.
 			expect( notAssessed() ).toHaveTextContent(
@@ -905,7 +976,7 @@ describe( 'Potential Impact', () => {
 				'Checked · no findings',
 				'Checked · no findings',
 				// Recorded before site checks: one quiet row, not a warning.
-				'Not captured · This update was observed before UpdateLens recorded site checks.',
+				'Not recorded · This update was observed before UpdateLens recorded site checks.',
 			] );
 		} );
 
@@ -930,10 +1001,11 @@ describe( 'Potential Impact', () => {
 			await renderReport( EXPIRED );
 
 			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				'Not available for this report'
+				'Not assessed in this partial report'
 			);
+			// Why is said once, at the top; this section only refers to it.
 			expect( impact() ).toHaveTextContent(
-				'The post-update observation was not captured within 5 minutes, so there is no Net result to check.'
+				'Review rules need the Net result, which this partial report does not have.'
 			);
 			expect( checkTexts()[ 0 ] ).toBe(
 				'Not checked (observation expired)'
@@ -944,7 +1016,7 @@ describe( 'Potential Impact', () => {
 				'true'
 			);
 			expect( notAssessed() ).toHaveTextContent(
-				/^Not assessedOptions & autoload: /
+				/^Not assessedObservation expired: Options & autoload and WP-Cron$/
 			);
 		} );
 
@@ -1295,6 +1367,7 @@ describe( 'Potential Impact group wording', () => {
 		after: number
 	): LargeAutoloadedOptionFinding => ( {
 		code: 'large_autoloaded_option',
+		records: [],
 		signal: 'options',
 		priority: 'review',
 		option,

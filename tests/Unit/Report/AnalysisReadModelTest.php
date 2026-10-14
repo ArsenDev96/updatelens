@@ -245,6 +245,7 @@ final class AnalysisReadModelTest extends TestCase {
 						'rest' => $not_captured,
 					),
 				),
+				'high_priority'     => 0,
 			),
 			$item
 		);

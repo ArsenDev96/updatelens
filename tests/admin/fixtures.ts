@@ -14,6 +14,7 @@ import type {
 	CronPhase,
 	HistorySignal,
 	ImpactAssessment,
+	NotAssessedCategory,
 	ImpactFinding,
 	MonitoringBaseline,
 	OptionsPhase,
@@ -475,14 +476,118 @@ export function impactOf(
 	} else if ( missing === 0 ) {
 		status = 'evaluated';
 	}
+	// Changed entries already named by an earlier finding (one each, like the API).
+	const used = new Set< string >();
 	const impact = {
 		phase: 'final' as const,
 		status,
 		signals,
-		findings: status === 'not_evaluated' ? [] : findings,
+		findings:
+			status === 'not_evaluated'
+				? []
+				: findings.map( ( finding ) =>
+						withRecords( finding, reportPhases, used )
+					),
 		site_checks: NOT_CAPTURED_SITE_CHECK_IMPACT,
 	};
 	return { ...impact, assessment: assessmentOf( impact, reportPhases ) };
+}
+
+/**
+ * A fixture finding with the records the API names for it (PHP's rules in
+ * PotentialImpact): its option's entry; every removed recurring instance of
+ * its hook, plus the recurring instances added for it as replacements; its
+ * changed entry. Fixture shape only: findings given with records keep them.
+ *
+ * @param finding      Finding (records may be empty).
+ * @param reportPhases Report phases.
+ * @param used         Changed entries named by earlier findings (updated).
+ */
+export function withRecords(
+	finding: ImpactFinding,
+	reportPhases: Record< PhaseKey, ReportPhase >,
+	used: Set< string > = new Set()
+): ImpactFinding {
+	if ( finding.records.length > 0 ) {
+		return finding;
+	}
+	const final = reportPhases.final[ finding.signal ];
+	if ( ! final.available ) {
+		return finding;
+	}
+	const indexes = (
+		list: 'added' | 'removed' | 'changed',
+		match: ( row: Record< string, unknown > ) => boolean
+	) =>
+		( final[ list ] as unknown as Array< Record< string, unknown > > )
+			.map( ( row, index ) => ( match( row ) ? index : -1 ) )
+			.filter( ( index ) => index >= 0 );
+	const subject =
+		( list: 'added' | 'removed' | 'changed' ) => ( index: number ) => ( {
+			list,
+			index,
+			role: 'subject' as const,
+		} );
+	switch ( finding.code ) {
+		case 'large_autoloaded_option': {
+			const list = finding.before === null ? 'added' : 'changed';
+			return {
+				...finding,
+				records: indexes(
+					list,
+					( row ) => row.name === finding.option
+				).map( subject( list ) ),
+			};
+		}
+		case 'recurring_cron_event_removed':
+			return {
+				...finding,
+				records: [
+					...indexes(
+						'removed',
+						( row ) =>
+							row.hook === finding.hook &&
+							row.is_recurring === true
+					).map( subject( 'removed' ) ),
+					...indexes(
+						'added',
+						( row ) =>
+							row.hook === finding.hook &&
+							row.is_recurring === true
+					).map( ( index ) => ( {
+						list: 'added' as const,
+						index,
+						role: 'replacement' as const,
+					} ) ),
+				],
+			};
+		default: {
+			const index = indexes(
+				'changed',
+				( row ) =>
+					row.hook === finding.hook &&
+					( finding.signal !== 'action_scheduler' ||
+						row.group === finding.group ) &&
+					Object.entries( finding.before ).every(
+						( [ key, value ] ) => row[ `before_${ key }` ] === value
+					) &&
+					Object.entries( finding.after ).every(
+						( [ key, value ] ) => row[ `after_${ key }` ] === value
+					)
+			).find(
+				( candidate ) =>
+					! used.has( `${ finding.signal }:${ candidate }` )
+			);
+			if ( index === undefined ) {
+				return finding;
+			}
+			used.add( `${ finding.signal }:${ index }` );
+			return {
+				...finding,
+				records: [ subject( 'changed' )( index ) ],
+			} as ImpactFinding;
+		}
+	}
 }
 
 /**
@@ -498,38 +603,41 @@ export function assessmentOf(
 	reportPhases: Record< PhaseKey, ReportPhase >
 ): ImpactAssessment {
 	const findings = [ ...impact.findings, ...impact.site_checks.findings ];
+	// Distinct records the findings of a signal cover.
 	const covered = ( signal: Provider ) =>
-		impact.findings
-			.filter( ( finding ) => finding.signal === signal )
-			.reduce(
-				( sum, finding ) =>
-					sum +
-					( finding.code === 'recurring_cron_event_removed'
-						? finding.evidence.removed_recurring_count +
-							finding.evidence.added_recurring_count
-						: 1 ),
-				0
-			);
+		new Set(
+			impact.findings
+				.filter( ( finding ) => finding.signal === signal )
+				.flatMap( ( finding ) =>
+					finding.records.map(
+						( record ) => `${ record.list }:${ record.index }`
+					)
+				)
+		).size;
 	const providers: Provider[] = [ 'options', 'cron', 'action_scheduler' ];
 	let informational: number | null = null;
+	let assessed: number | null = null;
+	const netResult = {} as ImpactAssessment[ 'net_result' ];
 	const notAssessed: ImpactAssessment[ 'not_assessed' ] = [];
 	const pendingSources: ImpactAssessment[ 'pending' ] = [];
 	for ( const provider of providers ) {
 		const signal = impact.signals[ provider ];
 		const final = reportPhases.final[ provider ];
+		netResult[ provider ] = null;
 		if ( signal.status === 'evaluated' && final.available ) {
-			const summary = final.summary as unknown as Record<
-				string,
-				number
-			>;
 			const changes =
-				summary.added_count +
-				summary.removed_count +
-				summary.changed_count +
-				( provider === 'options' ? 0 : summary.rescheduled_count );
-			informational =
-				( informational ?? 0 ) +
-				Math.max( 0, changes - covered( provider ) );
+				final.added.length +
+				final.removed.length +
+				final.changed.length +
+				( 'rescheduled' in final ? final.rescheduled.length : 0 );
+			const matched = covered( provider );
+			netResult[ provider ] = {
+				changes,
+				matched,
+				informational: changes - matched,
+			};
+			informational = ( informational ?? 0 ) + changes - matched;
+			assessed = ( assessed ?? 0 ) + changes;
 		} else if ( signal.status === 'not_evaluated' ) {
 			if (
 				signal.reason === 'awaiting_settle' ||
@@ -537,10 +645,20 @@ export function assessmentOf(
 			) {
 				pendingSources.push( { type: 'signal', name: provider } );
 			} else {
+				let category: NotAssessedCategory = 'unavailable';
+				if ( signal.reason === 'settle_expired' ) {
+					category = 'expired';
+				} else if (
+					signal.reason === 'not_captured' ||
+					signal.reason === 'not_recorded'
+				) {
+					category = 'not_recorded';
+				}
 				notAssessed.push( {
 					type: 'signal',
 					name: provider,
 					reason: signal.reason,
+					category,
 				} );
 			}
 		}
@@ -554,6 +672,10 @@ export function assessmentOf(
 				type: 'site_check',
 				name: check,
 				reason: evaluation.reason,
+				category:
+					evaluation.reason === 'settle_expired'
+						? 'expired'
+						: 'not_compared',
 			} );
 		}
 	}
@@ -565,6 +687,8 @@ export function assessmentOf(
 			( finding ) => finding.priority === 'review'
 		).length,
 		informational,
+		assessed_changes: assessed,
+		net_result: netResult,
 		not_assessed: notAssessed,
 		pending: pendingSources,
 	};
@@ -914,6 +1038,8 @@ export function historyItem(
 			status: report.potential_impact.site_checks.status,
 			checks: report.potential_impact.site_checks.checks,
 		},
+		// The report's own count, as PHP returns it.
+		high_priority: report.potential_impact.assessment.high_priority,
 		...overrides,
 	};
 }

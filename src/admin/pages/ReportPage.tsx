@@ -23,7 +23,6 @@ import {
 	matchedRows,
 	MatchedRowsProvider,
 	type Located,
-	type MatchedRows,
 } from '../utils/highlight';
 import { LoadError } from '../components/LoadError';
 import { PhaseTabs } from '../components/PhaseTabs';
@@ -483,7 +482,8 @@ function RefinedSignalView( {
 		() => ( item === null ? null : locate( report, signal, item ) ),
 		[ report, signal, item ]
 	);
-	// Review rules are evaluated on the Net result only: its rows are marked.
+	// Review rules are evaluated on the Net result only: the records its
+	// findings cover (named by the API) are marked.
 	const matched = useMemo(
 		() => ( selected === 'final' ? matchedRows( report, signal ) : null ),
 		[ report, signal, selected ]
@@ -595,7 +595,6 @@ function RefinedSignalView( {
 											count={
 												counts[ selected ][ signal ]
 											}
-											matched={ matched }
 										/>
 									}
 								>
@@ -625,50 +624,47 @@ function RefinedSignalView( {
 
 /**
  * Whether review rules matched this signal's changes, in one quiet line
- * above them (only with changes): the findings of the Net result marked on
- * their rows, or none, so the other changes are informational. Never "safe":
- * no rule matching does not show that a change had no effect.
+ * above them (only with changes). On the Net result the numbers are the
+ * API's (`assessment.net_result`): the records findings cover, which are
+ * marked on their rows, and the rest, which are informational. Other phases
+ * are never checked by the rules. Never "safe": no rule matching does not
+ * show that a change had no effect.
  *
  * @param props        Props.
  * @param props.report Report.
  * @param props.signal Signal of the page.
  * @param props.phase  Selected phase.
- * @param props.count   Changes of the signal in the phase, null if unavailable.
- * @param props.matched Rows a finding is about (Net result), or null.
+ * @param props.count  Changes of the signal in the phase, null if unavailable.
  */
 function RulesLine( {
 	report,
 	signal,
 	phase,
 	count,
-	matched,
 }: {
 	report: AnalysisReport;
 	signal: Provider;
 	phase: PhaseKey;
 	count: number | null;
-	matched: MatchedRows | null;
 } ) {
 	if ( count === null || count === 0 ) {
 		return null;
 	}
-	// Rows a finding is about (its own entries, or its hook's), never guessed.
-	const marked = matched?.size ?? 0;
-	const others = Math.max( 0, count - marked );
+	const records = report.potential_impact.assessment.net_result[ signal ];
 	let text: string;
 	if ( phase !== 'final' ) {
 		text = __(
 			'Review rules are checked on the Net result only, not on this phase.',
 			'updatelens'
 		);
-	} else if (
-		report.potential_impact.signals[ signal ].status !== 'evaluated'
-	) {
+	} else if ( records === null ) {
 		text = __(
 			'Review rules could not be checked for these changes.',
 			'updatelens'
 		);
-	} else if ( marked > 0 ) {
+	} else if ( records.matched > 0 ) {
+		const marked = records.matched;
+		const others = records.informational;
 		text = sprintf(
 			/* translators: %s: number of changes a review rule matched. */
 			_n(
@@ -709,10 +705,10 @@ function RulesLine( {
 }
 
 /**
- * Which rows a Potential Impact link located on this page, with a way to
- * clear the marks. The rows themselves are marked in their lists: as the
- * finding's own only when its evidence identifies them, else neutrally as
- * entries of the same hook.
+ * Which rows a finding link located on this page, with a way to clear the
+ * marks. The rows themselves are marked in their lists: as the finding's
+ * own (the records the API names), or, for a link whose finding is no longer
+ * in the report, neutrally as entries with the same name.
  *
  * @param props         Props.
  * @param props.located Located rows.
@@ -728,7 +724,7 @@ function LocatedItem( {
 	signal: Provider;
 	onClear: () => void;
 } ) {
-	const { item, precision, rows, ambiguous } = located;
+	const { item, precision, rows } = located;
 	const count = rows.size;
 	let text: string;
 	if ( precision === 'exact' ) {
@@ -753,18 +749,9 @@ function LocatedItem( {
 							formatCount( count )
 						);
 		}
-	} else if ( ambiguous ) {
-		text = sprintf(
-			/* translators: %s: number of entries (2 or more). */
-			__(
-				'Showing the Net result. %s entries of this hook match this finding. Arguments are not shown, so UpdateLens cannot tell which one the finding refers to; they are marked as entries of the same hook:',
-				'updatelens'
-			),
-			formatCount( count )
-		);
 	} else if ( count > 0 ) {
 		text = __(
-			'Showing the Net result. The exact entry of this finding could not be identified; entries of the same hook are marked:',
+			'Showing the Net result. This link no longer matches a finding of the report; entries with the same name are marked:',
 			'updatelens'
 		);
 	} else {

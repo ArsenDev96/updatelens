@@ -202,7 +202,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "high"
           }
         ]
       }
@@ -412,7 +413,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "high"
           }
         ]
       }
@@ -629,7 +631,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "high"
           },
           {
             "code": "site_check_newly_failing",
@@ -697,7 +700,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "high"
           }
         ]
       }
@@ -903,7 +907,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "review"
           }
         ]
       }
@@ -1109,7 +1114,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "high"
           }
         ]
       }
@@ -1315,7 +1321,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "high"
           }
         ]
       }
@@ -1671,7 +1678,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "high"
           }
         ]
       }
@@ -3332,7 +3340,8 @@
                 ]
               },
               "delay_seconds": 3
-            }
+            },
+            "priority": "high"
           }
         ]
       }

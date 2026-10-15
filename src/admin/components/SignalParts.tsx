@@ -1,9 +1,10 @@
-import { __ } from '@wordpress/i18n';
-import { Fragment, type ReactNode } from 'react';
+import { __, sprintf } from '@wordpress/i18n';
+import { createContext, Fragment, useContext, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
-import { locatedPrecision, useLocated } from '../utils/highlight';
+import { locatedPrecision, useLocated, useMatched } from '../utils/highlight';
+import { findingTitle, priorityLabel } from '../utils/impact';
 import { Icon, type IconName } from './Icon';
 
 /*
@@ -12,6 +13,11 @@ import { Icon, type IconName } from './Icon';
  * notes and the empty state. Meaning is always carried by text; marks and
  * colors only help scanning.
  */
+
+/** Extra line of a signal's summary (whether review rules matched), if any. */
+const SummaryExtra = createContext< ReactNode >( null );
+
+export const SummaryExtraProvider = SummaryExtra.Provider;
 
 export type ChangeKind =
 	'added' | 'removed' | 'changed' | 'gone' | 'rescheduled';
@@ -138,6 +144,8 @@ export function ChangeRow( {
 } ) {
 	// `exact`: the finding's own entry; `group`: an entry of the same hook.
 	const located = locatedPrecision( useLocated(), record );
+	// A review rule that matched this row (Net result only).
+	const matched = useMatched( record );
 
 	return (
 		<li
@@ -166,8 +174,34 @@ export function ChangeRow( {
 					) }
 				>
 					{ located === 'exact'
-						? __( 'From Potential Impact', 'updatelens' )
+						? __( 'From Findings', 'updatelens' )
 						: __( 'Same hook as the finding', 'updatelens' ) }
+				</p>
+			) }
+			{ matched && (
+				<p className="col-start-2 -mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs leading-5 text-slate-700 sm:col-end-[-1]">
+					<span
+						className={ cn(
+							'rounded-full px-1.5 font-semibold ring-1 ring-inset',
+							matched.finding.priority === 'high'
+								? 'bg-rose-50 text-rose-800 ring-rose-200'
+								: 'bg-amber-50 text-amber-900 ring-amber-200'
+						) }
+					>
+						{ priorityLabel( matched.finding.priority ) }
+					</span>
+					<span>
+						{ matched.role === 'subject'
+							? findingTitle( matched.finding )
+							: sprintf(
+									/* translators: %s: review rule, e.g. "Recurring WP-Cron event no longer observed". */
+									__(
+										'Counted as a replacement in: %s',
+										'updatelens'
+									),
+									findingTitle( matched.finding )
+								) }
+					</span>
 				</p>
 			) }
 			{ meta && (
@@ -284,34 +318,36 @@ export function SignalSummary( {
 	counts: SummaryCount[];
 	note?: string;
 } ) {
+	const extra = useContext( SummaryExtra );
 	return (
 		<section
 			aria-labelledby={ id }
-			className="rounded-xl border border-tint-border bg-tint px-5 py-5 sm:px-7 sm:py-6"
+			className="rounded-lg border bg-card px-4 py-3 shadow-surface sm:px-5"
 		>
-			<p className="text-xs font-semibold uppercase tracking-[0.08em] text-tint-foreground">
-				{ eyebrow }
+			<p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+				<span className="text-[13px] text-muted-foreground">
+					{ eyebrow }
+				</span>
+				<span
+					id={ id }
+					className="text-base font-semibold leading-6 text-slate-900"
+				>
+					{ headline }
+				</span>
 			</p>
-			<p
-				id={ id }
-				className="mt-1.5 text-[1.75rem] font-semibold leading-tight tracking-tight text-slate-900 sm:text-[2rem]"
-			>
-				{ headline }
-			</p>
-			<dl className="mt-4 flex flex-wrap gap-2">
+			<dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[13px] leading-5">
 				{ counts.map( ( count ) => (
 					<div
 						key={ count.label }
-						className={ cn(
-							'flex items-center gap-2 rounded-lg border py-1.5 pr-3 text-sm',
-							count.kind ? 'pl-1.5' : 'pl-3',
-							count.quiet ? 'bg-card/60' : 'bg-card'
-						) }
+						className="flex items-center gap-1.5"
 					>
 						{ count.kind && (
 							<ChangeMark
 								kind={ count.kind }
-								className={ cn( count.quiet && 'opacity-50' ) }
+								className={ cn(
+									'size-5',
+									count.quiet && 'opacity-50'
+								) }
 							/>
 						) }
 						<dt className="text-slate-600">{ count.label }</dt>
@@ -328,10 +364,9 @@ export function SignalSummary( {
 					</div>
 				) ) }
 			</dl>
+			{ extra && <div className="mt-2">{ extra }</div> }
 			{ note && (
-				<SignalNote className="mt-5 border-t border-tint-border pt-4">
-					{ note }
-				</SignalNote>
+				<SignalNote className="mt-2 border-t pt-2">{ note }</SignalNote>
 			) }
 		</section>
 	);
@@ -355,30 +390,26 @@ export function SignalTotals( {
 	items: Array< [ string, string, string, string ] >;
 } ) {
 	return (
-		<section aria-labelledby={ id } className="space-y-3">
-			<h3 id={ id } className="text-sm font-semibold text-slate-600">
+		<section
+			aria-labelledby={ id }
+			className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t pt-3 text-[13px] leading-5 text-muted-foreground"
+		>
+			<h3 id={ id } className="font-medium text-slate-600">
 				{ __( 'Site totals', 'updatelens' ) }
 			</h3>
-			<dl
-				aria-label={ label }
-				className="grid grid-cols-1 gap-px overflow-hidden rounded-xl border bg-border min-[480px]:grid-cols-2 lg:grid-cols-4"
-			>
+			<dl aria-label={ label } className="flex flex-wrap gap-x-4 gap-y-1">
 				{ items.map( ( [ name, before, after, delta ] ) => (
-					<div key={ name } className="bg-card px-4 py-3">
-						<dt className="text-xs text-muted-foreground">
-							{ name }
-						</dt>
-						<dd className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-sm tabular-nums">
-							<span className="font-medium text-slate-800">
+					<div key={ name } className="flex gap-1.5">
+						<dt>{ name }</dt>
+						<dd className="tabular-nums">
+							<span className="text-slate-700">
 								{ before } <span aria-hidden="true">→</span>
 								<span className="sr-only">
 									{ __( 'to', 'updatelens' ) }
 								</span>{ ' ' }
 								{ after }
 							</span>{ ' ' }
-							<span className="text-muted-foreground">
-								({ delta })
-							</span>
+							({ delta })
 						</dd>
 					</div>
 				) ) }

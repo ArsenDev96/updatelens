@@ -16,6 +16,7 @@ import {
 	comparisonReasonText,
 	crossOriginText,
 	laterText,
+	sideSummaryText,
 	SITE_CHECKS,
 	siteCheckSubject,
 } from './siteCheckImpact';
@@ -163,6 +164,106 @@ export function siteCheckRow(
 }
 
 /**
+ * The comparison of one check in two or three words, for the compact row
+ * (Before → After → Result). From the API's state only: "Passed before and after" only
+ * for a check the API compared as passed.
+ *
+ * @param comparison The check in the report's `site_checks`.
+ * @param evaluation The check in `potential_impact.site_checks`, if present.
+ */
+export function siteCheckResultLabel(
+	comparison: SiteCheckComparison,
+	evaluation: SiteCheckImpactCheck | undefined
+): string {
+	if ( evaluation?.status === 'not_applicable' ) {
+		return evaluation.reason === 'cross_origin'
+			? __( 'Not supported', 'updatelens' )
+			: __( 'Not checked', 'updatelens' );
+	}
+	switch ( comparison.state ) {
+		case 'passed_both':
+			return __( 'Passed before and after', 'updatelens' );
+		case 'newly_failing':
+			return __( 'Newly failing', 'updatelens' );
+		case 'failing_both':
+			return __( 'Failed before and after', 'updatelens' );
+		case 'recovered':
+			return __( 'Recovered', 'updatelens' );
+		case 'changed':
+			switch ( evaluation?.change ) {
+				case 'redirect_appeared':
+					return __( 'Now redirects', 'updatelens' );
+				case 'redirect_disappeared':
+					return __( 'No longer redirects', 'updatelens' );
+				case 'redirect_then_failure':
+					return __( 'Now failing', 'updatelens' );
+				default:
+					return __( 'Changed', 'updatelens' );
+			}
+		case 'pending':
+			return __( 'Waiting', 'updatelens' );
+		default:
+			return __( 'Not compared', 'updatelens' );
+	}
+}
+
+/**
+ * One side of a check in a few words: "Passed · HTTP 200", "Waiting" while
+ * the later check may still arrive, or "Not run".
+ *
+ * @param side       Side.
+ * @param purpose    `before` or `after`.
+ * @param comparison The check's comparison.
+ */
+export function siteCheckSideCell(
+	side: SiteCheckSide,
+	purpose: 'before' | 'after',
+	comparison: SiteCheckComparison
+): string {
+	if ( side.available && side.result !== null ) {
+		return sideSummaryText( side );
+	}
+	return purpose === 'after' && comparison.state === 'pending'
+		? __( 'Waiting', 'updatelens' )
+		: __( 'Not run', 'updatelens' );
+}
+
+/**
+ * Why a check was not compared, in a few words, for the report summary:
+ * "no check before the update", "no check after the update" or "could not
+ * be compared". From the API's comparison state and which side is missing;
+ * the full reasons are in the Site checks section.
+ *
+ * @param comparison The check in the report's `site_checks`.
+ */
+export function siteCheckGapText( comparison: SiteCheckComparison ): string {
+	if ( comparison.state === 'not_comparable' ) {
+		return __( 'could not be compared', 'updatelens' );
+	}
+	return comparison.before.available
+		? __( 'no check after the update', 'updatelens' )
+		: __( 'no check before the update', 'updatelens' );
+}
+
+/**
+ * The reason a check was not compared that says how to compare next time
+ * (siteCheckNextTimeText()), or null.
+ *
+ * @param comparison The check's comparison.
+ */
+export function siteCheckGuidanceReason(
+	comparison: SiteCheckComparison
+): string | null {
+	if ( comparison.state === 'not_comparable' ) {
+		return comparison.reason;
+	}
+	if ( comparison.state === 'not_run' && comparison.before.available ) {
+		return comparison.after.reason;
+	}
+	return null;
+}
+
+/**
  * A `changed` comparison (redirects), worded as what was observed.
  *
  * @param change  Kind from the API.
@@ -174,8 +275,9 @@ function changedRow(
 ): SiteCheckRowText {
 	switch ( change ) {
 		case 'redirect_appeared':
+			// A finding that needs review: the same amber as its finding.
 			return {
-				tone: 'neutral',
+				tone: finding ? 'caution' : 'neutral',
 				icon: 'changed',
 				status: __( 'Passed before, redirected after', 'updatelens' ),
 				detail: __(
@@ -330,13 +432,16 @@ export function siteCheckReadingNote( check: SiteCheckId ): string {
  */
 export function sharedReason( rows: SiteCheckRowText[] ): string | null {
 	const [ first, ...others ] = rows;
+	// Why both were not compared, or that both are still waiting.
+	const shareable = ( row: SiteCheckRowText ) =>
+		row.tone === 'caution' || row.tone === 'progress';
 	return first &&
 		others.length > 0 &&
-		first.tone === 'caution' &&
+		shareable( first ) &&
 		first.detail !== null &&
 		others.every(
 			( other ) =>
-				other.tone === 'caution' && other.detail === first.detail
+				other.tone === first.tone && other.detail === first.detail
 		)
 		? first.detail
 		: null;

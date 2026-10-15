@@ -9,6 +9,7 @@ import {
 	formatDateTime,
 	formatDuration,
 	formatDurationDelta,
+	formatShift,
 	formatUnixDateTime,
 	formatUnixRangeEnd,
 	unixToIso,
@@ -27,6 +28,9 @@ import {
 	statusTone,
 	unavailableReasonText,
 } from '@/admin/utils/labels';
+import type { AnalysisReport } from '@/admin/types/api';
+import { notAssessedLines } from '@/admin/utils/glance';
+import { siteCheckOutcome } from '@/admin/utils/siteChecks';
 import { parseRoute, routeHref } from '@/admin/utils/route';
 
 import {
@@ -106,6 +110,67 @@ describe( 'formatDateTime', () => {
 		expect( formatDateTime( null ) ).toBeNull();
 		expect( formatDateTime( '' ) ).toBeNull();
 		expect( formatDateTime( 'not a date' ) ).toBeNull();
+	} );
+} );
+
+describe( 'notAssessedLines', () => {
+	it( 'names every expired source, configuration sources and checks apart', () => {
+		const report = {
+			...EXPIRED,
+			potential_impact: {
+				...EXPIRED.potential_impact,
+				assessment: {
+					...EXPIRED.potential_impact.assessment,
+					not_assessed: [
+						...(
+							[ 'options', 'cron', 'action_scheduler' ] as const
+						 ).map( ( name ) => ( {
+							type: 'signal' as const,
+							name,
+							reason: 'settle_expired',
+							category: 'expired' as const,
+						} ) ),
+						...( [ 'home', 'rest' ] as const ).map( ( name ) => ( {
+							type: 'site_check' as const,
+							name,
+							reason: 'settle_expired',
+							category: 'expired' as const,
+						} ) ),
+					],
+				},
+			},
+		};
+		expect( notAssessedLines( report ) ).toEqual( [
+			'Observation expired: Options & autoload, WP-Cron and Action Scheduler · Homepage and REST API checks after the update',
+		] );
+
+		// With the site checks in the report, the summary's Site checks row
+		// names them ("Not compared"), so only the configuration sources stay.
+		const expiredCheck = {
+			status: 'not_evaluated' as const,
+			reason: 'settle_expired',
+			state: 'not_run',
+			change: null,
+			finding_count: null,
+		};
+		const withChecks = {
+			...report,
+			site_checks: { status: 'unavailable' },
+			potential_impact: {
+				...report.potential_impact,
+				site_checks: {
+					...report.potential_impact.site_checks,
+					status: 'not_evaluated',
+					checks: { home: expiredCheck, rest: expiredCheck },
+				},
+			},
+		} as unknown as AnalysisReport;
+		expect( notAssessedLines( withChecks ) ).toEqual( [
+			'Observation expired: Options & autoload, WP-Cron and Action Scheduler',
+		] );
+		expect(
+			siteCheckOutcome( withChecks.potential_impact.site_checks ).value
+		).toBe( 'Not compared' );
 	} );
 } );
 
@@ -207,7 +272,7 @@ describe( 'labels', () => {
 			open: false,
 		} );
 		expect( reportNotice( EXPIRED ).title ).toBe(
-			'Post-update observation expired'
+			'Partial report: the observation after the update expired'
 		);
 		expect( reportNotice( FAILED ) ).toMatchObject( {
 			title: 'Plugin update failed',
@@ -492,6 +557,23 @@ describe( 'durations', () => {
 		);
 		expect( formatDurationDelta( 172800, 'en' ) ).toBe( '+2 days' );
 		expect( formatDurationDelta( 0, 'en' ) ).toBeNull();
+	} );
+
+	it.each( [
+		[ 3600, '1 hour later' ],
+		[ 3568, 'about 1 hour later' ],
+		[ 58, 'about 1 minute later' ],
+		[ 35, '35 seconds later' ],
+		[ 120, '2 minutes later' ],
+		[ -86400, '1 day earlier' ],
+		[ -5400, 'about 2 hours earlier' ],
+		[ 1, '1 second later' ],
+	] )( 'a schedule moved by %d seconds reads "%s"', ( seconds, text ) => {
+		expect( formatShift( seconds, 'en' ) ).toBe( text );
+	} );
+
+	it( 'says nothing for a schedule that did not move', () => {
+		expect( formatShift( 0, 'en' ) ).toBeNull();
 	} );
 
 	it( 'takes unit words from UpdateLens translations, not the number locale', () => {

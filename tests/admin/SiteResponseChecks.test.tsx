@@ -11,7 +11,7 @@ import type {
 } from '@/admin/types/api';
 
 import cases from '../fixtures/site-check-impact-cases.json';
-import { COMPLETED } from './fixtures';
+import { COMPLETED, withSiteCheckCase } from './fixtures';
 import { openReport, tab } from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
@@ -32,14 +32,11 @@ function withSiteChecks(
 	name: CaseName
 ): AnalysisReport {
 	const data = cases.cases[ name ];
-	return {
-		...base,
-		site_checks: data.site_checks as SiteChecks,
-		potential_impact: {
-			...base.potential_impact,
-			site_checks: data.potential_impact_site_checks as SiteCheckImpact,
-		},
-	};
+	return withSiteCheckCase(
+		base,
+		data.site_checks as SiteChecks,
+		data.potential_impact_site_checks as SiteCheckImpact
+	);
 }
 
 async function renderReport(
@@ -51,10 +48,15 @@ async function renderReport(
 	await screen.findByRole( 'heading', { level: 2 } );
 }
 
-const section = () =>
-	screen.getByRole( 'region', { name: 'Site response checks' } );
+const section = () => screen.getByRole( 'region', { name: 'Site checks' } );
 
-/** The rows of the section: name → [status line, aria-expanded]. */
+/** The collapsed row of a check (before its details). */
+const rowOf = ( item: Element ) => item.firstElementChild!;
+
+/**
+ * The rows of the section: name → the comparison result, and the row's one
+ * sentence when it has one.
+ */
 function checkRows() {
 	const list = within( section() ).queryByRole( 'list', { name: 'Checks' } );
 	if ( ! list ) {
@@ -65,13 +67,34 @@ function checkRows() {
 			.getAllByRole( 'listitem' )
 			.map( ( item ) => {
 				const button = item.querySelector( 'h4 button' )!;
+				const values = rowOf( item ).querySelectorAll( 'dl dd' );
+				const detail = rowOf( item ).querySelector(
+					'dl + div > p:not(.relative)'
+				)?.textContent;
 				return [
 					button.textContent,
-					item.querySelector( 'p' )!.textContent,
+					[ values[ 2 ].textContent, detail ]
+						.filter( Boolean )
+						.join( ' ' ),
 				];
 			} )
 	);
 }
+
+/**
+ * What a check returned before and after the update, as its row shows it.
+ *
+ * @param name Check name.
+ */
+const sides = ( name: 'Homepage' | 'WordPress REST API' ) =>
+	Array.from(
+		rowOf( checkButton( name ).closest( 'li' )! ).querySelectorAll(
+			'dl dd'
+		)
+	)
+		.slice( 0, 2 )
+		// "HTTP 200" is kept together with a no-break space.
+		.map( ( value ) => value.textContent!.replace( /\u00a0/g, ' ' ) );
 
 const checkButton = ( name: 'Homepage' | 'WordPress REST API' ) =>
 	within( section() ).getByRole( 'button', { name } );
@@ -84,27 +107,30 @@ describe( 'Site response checks on the report overview', () => {
 		apiFetchMock.mockReset();
 	} );
 
-	it( 'both passed: its own section above the phase tabs, with short rows', async () => {
+	it( 'both passed: its own section above the phase tabs, with compact rows', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
 
 		expect(
 			within( section() ).getByRole( 'heading', {
 				level: 3,
-				name: 'Site response checks',
+				name: 'Site checks',
 			} )
 		).toBeInTheDocument();
-		expect( section() ).toHaveTextContent( 'Before and after the update' );
 		// The brief statement of what these checks cover stays visible.
 		expect( section() ).toHaveTextContent(
-			'These checks are separate from the configuration phases below, and they do not test every page or feature.'
+			'Requested by your browser before and after the update. They do not test every page or feature.'
 		);
-		// A pass needs no explanation in the collapsed row.
+		// Before → after → result; a pass needs no explanation.
 		expect( checkRows() ).toEqual( {
 			Homepage: 'Passed before and after',
 			'WordPress REST API': 'Passed before and after',
 		} );
+		expect( sides( 'Homepage' ) ).toEqual( [
+			'Passed · HTTP 200',
+			'Passed · HTTP 200',
+		] );
 		expect( checkButton( 'Homepage' ) ).toHaveAccessibleDescription(
-			'Passed before and after'
+			/^Before update Passed · HTTP.200 After update Passed · HTTP.200 Result Passed before and after$/
 		);
 		expect( checkButton( 'Homepage' ) ).toHaveAttribute(
 			'aria-expanded',
@@ -113,18 +139,16 @@ describe( 'Site response checks on the report overview', () => {
 		// Collapsed: no requests or explanations in the DOM.
 		expect( section() ).not.toHaveTextContent( 'Request 1' );
 		expect( section() ).not.toHaveTextContent( 'completion marker' );
-		// Not part of a phase: outside the tab panel, before the tabs and
-		// Potential Impact.
+		// Not part of a phase: outside the tab panel, after Findings and
+		// before the configuration phases.
 		expect( section().closest( '[role="tabpanel"]' ) ).toBeNull();
 		const following = ( other: Element ) =>
 			section().compareDocumentPosition( other ) &
 			Node.DOCUMENT_POSITION_FOLLOWING;
 		expect( following( screen.getByRole( 'tablist' ) ) ).toBeTruthy();
 		expect(
-			following(
-				screen.getByRole( 'region', { name: 'Potential impact' } )
-			)
-		).toBeTruthy();
+			following( screen.getByRole( 'region', { name: 'Findings' } ) )
+		).toBeFalsy();
 	} );
 
 	it( 'expands with the keyboard to labelled fields before and after the update', async () => {
@@ -197,17 +221,19 @@ describe( 'Site response checks on the report overview', () => {
 				withSiteChecks( COMPLETED, 'home_newly_failing' )
 			);
 
-			expect( checkRows()!.Homepage ).toBe(
-				'Passed before, failed after Both requests after the update returned HTTP 500.'
-			);
-			expect( checkRows()![ 'WordPress REST API' ] ).toMatch(
-				/^Passed before and after/
+			// The After cell says it; the sentence would repeat it.
+			expect( checkRows()!.Homepage ).toBe( 'Newly failing' );
+			expect( sides( 'Homepage' ) ).toEqual( [
+				'Passed · HTTP 200',
+				'Failed in both requests · HTTP 500',
+			] );
+			expect( checkRows()![ 'WordPress REST API' ] ).toBe(
+				'Passed before and after'
 			);
 			await user.click( checkButton( 'Homepage' ) );
 			const row = checkButton( 'Homepage' ).closest( 'li' )!;
-			expect( row ).toHaveTextContent(
-				'Failed in both requests · HTTP 500'
-			);
+			// Expanded: the comparison in words, then both sides in full.
+			expect( row ).toHaveTextContent( 'Passed before, failed after' );
 			// The next step and the finding link are in the collapsed row.
 			expect( row ).toHaveTextContent(
 				'Next: Check whether the homepage is accessible now. Show the finding'
@@ -223,7 +249,7 @@ describe( 'Site response checks on the report overview', () => {
 			);
 			await act( () => vi.runOnlyPendingTimersAsync() );
 			const finding = screen.getByRole( 'button', {
-				name: 'Homepage check newly failing, 1 finding',
+				name: 'Homepage check newly failing, 1 finding, High priority',
 			} );
 			expect( finding ).toHaveAttribute( 'aria-expanded', 'true' );
 			expect( finding ).toHaveFocus();
@@ -234,10 +260,8 @@ describe( 'Site response checks on the report overview', () => {
 
 	it( 'REST newly failing and both newly failing', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'rest_newly_failing' ) );
-		expect( checkRows()![ 'WordPress REST API' ] ).toBe(
-			'Passed before, failed after Both requests after the update returned a response that was not valid JSON.'
-		);
-		expect( checkRows()!.Homepage ).toMatch( /^Passed before and after/ );
+		expect( checkRows()![ 'WordPress REST API' ] ).toBe( 'Newly failing' );
+		expect( checkRows()!.Homepage ).toBe( 'Passed before and after' );
 		expect(
 			checkButton( 'WordPress REST API' ).closest( 'li' )
 		).toHaveTextContent(
@@ -251,11 +275,11 @@ describe( 'Site response checks on the report overview', () => {
 
 	it.each( [
 		[ 'failing_both', 'Failed before and after' ],
-		[ 'recovered', 'Failed before, passed after' ],
-		[ 'home_redirect', 'Passed before, redirected after' ],
-		[ 'redirect_disappeared', 'Redirected before, passed after' ],
-		[ 'redirect_then_failure', 'Redirected before, failed after' ],
-		[ 'home_timeouts', 'Passed before, failed after' ],
+		[ 'recovered', 'Recovered' ],
+		[ 'home_redirect', 'Now redirects' ],
+		[ 'redirect_disappeared', 'No longer redirects' ],
+		[ 'redirect_then_failure', 'Now failing' ],
+		[ 'home_timeouts', 'Newly failing' ],
 	] as Array< [ CaseName, string ] > )(
 		'%s: the comparison as observed',
 		async ( name, status ) => {
@@ -274,9 +298,10 @@ describe( 'Site response checks on the report overview', () => {
 		const reason =
 			'No check from this login session had finished when the update started. These checks run in the background on Installed Plugins; wait until UpdateLens shows “Ready to compare site responses” there before clicking “Update now”.';
 		expect( checkRows() ).toEqual( {
-			Homepage: 'Not compared: no check before the update',
-			'WordPress REST API': 'Not compared: no check before the update',
+			Homepage: 'Not compared',
+			'WordPress REST API': 'Not compared',
 		} );
+		expect( sides( 'Homepage' ) ).toEqual( [ 'Not run', 'Not run' ] );
 		expect( section().textContent!.split( reason ).length - 1 ).toBe( 1 );
 		await user.click( checkButton( 'Homepage' ) );
 		const row = checkButton( 'Homepage' ).closest( 'li' )!;
@@ -291,12 +316,25 @@ describe( 'Site response checks on the report overview', () => {
 	it( 'a check after the update that was never reported', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'after_not_reported' ) );
 		expect( checkRows() ).toEqual( {
-			Homepage: 'Not compared: no check after the update',
-			'WordPress REST API': 'Not compared: no check after the update',
+			Homepage: 'Not compared',
+			'WordPress REST API': 'Not compared',
 		} );
+		expect( sides( 'Homepage' ) ).toEqual( [
+			'Passed · HTTP 200',
+			'Not run',
+		] );
 		expect( section() ).toHaveTextContent(
 			'The check after the update started, but its result was not reported, for example because the page was closed while it ran.'
 		);
+		// How to get a comparison next time, once; never an action for this update.
+		expect( section() ).toHaveTextContent(
+			'For a comparison next time, click “Update now” on Installed Plugins and keep that tab open for a few seconds after “Updated!”.'
+		);
+		expect(
+			within( section() ).queryByRole( 'button', {
+				name: /compare|retry|run/i,
+			} )
+		).toBeNull();
 	} );
 
 	it( 'one compared, one unavailable: each row says its own', async () => {
@@ -304,20 +342,20 @@ describe( 'Site response checks on the report overview', () => {
 		expect( checkRows() ).toEqual( {
 			Homepage: 'Passed before and after',
 			'WordPress REST API':
-				'Not compared: no check before the update The update started before the check before it had finished.',
+				'Not compared The update started before the check before it had finished.',
 		} );
 	} );
 
 	it( 'an inconclusive check after the update (caching or security restrictions) is not compared', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'unconfirmed' ) );
 		expect( checkRows()!.Homepage ).toBe(
-			'Could not be compared The check after the update was inconclusive: one request failed and the retry did not confirm it.'
+			'Not compared The check after the update was inconclusive: one request failed and the retry did not confirm it.'
 		);
 	} );
 
 	it( 'a check before the update too large to inspect is not compared', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'home_not_inspected' ) );
-		expect( checkRows()!.Homepage ).toMatch( /^Could not be compared/ );
+		expect( checkRows()!.Homepage ).toMatch( /^Not compared/ );
 	} );
 
 	it( 'disabled: one sentence and the settings link, no rows and no timing badge', async () => {
@@ -367,10 +405,10 @@ describe( 'Site response checks on the report overview', () => {
 	it( 'on another origin: not supported, never passed', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'home_cross_origin' ) );
 		expect( checkRows()!.Homepage ).toMatch(
-			/^Not supported on this site The homepage is on a different address than wp-admin/
+			/^Not supported The homepage is on a different address than wp-admin/
 		);
-		expect( checkRows()![ 'WordPress REST API' ] ).toMatch(
-			/^Passed before and after/
+		expect( checkRows()![ 'WordPress REST API' ] ).toBe(
+			'Passed before and after'
 		);
 	} );
 
@@ -388,11 +426,15 @@ describe( 'Site response checks on the report overview', () => {
 	it( 'pending: waiting, with the refresh line, never passed', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'pending' ) );
 		expect( checkRows() ).toEqual( {
-			Homepage:
-				'Waiting for the check after the update The browser that ran the update is still checking. Results appear here when they arrive.',
-			'WordPress REST API':
-				'Waiting for the check after the update The browser that ran the update is still checking. Results appear here when they arrive.',
+			Homepage: 'Waiting',
+			'WordPress REST API': 'Waiting',
 		} );
+		// The reason both share, said once below the rows.
+		expect(
+			section().textContent!.split(
+				'The browser that ran the update is still checking. Results appear here when they arrive.'
+			).length - 1
+		).toBe( 1 );
 		expect( section() ).toHaveTextContent(
 			'This report checks for the pending site check results every few seconds while it is open.'
 		);
@@ -401,7 +443,10 @@ describe( 'Site response checks on the report overview', () => {
 				name: 'Refresh results',
 			} )
 		).toBeInTheDocument();
-		expect( section().textContent ).not.toMatch( /Passed/ );
+		// The earlier results are shown; the comparison is never "passed".
+		expect( section().textContent ).not.toMatch(
+			/Passed both|Passed before and after/
+		);
 	} );
 
 	it( 'is the same in every phase and keeps an expanded check', async () => {

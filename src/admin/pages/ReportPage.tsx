@@ -1,4 +1,4 @@
-import { __, sprintf } from '@wordpress/i18n';
+import { _n, __, sprintf } from '@wordpress/i18n';
 import {
 	useCallback,
 	useEffect,
@@ -20,17 +20,21 @@ import {
 	findingListKind,
 	locate,
 	LocatedProvider,
+	matchedRows,
+	MatchedRowsProvider,
 	type Located,
 } from '../utils/highlight';
 import { LoadError } from '../components/LoadError';
 import { PhaseTabs } from '../components/PhaseTabs';
-import { ReportGlance } from '../components/ReportGlance';
 import {
 	DEFAULT_VISIBLE_FINDINGS,
-	ReportOverview,
-} from '../components/ReportOverview';
+	PotentialImpact,
+} from '../components/PotentialImpact';
+import { ConfigurationChanges } from '../components/ReportOverview';
+import { ReportSummary } from '../components/ReportSummary';
 import { SiteResponseChecks } from '../components/SiteResponseChecks';
 import { SignalDetail } from '../components/SignalDetail';
+import { SummaryExtraProvider } from '../components/SignalParts';
 import { StatusBadge } from '../components/StatusBadge';
 import { Versions } from '../components/Versions';
 import { Icon, type IconName } from '../components/Icon';
@@ -359,11 +363,36 @@ function Report( {
 					onFocus={ onStatusFocus }
 				/>
 			) }
-			<ReportGlance
+			<ReportSummary
 				report={ report }
 				counts={ counts }
-				onShowImpact={ () => focusSoon( 'updatelens-impact-title' ) }
+				onShowFindings={ () => focusSoon( 'updatelens-impact-title' ) }
+				onShowConfiguration={ () =>
+					focusSoon( 'updatelens-configuration-title' )
+				}
+				onShowSiteChecks={ () =>
+					focusSoon( 'updatelens-site-checks-title' )
+				}
 			/>
+			{ /* Findings: the Net result and the site checks, whatever phase is selected below; none without any phase (a failed update). */ }
+			{ selected && (
+				<PotentialImpact
+					impact={ report.potential_impact }
+					siteChecks={ report.site_checks }
+					onShowSiteCheck={ showSiteCheck }
+					windowSeconds={ report.observation_window_seconds }
+					findingHref={ ( finding ) =>
+						href( findingRoute( finding ) )
+					}
+					onOpenFinding={ ( finding ) => {
+						returnTo.current =
+							report.potential_impact.findings.indexOf( finding );
+						onNavigate( findingRoute( finding ) );
+					} }
+					view={ impactView }
+					onViewChange={ setImpactView }
+				/>
+			) }
 			{ /* Its own evidence, the same whatever phase is selected below. */ }
 			<SiteResponseChecks
 				siteChecks={ report.site_checks }
@@ -373,51 +402,18 @@ function Report( {
 				onViewChange={ setImpactView }
 				onShowFinding={ showSiteFinding }
 			/>
-			{ selected && (
-				<PhaseTabs
-					counts={ {
-						during_update: counts.during_update.total,
-						post_update: counts.post_update.total,
-						final: counts.final.total,
-					} }
-					selected={ selected }
-					onSelect={ selectPhase }
-				>
-					<ReportOverview
-						data={ report.phases[ selected ] }
-						phase={ selected }
-						counts={ counts[ selected ] }
-						windowSeconds={ report.observation_window_seconds }
-						signalHref={ ( provider: Provider ) =>
-							href( at( { signal: provider } ) )
-						}
-						onOpenSignal={ ( provider: Provider ) =>
-							onNavigate( at( { signal: provider } ) )
-						}
-						impact={ report.potential_impact }
-						siteChecks={ report.site_checks }
-						onShowSiteCheck={ showSiteCheck }
-						findingHref={ ( finding ) =>
-							href( findingRoute( finding ) )
-						}
-						onOpenFinding={ ( finding ) => {
-							returnTo.current =
-								report.potential_impact.findings.indexOf(
-									finding
-								);
-							onNavigate( findingRoute( finding ) );
-						} }
-						impactView={ impactView }
-						onImpactViewChange={ setImpactView }
-						onShowNetResult={
-							// Offered only when the Net result has data to show.
-							selected === 'final' || counts.final.total === null
-								? null
-								: () => selectPhase( 'final' )
-						}
-					/>
-				</PhaseTabs>
-			) }
+			<ConfigurationChanges
+				report={ report }
+				counts={ counts }
+				selected={ selected }
+				onSelectPhase={ selectPhase }
+				signalHref={ ( provider: Provider ) =>
+					href( at( { signal: provider } ) )
+				}
+				onOpenSignal={ ( provider: Provider ) =>
+					onNavigate( at( { signal: provider } ) )
+				}
+			/>
 			<TechnicalDetails
 				report={ report }
 				signal={ null }
@@ -485,6 +481,12 @@ function RefinedSignalView( {
 	const located = useMemo(
 		() => ( item === null ? null : locate( report, signal, item ) ),
 		[ report, signal, item ]
+	);
+	// Review rules are evaluated on the Net result only: the records its
+	// findings cover (named by the API) are marked.
+	const matched = useMemo(
+		() => ( selected === 'final' ? matchedRows( report, signal ) : null ),
+		[ report, signal, selected ]
 	);
 	const crumb =
 		'rounded font-medium text-primary no-underline hover:underline focus:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -583,15 +585,30 @@ function RefinedSignalView( {
 							selected={ selected }
 							onSelect={ onSelectPhase }
 						>
-							<SignalDetail
-								provider={ signal }
-								phase={ selected }
-								data={ report.phases[ selected ] }
-								count={ counts[ selected ][ signal ] }
-								windowSeconds={
-									report.observation_window_seconds
-								}
-							/>
+							<MatchedRowsProvider value={ matched }>
+								<SummaryExtraProvider
+									value={
+										<RulesLine
+											report={ report }
+											signal={ signal }
+											phase={ selected }
+											count={
+												counts[ selected ][ signal ]
+											}
+										/>
+									}
+								>
+									<SignalDetail
+										provider={ signal }
+										phase={ selected }
+										data={ report.phases[ selected ] }
+										count={ counts[ selected ][ signal ] }
+										windowSeconds={
+											report.observation_window_seconds
+										}
+									/>
+								</SummaryExtraProvider>
+							</MatchedRowsProvider>
 						</PhaseTabs>
 					</LocatedProvider>
 				) }
@@ -606,10 +623,92 @@ function RefinedSignalView( {
 }
 
 /**
- * Which rows a Potential Impact link located on this page, with a way to
- * clear the marks. The rows themselves are marked in their lists: as the
- * finding's own only when its evidence identifies them, else neutrally as
- * entries of the same hook.
+ * Whether review rules matched this signal's changes, in one quiet line
+ * above them (only with changes). On the Net result the numbers are the
+ * API's (`assessment.net_result`): the records findings cover, which are
+ * marked on their rows, and the rest, which are informational. Other phases
+ * are never checked by the rules. Never "safe": no rule matching does not
+ * show that a change had no effect.
+ *
+ * @param props        Props.
+ * @param props.report Report.
+ * @param props.signal Signal of the page.
+ * @param props.phase  Selected phase.
+ * @param props.count  Changes of the signal in the phase, null if unavailable.
+ */
+function RulesLine( {
+	report,
+	signal,
+	phase,
+	count,
+}: {
+	report: AnalysisReport;
+	signal: Provider;
+	phase: PhaseKey;
+	count: number | null;
+} ) {
+	if ( count === null || count === 0 ) {
+		return null;
+	}
+	const records = report.potential_impact.assessment.net_result[ signal ];
+	let text: string;
+	if ( phase !== 'final' ) {
+		text = __(
+			'Review rules are checked on the Net result only, not on this phase.',
+			'updatelens'
+		);
+	} else if ( records === null ) {
+		text = __(
+			'Review rules could not be checked for these changes.',
+			'updatelens'
+		);
+	} else if ( records.matched > 0 ) {
+		const marked = records.matched;
+		const others = records.informational;
+		text = sprintf(
+			/* translators: %s: number of changes a review rule matched. */
+			_n(
+				'Review rules matched %s change; it is marked below.',
+				'Review rules matched %s changes; they are marked below.',
+				marked,
+				'updatelens'
+			),
+			formatCount( marked )
+		);
+		if ( others > 0 ) {
+			text += ` ${ sprintf(
+				/* translators: %s: number of changes no review rule matched. */
+				_n(
+					'%s other change matched no rule (informational).',
+					'%s other changes matched no rule (informational).',
+					others,
+					'updatelens'
+				),
+				formatCount( others )
+			) }`;
+		}
+	} else {
+		text = __(
+			'No review rule matched these changes (informational). That does not show they had no effect.',
+			'updatelens'
+		);
+	}
+	return (
+		<p className="flex gap-2 text-[13px] leading-5 text-slate-600">
+			<Icon
+				name="info"
+				className="mt-0.5 size-4 shrink-0 text-slate-500"
+			/>
+			<span>{ text }</span>
+		</p>
+	);
+}
+
+/**
+ * Which rows a finding link located on this page, with a way to clear the
+ * marks. The rows themselves are marked in their lists: as the finding's
+ * own (the records the API names), or, for a link whose finding is no longer
+ * in the report, neutrally as entries with the same name.
  *
  * @param props         Props.
  * @param props.located Located rows.
@@ -625,7 +724,7 @@ function LocatedItem( {
 	signal: Provider;
 	onClear: () => void;
 } ) {
-	const { item, precision, rows, ambiguous } = located;
+	const { item, precision, rows } = located;
 	const count = rows.size;
 	let text: string;
 	if ( precision === 'exact' ) {
@@ -650,18 +749,9 @@ function LocatedItem( {
 							formatCount( count )
 						);
 		}
-	} else if ( ambiguous ) {
-		text = sprintf(
-			/* translators: %s: number of entries (2 or more). */
-			__(
-				'Showing the Net result. %s entries of this hook match this finding. Arguments are not shown, so UpdateLens cannot tell which one the finding refers to; they are marked as entries of the same hook:',
-				'updatelens'
-			),
-			formatCount( count )
-		);
 	} else if ( count > 0 ) {
 		text = __(
-			'Showing the Net result. The exact entry of this finding could not be identified; entries of the same hook are marked:',
+			'Showing the Net result. This link no longer matches a finding of the report; entries with the same name are marked:',
 			'updatelens'
 		);
 	} else {
@@ -796,6 +886,20 @@ function StatusLine( {
 							<span key={ detail }> { detail }</span>
 						) ) }
 					</p>
+					{ notice.why && (
+						<details className="group pt-1">
+							<summary className="-mx-1 inline-flex cursor-pointer select-none list-none items-center gap-1.5 rounded px-1 py-0.5 font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+								<Icon
+									name="chevron-down"
+									className="size-4 -rotate-90 text-slate-500 transition-transform group-open:rotate-0"
+								/>
+								{ notice.why.label }
+							</summary>
+							<p className="mt-1 leading-relaxed text-muted-foreground">
+								{ notice.why.text }
+							</p>
+						</details>
+					) }
 				</div>
 			</div>
 			{ notice.open && (

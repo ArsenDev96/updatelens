@@ -1,15 +1,13 @@
 import { __, _n, sprintf } from '@wordpress/i18n';
 
 import type { IconName } from '../components/Icon';
-import type { AnalysisReport, PhaseKey } from '../types/api';
+import type {
+	AnalysisReport,
+	NotAssessedCategory,
+	PhaseKey,
+} from '../types/api';
 import type { PhaseChangeCounts } from './changes';
 import { formatCount } from './format';
-import {
-	impactHeadline,
-	impactSourceLabel,
-	impactState,
-	type ImpactState,
-} from './impact';
 import {
 	actionSchedulerNotDetectedText,
 	listText,
@@ -19,17 +17,21 @@ import {
 	signalUnavailableText,
 	type Tone,
 } from './labels';
-import { siteChecksEvaluated } from './siteCheckImpact';
-import { siteCheckOutcome, type SiteCheckOutcome } from './siteChecks';
+import { siteCheckName, siteCheckSubject } from './siteCheckImpact';
+import {
+	siteCheckGapText,
+	siteCheckOutcome,
+	type SiteCheckOutcome,
+} from './siteChecks';
 
 /*
- * The report overview's summary below the header: three separate facts,
- * never one verdict about the update. Configuration changes (the Net result
- * total), the site response checks (their outcome, shared with History) and
- * Potential Impact (its findings to review, or why there are none), with the
- * observation coverage of the configuration sources below them. Everything
- * comes from the API's states and summary counts; nothing here is a
- * judgement of the update.
+ * Wording of the report overview's summary (ReportSummary) and of the
+ * configuration section's coverage line: separate facts, never one verdict
+ * about the update. Configuration changes (the Net result total), the site
+ * checks (their outcome, shared with History), what could not be assessed
+ * (from the API's assessment) and the observation coverage of the
+ * configuration sources. Everything comes from the API's states and summary
+ * counts; nothing here is a judgement of the update.
  */
 
 /** One item of the summary. */
@@ -148,37 +150,135 @@ export function siteChecksGlance( report: AnalysisReport ): GlanceItem & {
 }
 
 /**
- * Potential Impact: how many findings there are to review, or why there are
- * none, in the section's own words (impactHeadline()), with what it was
- * based on. Never a verdict: no findings is not "no problems".
+ * What the API could not assess for this report (`assessment.not_assessed`),
+ * one line per category the API gave, naming what is affected; never a
+ * priority, never "no changes" or "passed". The category is the API's:
+ *
+ * - `expired`:      "Observation expired: Options & autoload, … and REST API check"
+ *                   (why is said once, in the status at the top);
+ * - `not_recorded`: "Not recorded for this report: WP-Cron and Action Scheduler";
+ * - `unavailable`:  each source with its reason's title;
+ * - `not_compared`: "Site checks not compared: Homepage and REST API (no check
+ *                   after the update)", the reasons themselves are in the
+ *                   Site checks section.
+ *
+ * Site checks the summary's Site checks row already names as not compared
+ * (siteChecksGlance(): its value or each check's state) are left out, so the
+ * summary says it once; the API's entries are unchanged.
+ *
+ * Empty when everything applicable was assessed or is still being observed.
  *
  * @param report Report.
  */
-export function impactGlance( report: AnalysisReport ): GlanceItem & {
-	state: ImpactState;
-} {
-	const impact = report.potential_impact;
-	const state = impactState( impact );
-	const evaluated = state === 'findings' || state === 'none';
-	const look: Record< ImpactState, [ Tone, IconName ] > = {
-		findings: [ 'caution', 'caution' ],
-		none: [ 'neutral', 'info' ],
-		waiting: [ 'progress', 'progress' ],
-		expired: [ 'neutral', 'info' ],
-		unavailable: [ 'neutral', 'info' ],
-	};
-	return {
-		state,
-		tone: look[ state ][ 0 ],
-		icon: look[ state ][ 1 ],
-		value: impactHeadline( impact, state ),
-		detail: evaluated
-			? impactSourceLabel(
-					impact.status !== 'not_evaluated',
-					siteChecksEvaluated( impact )
+export function notAssessedLines( report: AnalysisReport ): string[] {
+	const evaluation =
+		report.site_checks === undefined
+			? undefined
+			: report.potential_impact.site_checks;
+	const entries = report.potential_impact.assessment.not_assessed.filter(
+		( entry ) =>
+			entry.type !== 'site_check' ||
+			evaluation === undefined ||
+			evaluation.status === 'not_applicable' ||
+			evaluation.checks[ entry.name ]?.status !== 'not_evaluated'
+	);
+	const name = ( entry: ( typeof entries )[ number ] ) =>
+		entry.type === 'signal'
+			? providerLabel( entry.name )
+			: siteCheckName( entry.name );
+	const of = ( category: NotAssessedCategory ) =>
+		entries.filter( ( entry ) => entry.category === category );
+	const lines: string[] = [];
+
+	const expired = of( 'expired' );
+	if ( expired.length > 0 ) {
+		// Configuration sources and site checks are listed apart (listText()
+		// takes at most three names).
+		const parts: string[] = [];
+		const sources = expired.filter( ( entry ) => entry.type === 'signal' );
+		if ( sources.length > 0 ) {
+			parts.push( listText( sources.map( name ) ) );
+		}
+		const checks = expired.flatMap( ( entry ) =>
+			entry.type === 'site_check'
+				? [ siteCheckSubject( entry.name ) ]
+				: []
+		);
+		if ( checks.length > 0 ) {
+			parts.push(
+				sprintf(
+					/* translators: %s: checks, e.g. "Homepage and REST API". */
+					__( '%s checks after the update', 'updatelens' ),
+					listText( checks )
 				)
-			: null,
-	};
+			);
+		}
+		lines.push(
+			sprintf(
+				/* translators: %s: what was not assessed, e.g. "Options & autoload, WP-Cron and Action Scheduler · Homepage and REST API checks after the update". */
+				__( 'Observation expired: %s', 'updatelens' ),
+				parts.join( ' · ' )
+			)
+		);
+	}
+	const historical = of( 'not_recorded' );
+	if ( historical.length > 0 ) {
+		lines.push(
+			sprintf(
+				/* translators: %s: sources the report predates, e.g. "WP-Cron and Action Scheduler". */
+				__( 'Not recorded for this report: %s', 'updatelens' ),
+				listText( historical.map( name ) )
+			)
+		);
+	}
+	for ( const entry of of( 'unavailable' ) ) {
+		if ( entry.type !== 'signal' ) {
+			continue;
+		}
+		lines.push(
+			entry.name === 'action_scheduler' &&
+				entry.reason === 'not_installed'
+				? // Absent at one capture only: not confirmed for the whole update.
+					actionSchedulerNotDetectedText( false )
+				: sprintf(
+						/* translators: 1: a label, e.g. an observation phase ("Net result") or a check ("Homepage"). 2: what it says, e.g. "3 changes". */
+						__( '%1$s: %2$s', 'updatelens' ),
+						name( entry ),
+						signalUnavailableText(
+							entry.name,
+							report.phases.final,
+							report.observation_window_seconds
+						)?.title ?? __( 'Not available', 'updatelens' )
+					)
+		);
+	}
+	// Checks that share how they could not be compared are named together.
+	const gaps = new Map< string, string[] >();
+	for ( const entry of of( 'not_compared' ) ) {
+		const comparison =
+			entry.type === 'site_check'
+				? report.site_checks?.checks[ entry.name ]
+				: undefined;
+		if ( entry.type !== 'site_check' || ! comparison ) {
+			continue;
+		}
+		const gap = siteCheckGapText( comparison );
+		gaps.set( gap, [
+			...( gaps.get( gap ) ?? [] ),
+			siteCheckSubject( entry.name ),
+		] );
+	}
+	gaps.forEach( ( checks, gap ) =>
+		lines.push(
+			sprintf(
+				/* translators: 1: checks, e.g. "Homepage and REST API". 2: why, e.g. "no check after the update". */
+				__( 'Site checks not compared: %1$s (%2$s)', 'updatelens' ),
+				listText( checks ),
+				gap
+			)
+		)
+	);
+	return lines;
 }
 
 /** One line of the observation coverage. */
@@ -233,7 +333,7 @@ export function coverageLine(
 			'caution',
 			'caution',
 			__(
-				'Observed during the update only: the state after it was not captured in time.',
+				'During update only: the observation after the update expired.',
 				'updatelens'
 			)
 		);
@@ -265,6 +365,25 @@ export function coverageLine(
 		}
 		if ( provider === 'action_scheduler' && absent ) {
 			parts.push( actionSchedulerNotDetectedText( true ) );
+			continue;
+		}
+		// A source the report predates (the API's `not_recorded` category) is
+		// a historical gap, not a warning.
+		if (
+			report.potential_impact.assessment.not_assessed.some(
+				( entry ) =>
+					entry.type === 'signal' &&
+					entry.name === provider &&
+					entry.category === 'not_recorded'
+			)
+		) {
+			parts.push(
+				sprintf(
+					/* translators: %s: source, e.g. "WP-Cron". */
+					__( '%s not recorded for this report', 'updatelens' ),
+					providerLabel( provider )
+				)
+			);
 			continue;
 		}
 		gaps++;

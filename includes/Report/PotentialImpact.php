@@ -11,6 +11,8 @@ use UpdateLens\SiteCheck\AfterReason;
 use UpdateLens\SiteCheck\BeforeReason;
 use UpdateLens\SiteCheck\ComparisonState;
 use UpdateLens\SiteCheck\Verdict;
+use UpdateLens\Update\ActionSchedulerPhaseReason;
+use UpdateLens\Update\CronPhaseReason;
 use UpdateLens\Update\ObservationPhase;
 
 defined( 'ABSPATH' ) || exit;
@@ -21,10 +23,19 @@ defined( 'ABSPATH' ) || exit;
  * signal either available with the lists its codec decoded, or unavailable
  * with a reason), never reads WordPress or stored rows, and stores nothing.
  *
- * Findings are observations worth a look, not problems: no severity, no
- * score, and never attribution to the updated plugin. A signal without a Net
- * result is `not_evaluated` with the phase's reason, never "no findings";
- * only an Action Scheduler absent throughout is `not_applicable`.
+ * Findings are observations worth a look, not problems: no score, and never
+ * attribution to the updated plugin. Each finding has a fixed `priority` by
+ * its rule (PRIORITIES): `high` only for a site check whose verified pass
+ * before the update was followed by a failure both requests confirmed after
+ * it; `review` for every other rule. Each configuration finding names the
+ * Net result records it covers (`records`: list and index in the report's
+ * decoded `final` lists), so the report and the signal pages never have to
+ * match rows to evidence themselves. assess() summarizes the findings with
+ * the Net result records no finding covers (`informational`, exact per
+ * record) and what could not be assessed, kept apart from the priorities. A
+ * signal without a Net result is `not_evaluated` with the phase's reason,
+ * never "no findings"; only an Action Scheduler absent throughout is
+ * `not_applicable`.
  *
  * Rules:
  *
@@ -142,6 +153,74 @@ final class PotentialImpact {
 	const SIGNAL_SITE_CHECKS = 'site_checks';
 
 	/**
+	 * Finding priorities. `high`: strong, confirmed evidence that something
+	 * observable stopped working (a verified pass before the update and a
+	 * failure both requests confirmed after it). `review`: a supported pattern
+	 * that merits a look. Changes no rule matched are informational and are
+	 * not findings; observations that could not be assessed have no priority.
+	 */
+	const PRIORITY_HIGH   = 'high';
+	const PRIORITY_REVIEW = 'review';
+
+	/**
+	 * Priority of each rule's findings.
+	 */
+	const PRIORITIES = array(
+		self::SITE_CHECK_NEWLY_FAILING     => self::PRIORITY_HIGH,
+		self::SITE_CHECK_CHANGED           => self::PRIORITY_REVIEW,
+		self::LARGE_AUTOLOADED_OPTION      => self::PRIORITY_REVIEW,
+		self::RECURRING_CRON_EVENT_REMOVED => self::PRIORITY_REVIEW,
+		self::RECURRING_SCHEDULE_CHANGED   => self::PRIORITY_REVIEW,
+	);
+
+	/**
+	 * Roles of a finding's records.
+	 *
+	 * - `subject`:     the change the finding is about (the large option, the
+	 *                  removed recurring instance, the changed schedule).
+	 * - `replacement`: a recurring instance of the same hook added in the Net
+	 *                  result, which the removal rule weighed against the
+	 *                  removed ones (`recurring_cron_event_removed` only).
+	 */
+	const ROLE_SUBJECT     = 'subject';
+	const ROLE_REPLACEMENT = 'replacement';
+
+	/**
+	 * Net result reasons that mean the observation is still running: the
+	 * signal will be assessed, it is not missing.
+	 */
+	const WAITING_REASONS = array( UnavailableReason::UPDATE_IN_PROGRESS, UnavailableReason::AWAITING_SETTLE );
+
+	/**
+	 * Why something was not assessed, as a category of `not_assessed`.
+	 *
+	 * - `expired`:      the observation after the update was not captured
+	 *                   within the settle window (`settle_expired`), so the
+	 *                   Net result and the checks after the update are missing.
+	 * - `not_recorded`: the report predates the source (`not_captured`, or a
+	 *                   phase with nothing recorded): a historical gap.
+	 * - `unavailable`:  the source could not be collected, stored, read or
+	 *                   compared (failures, unsupported or malformed state,
+	 *                   corrupt data, an Action Scheduler not detected at one
+	 *                   capture only, an analysis that ended early).
+	 * - `not_compared`: a site check that did not get both a usable check
+	 *                   before and after the update (missing, inconclusive,
+	 *                   another update in between, not followed up, …); its
+	 *                   reason says which.
+	 *
+	 * None of them means "no changes" or "passed".
+	 */
+	const CATEGORY_EXPIRED      = 'expired';
+	const CATEGORY_NOT_RECORDED = 'not_recorded';
+	const CATEGORY_UNAVAILABLE  = 'unavailable';
+	const CATEGORY_NOT_COMPARED = 'not_compared';
+
+	/**
+	 * Net result reasons of a source the analysis predates.
+	 */
+	const NOT_RECORDED_REASONS = array( CronPhaseReason::NOT_CAPTURED, ActionSchedulerPhaseReason::NOT_CAPTURED, UnavailableReason::NOT_RECORDED );
+
+	/**
 	 * Site check evaluation status while the AFTER result may still arrive.
 	 */
 	const PENDING = 'pending';
@@ -251,7 +330,8 @@ final class PotentialImpact {
 			$found = array();
 			foreach ( $rules as $rule ) {
 				foreach ( self::run( $rule, $signal, $data ) as $finding ) {
-					$found[] = $finding;
+					$finding['priority'] = self::PRIORITIES[ $finding['code'] ];
+					$found[]             = $finding;
 				}
 			}
 
@@ -370,6 +450,195 @@ final class PotentialImpact {
 	}
 
 	/**
+	 * Summarize an evaluated report for the decision at the top of a report.
+	 *
+	 * Counts findings by priority. `net_result` gives, per configuration
+	 * signal evaluated on the Net result, its change records (added, removed,
+	 * changed, plus rescheduled for WP-Cron and Action Scheduler: one record
+	 * per listed entry, the codecs guarantee that the lists match the summary
+	 * counts), the records a finding covers (`matched`: the distinct `records`
+	 * of its findings, subjects and replacements alike) and the rest
+	 * (`informational`: observed, no rule matched; never "safe"); null for a
+	 * signal that was not evaluated. `informational` and `assessed_changes`
+	 * are the sums of `informational` and `changes` over the evaluated
+	 * signals, null when none was. Every count is exact per record,
+	 * and the signal pages mark the same records. Site check findings are not
+	 * change records and are never informational.
+	 *
+	 * What could not be assessed is listed apart, never as a priority:
+	 * signals and site checks `not_evaluated`, with their reason and a
+	 * `category` (CATEGORY_*); `pending` lists those still being observed (the
+	 * Net result while the observation runs, site checks whose result may
+	 * still arrive). `not_applicable` ones (Action Scheduler absent
+	 * throughout, site checks not used) are in neither list.
+	 *
+	 * @param array $impact `potential_impact` (evaluate() with `site_checks`
+	 *                      from evaluate_site_checks()).
+	 * @param array $phases Report phases (the same as evaluate()'s).
+	 * @return array{high_priority: int, needs_review: int, informational: int|null, assessed_changes: int|null, net_result: array<string, array{changes: int, matched: int, informational: int}|null>, not_assessed: array<int, array>, pending: array<int, array>}
+	 */
+	public function assess( array $impact, array $phases ) {
+		$final    = isset( $phases[ ObservationPhase::FINAL ] ) && is_array( $phases[ ObservationPhase::FINAL ] ) ? $phases[ ObservationPhase::FINAL ] : array();
+		$site     = isset( $impact['site_checks'] ) && is_array( $impact['site_checks'] ) ? $impact['site_checks'] : array();
+		$findings = array_merge(
+			isset( $impact['findings'] ) && is_array( $impact['findings'] ) ? $impact['findings'] : array(),
+			isset( $site['findings'] ) && is_array( $site['findings'] ) ? $site['findings'] : array()
+		);
+
+		$priorities = array(
+			self::PRIORITY_HIGH   => 0,
+			self::PRIORITY_REVIEW => 0,
+		);
+		$covered    = array();
+		foreach ( $findings as $finding ) {
+			++$priorities[ self::PRIORITY_HIGH === $finding['priority'] ? self::PRIORITY_HIGH : self::PRIORITY_REVIEW ];
+			if ( isset( $finding['records'] ) && is_array( $finding['records'] ) ) {
+				foreach ( $finding['records'] as $record ) {
+					$covered[ $finding['signal'] ][ $record['list'] . ':' . $record['index'] ] = true;
+				}
+			}
+		}
+
+		$informational = null;
+		$assessed      = null;
+		$net_result    = array();
+		$not_assessed  = array();
+		$pending       = array();
+		$signals       = isset( $impact['signals'] ) && is_array( $impact['signals'] ) ? $impact['signals'] : array();
+		foreach ( array_keys( self::RULES ) as $signal ) {
+			$status                = isset( $signals[ $signal ]['status'] ) ? $signals[ $signal ]['status'] : self::NOT_EVALUATED;
+			$reason                = isset( $signals[ $signal ]['reason'] ) ? $signals[ $signal ]['reason'] : null;
+			$net_result[ $signal ] = null;
+			if ( self::EVALUATED === $status && isset( $final[ $signal ] ) && is_array( $final[ $signal ] ) ) {
+				$changes               = self::change_count( $signal, $final[ $signal ] );
+				$matched               = isset( $covered[ $signal ] ) ? count( $covered[ $signal ] ) : 0;
+				$net_result[ $signal ] = array(
+					'changes'       => $changes,
+					'matched'       => $matched,
+					'informational' => $changes - $matched,
+				);
+				$informational         = (int) $informational + $changes - $matched;
+				$assessed              = (int) $assessed + $changes;
+			} elseif ( self::NOT_EVALUATED === $status ) {
+				if ( in_array( $reason, self::WAITING_REASONS, true ) ) {
+					$pending[] = array(
+						'type' => 'signal',
+						'name' => $signal,
+					);
+				} else {
+					$not_assessed[] = array(
+						'type'     => 'signal',
+						'name'     => $signal,
+						'reason'   => $reason,
+						'category' => self::signal_category( $reason ),
+					);
+				}
+			}
+		}
+
+		$checks = isset( $site['checks'] ) && is_array( $site['checks'] ) ? $site['checks'] : array();
+		foreach ( $checks as $check => $data ) {
+			if ( self::PENDING === $data['status'] ) {
+				$pending[] = array(
+					'type' => 'site_check',
+					'name' => (string) $check,
+				);
+			} elseif ( self::NOT_EVALUATED === $data['status'] ) {
+				$not_assessed[] = array(
+					'type'     => 'site_check',
+					'name'     => (string) $check,
+					'reason'   => $data['reason'],
+					'category' => AfterReason::SETTLE_EXPIRED === $data['reason'] ? self::CATEGORY_EXPIRED : self::CATEGORY_NOT_COMPARED,
+				);
+			}
+		}
+
+		return array(
+			'high_priority'    => $priorities[ self::PRIORITY_HIGH ],
+			'needs_review'     => $priorities[ self::PRIORITY_REVIEW ],
+			'informational'    => $informational,
+			'assessed_changes' => $assessed,
+			'net_result'       => $net_result,
+			'not_assessed'     => $not_assessed,
+			'pending'          => $pending,
+		);
+	}
+
+	/**
+	 * Number of high priority findings among the site check evaluation's
+	 * findings. Only site check rules are high priority (PRIORITIES), so this
+	 * is the report's whole high priority count: History shows it without
+	 * decoding any diff.
+	 *
+	 * @param array $site_checks evaluate_site_checks() output.
+	 * @return int
+	 */
+	public static function site_check_high_priority( array $site_checks ) {
+		$count = 0;
+		foreach ( isset( $site_checks['findings'] ) && is_array( $site_checks['findings'] ) ? $site_checks['findings'] : array() as $finding ) {
+			$count += self::PRIORITY_HIGH === $finding['priority'] ? 1 : 0;
+		}
+
+		return $count;
+	}
+
+	/**
+	 * Category of a signal whose Net result was not evaluated.
+	 *
+	 * @param string|null $reason Net result reason.
+	 * @return string CATEGORY_* constant.
+	 */
+	private static function signal_category( $reason ) {
+		if ( UnavailableReason::SETTLE_EXPIRED === $reason ) {
+			return self::CATEGORY_EXPIRED;
+		}
+
+		return in_array( $reason, self::NOT_RECORDED_REASONS, true ) ? self::CATEGORY_NOT_RECORDED : self::CATEGORY_UNAVAILABLE;
+	}
+
+	/**
+	 * Change records of a signal's decoded Net result: one per listed entry.
+	 *
+	 * @param string $signal Signal.
+	 * @param array  $diff   Decoded Net result of the signal.
+	 * @return int
+	 */
+	private static function change_count( $signal, array $diff ) {
+		$count = 0;
+		foreach ( self::record_lists( $signal ) as $list ) {
+			$count += isset( $diff[ $list ] ) && is_array( $diff[ $list ] ) ? count( $diff[ $list ] ) : 0;
+		}
+
+		return $count;
+	}
+
+	/**
+	 * Change lists of a signal (rescheduled exists for WP-Cron and Action Scheduler only).
+	 *
+	 * @param string $signal Signal.
+	 * @return string[]
+	 */
+	private static function record_lists( $signal ) {
+		return self::SIGNAL_OPTIONS === $signal ? array( 'added', 'removed', 'changed' ) : array( 'added', 'removed', 'rescheduled', 'changed' );
+	}
+
+	/**
+	 * A record reference of a finding.
+	 *
+	 * @param string $diff_list Diff list.
+	 * @param int    $index     Index in the list.
+	 * @param string $role      ROLE_* constant.
+	 * @return array{list: string, index: int, role: string}
+	 */
+	private static function record( $diff_list, $index, $role = self::ROLE_SUBJECT ) {
+		return array(
+			'list'  => $diff_list,
+			'index' => (int) $index,
+			'role'  => $role,
+		);
+	}
+
+	/**
 	 * Kind of a `changed` comparison, from the two verdicts, or null.
 	 *
 	 * @param array $data The check in the report.
@@ -438,6 +707,7 @@ final class PotentialImpact {
 			'evidence' => $evidence,
 			'before'   => $before,
 			'after'    => $after,
+			'priority' => self::PRIORITIES[ $code ],
 		);
 	}
 
@@ -491,7 +761,7 @@ final class PotentialImpact {
 	private static function large_autoloaded_options( array $diff ) {
 		$findings = array();
 
-		foreach ( $diff['added'] as $option ) {
+		foreach ( $diff['added'] as $index => $option ) {
 			if ( $option['is_autoloaded'] && $option['size'] > self::LARGE_OPTION_BYTES ) {
 				$findings[] = self::large_option(
 					$option['name'],
@@ -503,12 +773,13 @@ final class PotentialImpact {
 						'is_autoloaded' => true,
 					),
 					null,
-					null
+					null,
+					self::record( 'added', $index )
 				);
 			}
 		}
 
-		foreach ( $diff['changed'] as $option ) {
+		foreach ( $diff['changed'] as $index => $option ) {
 			if ( ! $option['after_is_autoloaded'] || $option['after_size'] <= self::LARGE_OPTION_BYTES ) {
 				continue;
 			}
@@ -533,7 +804,8 @@ final class PotentialImpact {
 					'is_autoloaded' => true,
 				),
 				$option['size_delta'],
-				$option['value_changed']
+				$option['value_changed'],
+				self::record( 'changed', $index )
 			);
 		}
 
@@ -556,9 +828,10 @@ final class PotentialImpact {
 	 * @param array      $after         Size and autoload after.
 	 * @param int|null   $size_delta    Signed size change, null if added.
 	 * @param bool|null  $value_changed Whether the value changed, null if added.
+	 * @param array      $record        The option's record (record()).
 	 * @return array
 	 */
-	private static function large_option( $name, $transition, $before, array $after, $size_delta, $value_changed ) {
+	private static function large_option( $name, $transition, $before, array $after, $size_delta, $value_changed, array $record ) {
 		return array(
 			'code'     => self::LARGE_AUTOLOADED_OPTION,
 			'signal'   => self::SIGNAL_OPTIONS,
@@ -571,6 +844,7 @@ final class PotentialImpact {
 			),
 			'before'   => $before,
 			'after'    => $after,
+			'records'  => array( $record ),
 		);
 	}
 
@@ -585,9 +859,11 @@ final class PotentialImpact {
 	private static function removed_recurring_cron_events( array $diff ) {
 		// Keys are prefixed so numeric hook names stay strings.
 		$removed = array();
-		foreach ( $diff['removed'] as $event ) {
+		$records = array();
+		foreach ( $diff['removed'] as $index => $event ) {
 			if ( $event['is_recurring'] ) {
 				$removed[ 'h' . $event['hook'] ][] = self::cron_instance( $event );
+				$records[ 'h' . $event['hook'] ][] = self::record( 'removed', $index );
 			}
 		}
 		if ( array() === $removed ) {
@@ -596,13 +872,14 @@ final class PotentialImpact {
 
 		$added_recurring = array();
 		$other           = array();
-		foreach ( $diff['added'] as $event ) {
+		foreach ( $diff['added'] as $index => $event ) {
 			$key = 'h' . $event['hook'];
 			if ( ! isset( $removed[ $key ] ) ) {
 				continue;
 			}
 			if ( $event['is_recurring'] ) {
 				$added_recurring[ $key ][] = self::cron_instance( $event );
+				$records[ $key ][]         = self::record( 'added', $index, self::ROLE_REPLACEMENT );
 			} else {
 				self::increment( $other, $key, 'added_one_time' );
 			}
@@ -639,6 +916,9 @@ final class PotentialImpact {
 				),
 				'before'   => array( 'removed_recurring' => $instances ),
 				'after'    => array( 'added_recurring' => $added ),
+				// Every removed recurring instance of the hook, and the
+				// recurring instances added for it, which the rule weighed.
+				'records'  => $records[ $key ],
 			);
 		}
 
@@ -688,7 +968,7 @@ final class PotentialImpact {
 	private static function changed_recurring_schedules( array $diff, $signal ) {
 		$findings = array();
 
-		foreach ( $diff['changed'] as $entry ) {
+		foreach ( $diff['changed'] as $index => $entry ) {
 			$change = self::SIGNAL_CRON === $signal ? self::cron_change( $entry ) : self::action_scheduler_change( $entry );
 			if ( null === $change ) {
 				continue;
@@ -705,6 +985,7 @@ final class PotentialImpact {
 			$finding['evidence'] = array( 'change' => $change );
 			$finding['before']   = self::side( $entry, 'before_', $signal );
 			$finding['after']    = self::side( $entry, 'after_', $signal );
+			$finding['records']  = array( self::record( 'changed', $index ) );
 
 			$findings[] = $finding;
 		}

@@ -29,7 +29,14 @@ import {
 	optionsPhase,
 	recurring,
 } from './dogfood-fixtures';
-import { asEverywhere, COMPLETED, phases, T, withImpact } from './fixtures';
+import {
+	asEverywhere,
+	assessmentOf,
+	COMPLETED,
+	phases,
+	T,
+	withImpact,
+} from './fixtures';
 
 const SYNC = recurring( 'acme_sync_feeds', T + 1800, 'hourly', 3600 );
 const VERSION_CHECK = recurring(
@@ -63,7 +70,9 @@ const BECAME_AUTOLOADED = {
 
 export const LARGE_ADDED: LargeAutoloadedOptionFinding = {
 	code: 'large_autoloaded_option',
+	records: [],
 	signal: 'options',
+	priority: 'review',
 	option: 'acme_feed_index',
 	evidence: {
 		transition: 'added',
@@ -77,7 +86,9 @@ export const LARGE_ADDED: LargeAutoloadedOptionFinding = {
 
 export const LARGE_BECAME: LargeAutoloadedOptionFinding = {
 	code: 'large_autoloaded_option',
+	records: [],
 	signal: 'options',
+	priority: 'review',
 	option: 'acme_feed_cache',
 	evidence: {
 		transition: 'became_autoloaded',
@@ -91,7 +102,9 @@ export const LARGE_BECAME: LargeAutoloadedOptionFinding = {
 
 export const CRON_REMOVED: RecurringCronEventRemovedFinding = {
 	code: 'recurring_cron_event_removed',
+	records: [],
 	signal: 'cron',
+	priority: 'review',
 	hook: 'acme_sync_feeds',
 	evidence: {
 		removed_recurring_count: 1,
@@ -113,7 +126,9 @@ export const CRON_REMOVED: RecurringCronEventRemovedFinding = {
 
 export const CRON_INTERVAL: CronScheduleChangedFinding = {
 	code: 'recurring_schedule_changed',
+	records: [],
 	signal: 'cron',
+	priority: 'review',
 	hook: 'acme_cleanup',
 	evidence: { change: 'interval_changed' },
 	before: {
@@ -132,7 +147,9 @@ export const CRON_INTERVAL: CronScheduleChangedFinding = {
 
 export const AS_TYPE_CHANGED: ActionScheduleChangedFinding = {
 	code: 'recurring_schedule_changed',
+	records: [],
 	signal: 'action_scheduler',
+	priority: 'review',
 	hook: WPFORMS_SUMMARIES.hook,
 	group: 'wpforms',
 	evidence: { change: 'schedule_type_changed' },
@@ -403,7 +420,9 @@ export function cronChangeFinding(
 ): CronScheduleChangedFinding {
 	return {
 		code: 'recurring_schedule_changed',
+		records: [],
 		signal: 'cron',
+		priority: 'review',
 		hook: change.hook,
 		evidence: { change: 'interval_changed' },
 		before: {
@@ -426,19 +445,23 @@ export function cronChangeFinding(
  * Scheduler phase `not_installed`, which cannot show it was absent at every
  * capture, so the API reports it `not_evaluated`.
  */
+const historicalImpact = {
+	...ONE_FINDING.potential_impact,
+	status: 'partial' as const,
+	signals: {
+		...ONE_FINDING.potential_impact.signals,
+		action_scheduler: {
+			...ONE_FINDING.potential_impact.signals.action_scheduler,
+			status: 'not_evaluated' as const,
+		},
+	},
+};
 export const HISTORICAL_NOT_INSTALLED: AnalysisReport = {
 	...ONE_FINDING,
 	id: 66,
 	potential_impact: {
-		...ONE_FINDING.potential_impact,
-		status: 'partial',
-		signals: {
-			...ONE_FINDING.potential_impact.signals,
-			action_scheduler: {
-				...ONE_FINDING.potential_impact.signals.action_scheduler,
-				status: 'not_evaluated',
-			},
-		},
+		...historicalImpact,
+		assessment: assessmentOf( historicalImpact, ONE_FINDING.phases ),
 	},
 };
 

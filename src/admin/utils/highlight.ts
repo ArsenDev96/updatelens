@@ -1,28 +1,33 @@
 import { createContext, useContext } from 'react';
 
-import type { AnalysisReport, ImpactFinding, Provider } from '../types/api';
+import type {
+	AnalysisReport,
+	FindingRecord,
+	ImpactFinding,
+	Provider,
+} from '../types/api';
 import { findingSubject } from './impact';
 import type { RouteItem, RouteItemKind } from './route';
 
 /*
- * Locating rows on a signal's details: a Potential Impact finding links to
- * its signal page with the option name or hook (and Action Scheduler group),
- * the change list it is about and its index in the report's findings.
+ * Locating rows on a signal's details: a finding links to its signal page
+ * with the option name or hook (and Action Scheduler group), the change list
+ * it is about and its index in the report's findings.
  *
- * Rows are marked as the finding's own ("exact") only when the finding's
- * evidence identifies them: an option by its name; a WP-Cron removal by the
- * removed recurring instances it lists; a schedule change by its before and
- * after values, when exactly one row has them. Entries of one hook can
- * differ only in arguments, which are never shown, so otherwise the rows of
- * the hook (and group) are marked neutrally as the "group" the finding
- * belongs to. Lists that would hide a marked row start expanded. Nothing is
- * filtered or reordered.
+ * Which rows a finding covers is the API's decision: each configuration
+ * finding lists its Net result records (`records`: list and index in
+ * `phases.final.<signal>`), and the assessment counts those same records.
+ * Rows are only looked up here, never matched to evidence, so the marks and
+ * the counts cannot disagree. A link whose finding is no longer in the
+ * report (an older link, a stale index) marks the rows of its option or hook
+ * neutrally as the "group". Lists that would hide a marked row start
+ * expanded. Nothing is filtered or reordered.
  */
 
 /**
- * `exact`: the rows are the entries the finding refers to.
- * `group`: rows of the same hook (and group); the finding's own entry could
- * not be told apart from them, or not be found.
+ * `exact`: the rows are the records the finding covers.
+ * `group`: rows of the same option or hook (and group), for a link without
+ * its finding.
  */
 export type LocatedPrecision = 'exact' | 'group';
 
@@ -33,15 +38,101 @@ export interface Located {
 	rows: ReadonlySet< object >;
 	/** The finding the link came from, when it is still in the report. */
 	finding: ImpactFinding | null;
-	/**
-	 * `group` only: true when more rows match the finding's evidence than it
-	 * refers to (alike except for hidden arguments), false when no row could
-	 * be matched to it.
-	 */
-	ambiguous: boolean;
 }
 
 const LocatedContext = createContext< Located | null >( null );
+
+/** A row a finding covers, with its role (the finding's subject, or a replacement it weighed). */
+export interface MatchedFinding {
+	finding: ImpactFinding;
+	role: FindingRecord[ 'role' ];
+}
+
+/** Rows of the Net result with the finding that covers each one. */
+export type MatchedRows = ReadonlyMap< object, MatchedFinding >;
+
+const MatchedContext = createContext< MatchedRows | null >( null );
+
+export const MatchedRowsProvider = MatchedContext.Provider;
+
+/** The finding that covers a row, if any. */
+export function useMatched(
+	record: object | undefined
+): MatchedFinding | null {
+	const matched = useContext( MatchedContext );
+	return ( record !== undefined && matched?.get( record ) ) || null;
+}
+
+/**
+ * The Net result rows of one record list of a signal.
+ *
+ * @param report Loaded report.
+ * @param signal Signal.
+ * @param list   Record list.
+ */
+function rowsOf(
+	report: AnalysisReport,
+	signal: Provider,
+	list: FindingRecord[ 'list' ]
+): object[] {
+	const phase = report.phases.final[ signal ];
+	if ( ! phase.available ) {
+		return [];
+	}
+	if ( list === 'rescheduled' ) {
+		return 'rescheduled' in phase ? phase.rescheduled : [];
+	}
+	return phase[ list ];
+}
+
+/**
+ * The rows a finding's records point at (all of them, or those of one role).
+ *
+ * @param report  Loaded report.
+ * @param finding Configuration finding.
+ * @param role    Only records of this role, if given.
+ */
+function recordRows(
+	report: AnalysisReport,
+	finding: ImpactFinding,
+	role?: FindingRecord[ 'role' ]
+): Array< [ object, FindingRecord ] > {
+	return finding.records.flatMap(
+		( record ): Array< [ object, FindingRecord ] > => {
+			const row = rowsOf( report, finding.signal, record.list )[
+				record.index
+			];
+			return row !== undefined && ( ! role || record.role === role )
+				? [ [ row, record ] ]
+				: [];
+		}
+	);
+}
+
+/**
+ * Every Net result row of a signal that a finding covers, from the API's
+ * records: the same records the assessment counts.
+ *
+ * @param report Loaded report.
+ * @param signal Signal of the page.
+ */
+export function matchedRows(
+	report: AnalysisReport,
+	signal: Provider
+): MatchedRows {
+	const rows = new Map< object, MatchedFinding >();
+	report.potential_impact.findings.forEach( ( finding ) => {
+		if ( finding.signal !== signal ) {
+			return;
+		}
+		recordRows( report, finding ).forEach( ( [ row, record ] ) => {
+			if ( ! rows.has( row ) ) {
+				rows.set( row, { finding, role: record.role } );
+			}
+		} );
+	} );
+	return rows;
+}
 
 export const LocatedProvider = LocatedContext.Provider;
 
@@ -51,8 +142,8 @@ export function useLocated(): Located | null {
 }
 
 /**
- * How a diff record is marked: as the finding's own, as a row of its hook,
- * or not at all.
+ * How a diff record is marked: as the finding's own, as a row of its option
+ * or hook, or not at all.
  *
  * @param located Located rows, or null.
  * @param record  Diff record of a row.
@@ -85,7 +176,9 @@ export function findingListKind( finding: ImpactFinding ): RouteItemKind {
 }
 
 /**
- * Rows of the Net result that a located item refers to.
+ * Rows of the Net result that a located item refers to: the records of its
+ * finding the API names as its subjects, or, without that finding, the rows
+ * of the option or hook.
  *
  * @param report Loaded report.
  * @param signal Signal of the page.
@@ -97,46 +190,40 @@ export function locate(
 	item: RouteItem
 ): Located {
 	const finding = linkedFinding( report, signal, item );
-	const phase = report.phases.final[ signal ];
-	const none = ( ambiguous: boolean, rows: object[] = [] ): Located => ( {
+	const located = (
+		precision: LocatedPrecision,
+		rows: object[] = []
+	): Located => ( {
 		item,
-		precision: 'group',
+		precision,
 		rows: new Set( rows ),
 		finding,
-		ambiguous,
 	} );
-	if ( ! phase.available ) {
-		return none( false );
+	if ( ! report.phases.final[ signal ].available ) {
+		return located( 'group' );
 	}
-
-	const kind = finding ? findingListKind( finding ) : item.kind;
-	const lists: RouteItemKind[] = kind
-		? [ kind ]
-		: [ 'added', 'removed', 'changed' ];
-	const candidates = lists
-		.flatMap( ( list ): object[] => phase[ list ] )
-		.filter( ( record ) => sameSubject( record, item ) );
 
 	if ( finding ) {
-		const matches = candidates.filter( ( record ) =>
-			matchesEvidence( finding, record )
+		const own = recordRows( report, finding, 'subject' ).map(
+			( [ row ] ) => row
 		);
-		if (
-			matches.length > 0 &&
-			matches.length === expectedRows( finding )
-		) {
-			return { ...none( false, matches ), precision: 'exact' };
+		if ( own.length > 0 ) {
+			return located( 'exact', own );
 		}
-		return matches.length > 0
-			? none( true, matches )
-			: none( false, candidates );
 	}
+
+	const lists: RouteItemKind[] = item.kind
+		? [ item.kind ]
+		: [ 'added', 'removed', 'changed' ];
+	const candidates = lists
+		.flatMap( ( list ) => rowsOf( report, signal, list ) )
+		.filter( ( record ) => sameSubject( record, item ) );
 
 	// A link without its finding: only a unique option name is exact.
 	if ( signal === 'options' && candidates.length === 1 ) {
-		return { ...none( false, candidates ), precision: 'exact' };
+		return located( 'exact', candidates );
 	}
-	return none( false, candidates );
+	return located( 'group', candidates );
 }
 
 /**
@@ -170,17 +257,6 @@ function linkedFinding(
 }
 
 /**
- * Number of rows the finding's evidence refers to.
- *
- * @param finding Finding.
- */
-function expectedRows( finding: ImpactFinding ): number {
-	return finding.code === 'recurring_cron_event_removed'
-		? finding.evidence.removed_recurring_count
-		: 1;
-}
-
-/**
  * Whether a record has the located name (option or hook) and group.
  *
  * @param record Diff record.
@@ -197,36 +273,5 @@ function sameSubject( record: object, item: RouteItem ): boolean {
 		( item.group === null ||
 			typeof group !== 'string' ||
 			group === item.group )
-	);
-}
-
-/**
- * Whether a record of the finding's list (with the finding's subject) has the
- * values of the finding's evidence.
- *
- * @param finding Finding.
- * @param record  Diff record.
- */
-function matchesEvidence( finding: ImpactFinding, record: object ): boolean {
-	const row = record as Record< string, unknown >;
-	switch ( finding.code ) {
-		case 'large_autoloaded_option':
-			return true;
-		case 'recurring_cron_event_removed':
-			return (
-				row.is_recurring === true &&
-				finding.before.removed_recurring.some(
-					( instance ) =>
-						instance.timestamp === row.timestamp &&
-						instance.schedule === row.schedule &&
-						instance.interval === row.interval
-				)
-			);
-	}
-	const sides = [ 'before', 'after' ] as const;
-	return sides.every( ( side ) =>
-		Object.entries( finding[ side ] ).every(
-			( [ key, value ] ) => row[ `${ side }_${ key }` ] === value
-		)
 	);
 }

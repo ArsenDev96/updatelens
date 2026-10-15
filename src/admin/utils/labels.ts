@@ -540,7 +540,7 @@ export function unavailableReasonText(
 			};
 		case 'settle_expired':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Observation expired', 'updatelens' ),
 				description: sprintf(
 					/* translators: %s: observation window length, e.g. "5 minutes". */
 					__(
@@ -640,7 +640,7 @@ export function cronUnavailableReasonText(
 			};
 		case 'settle_expired':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Observation expired', 'updatelens' ),
 				description: sprintf(
 					/* translators: %s: observation window length, e.g. "5 minutes". */
 					__(
@@ -660,7 +660,7 @@ export function cronUnavailableReasonText(
 			};
 		case 'not_captured':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Not recorded for this report', 'updatelens' ),
 				description: __(
 					'WP-Cron was not captured for this phase.',
 					'updatelens'
@@ -848,7 +848,7 @@ export function actionSchedulerUnavailableReasonText(
 			};
 		case 'settle_expired':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Observation expired', 'updatelens' ),
 				description: sprintf(
 					/* translators: %s: observation window length, e.g. "5 minutes". */
 					__(
@@ -868,7 +868,7 @@ export function actionSchedulerUnavailableReasonText(
 			};
 		case 'not_captured':
 			return {
-				title: __( 'Not captured', 'updatelens' ),
+				title: __( 'Not recorded for this report', 'updatelens' ),
 				description: __(
 					'Action Scheduler was not captured for this phase.',
 					'updatelens'
@@ -1070,6 +1070,8 @@ export interface ReportNotice {
 	description: string;
 	/** Extra sentences (settle outcome, error). */
 	details: string[];
+	/** Background behind a closed disclosure, e.g. why a report is partial. */
+	why?: { label: string; text: string };
 	tone: Tone;
 	/** The analysis is still open; a refresh may show more. */
 	open: boolean;
@@ -1090,21 +1092,34 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 	switch ( report.status ) {
 		case 'completed': {
 			if ( report.settle_outcome === 'expired' ) {
+				// The one full explanation of a partial report; the other
+				// sections only refer to it. Why it is partial (the request
+				// that never came) is background, behind a closed disclosure.
 				return {
 					...base,
 					tone: 'caution',
 					title: __(
-						'Post-update observation expired',
+						'Partial report: the observation after the update expired',
 						'updatelens'
 					),
-					description: sprintf(
-						/* translators: %s: observation window length, e.g. "5 minutes". */
-						__(
-							'The update itself was analyzed, but no eligible admin request occurred within %s of the update.',
+					description: __(
+						'The plugin update completed and the changes during it were recorded. The After update and Net result phases, the review rules and the site checks after the update are missing. Missing does not mean unchanged.',
+						'updatelens'
+					),
+					why: {
+						label: __(
+							'Why is this report incomplete?',
 							'updatelens'
 						),
-						windowLength
-					),
+						text: sprintf(
+							/* translators: %s: observation window length, e.g. "5 minutes". */
+							__(
+								'To capture the state after the update, UpdateLens needs a request from the browser that ran the update, or another admin page, within %s, and none arrived in time.',
+								'updatelens'
+							),
+							windowLength
+						),
+					},
 				};
 			}
 			const outcome = settleOutcomeText(

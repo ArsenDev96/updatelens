@@ -1024,7 +1024,7 @@ function notUsedText(
 				),
 			}
 		: {
-				status: __( 'Not captured', 'updatelens' ),
+				status: __( 'Not recorded', 'updatelens' ),
 				detail: __(
 					'This update was observed before UpdateLens recorded site checks.',
 					'updatelens'
@@ -1259,12 +1259,17 @@ export function afterReasonText( reason: string ): string {
 			);
 		case 'settle_expired':
 			return __(
-				'The observation after the update was not captured in time, so there was no check after it.',
+				'The observation after the update expired, so no check ran after it.',
+				'updatelens'
+			);
+		case 'next_update':
+			return __(
+				'Another plugin update started right after this one (a second “Update now” or a bulk update), so the check after the update could not run for this update on its own.',
 				'updatelens'
 			);
 		case 'not_followed_up':
 			return __(
-				'Checks after an update run only after “Update now” on Installed Plugins, in the same browser tab. This update finished another way, for example from Dashboard → Updates, so there was no check after it.',
+				'The check after the update runs in the tab that clicked “Update now” on Installed Plugins, right after “Updated!”. This update was not followed up there: it ran from Dashboard → Updates, the page was left while it was updating, or the browser’s follow-up request did not arrive.',
 				'updatelens'
 			);
 		case 'no_baseline':
@@ -1292,6 +1297,35 @@ export function afterReasonText( reason: string ): string {
 				'No check after the update was available.',
 				'updatelens'
 			);
+	}
+}
+
+/**
+ * How to get a comparison for a future update, when a missing check after
+ * the update is explained by how the update ran: one sentence, or null. The
+ * missing comparison itself cannot be made afterwards, and this never offers
+ * to.
+ *
+ * @param reason AFTER reason (or comparison reason).
+ */
+export function siteCheckNextTimeText( reason: string | null ): string | null {
+	switch ( reason ) {
+		case 'next_update':
+		case 'overlapping_update':
+		case 'queued_update':
+			return __(
+				'For a comparison next time, update one plugin at a time: on Installed Plugins, wait for “Ready to compare site responses”, click “Update now”, and wait a few seconds after “Updated!” before starting the next update.',
+				'updatelens'
+			);
+		case 'not_followed_up':
+		case 'not_started':
+		case 'not_reported':
+			return __(
+				'For a comparison next time, click “Update now” on Installed Plugins and keep that tab open for a few seconds after “Updated!”.',
+				'updatelens'
+			);
+		default:
+			return null;
 	}
 }
 

@@ -1,6 +1,7 @@
 import { _n, __, sprintf } from '@wordpress/i18n';
 
 import type {
+	FindingPriority,
 	ImpactFinding,
 	LargeAutoloadedOptionFinding,
 	PotentialImpact,
@@ -19,7 +20,6 @@ import {
 	cronUnavailableReasonText,
 	providerLabel,
 	unavailableReasonText,
-	windowText,
 } from './labels';
 import { siteCheckFindings } from './siteCheckImpact';
 
@@ -106,6 +106,20 @@ export function findingGroupTitle( group: FindingGroup ): string {
 						'updatelens'
 					);
 	}
+}
+
+/**
+ * Title of one finding's rule ("Large autoloaded option").
+ *
+ * @param finding Finding.
+ */
+export function findingTitle( finding: ImpactFinding ): string {
+	return findingGroupTitle( {
+		key: '',
+		code: finding.code,
+		signal: finding.signal,
+		findings: [ finding ],
+	} );
 }
 
 /**
@@ -487,6 +501,19 @@ export function cronRemovalContext( finding: ImpactFinding ): string[] {
 }
 
 /**
+ * A finding's priority as the API gave it: "High priority" (a site check
+ * that passed before the update and failed after it, confirmed) or "Needs
+ * review" (a pattern worth a look).
+ *
+ * @param priority Priority.
+ */
+export function priorityLabel( priority: FindingPriority ): string {
+	return priority === 'high'
+		? __( 'High priority', 'updatelens' )
+		: __( 'Needs review', 'updatelens' );
+}
+
+/**
  * The evidence label: "Based on Net result", "Based on Net result and site
  * checks" when site checks were compared too, or "Based on site checks".
  *
@@ -560,6 +587,25 @@ export function impactCompleteness(
 }
 
 /**
+ * What an evaluated result is missing, from the API's statuses: a
+ * configuration source of the Net result that was not evaluated (`status`
+ * `partial`; not applicable sources do not count), and site checks that
+ * could not be compared (their own status, never part of the Net result).
+ *
+ * @param impact API evaluation.
+ */
+export function impactGaps( impact: PotentialImpact ): {
+	configuration: boolean;
+	siteChecks: boolean;
+} {
+	const site = impact.site_checks?.status;
+	return {
+		configuration: impact.status === 'partial',
+		siteChecks: site === 'partial' || site === 'not_evaluated',
+	};
+}
+
+/**
  * Headline of the section.
  *
  * @param impact API evaluation.
@@ -589,11 +635,27 @@ export function impactHeadline(
 						'No findings yet — site checks are still pending.',
 						'updatelens'
 					);
-				case 'partial':
-					return __(
-						'No findings in completed observations; some checks were unavailable.',
-						'updatelens'
-					);
+				case 'partial': {
+					// Says what is missing: configuration sources (named in
+					// the summary's Not assessed row), site checks (named in
+					// its Site checks row), or both.
+					const gaps = impactGaps( impact );
+					if ( gaps.configuration && gaps.siteChecks ) {
+						return __(
+							'No findings in the completed observations; some configuration sources were not assessed and not all site checks were compared.',
+							'updatelens'
+						);
+					}
+					return gaps.siteChecks
+						? __(
+								'No findings in the completed observations; not all site checks were compared.',
+								'updatelens'
+							)
+						: __(
+								'No findings in the completed observations; some configuration sources were not assessed.',
+								'updatelens'
+							);
+				}
 				default:
 					return __(
 						'No findings matched the completed observations.',
@@ -603,6 +665,7 @@ export function impactHeadline(
 		case 'waiting':
 			return __( 'Waiting for the Net result', 'updatelens' );
 		case 'expired':
+			return __( 'Not assessed in this partial report', 'updatelens' );
 		case 'unavailable':
 			return __( 'Not available for this report', 'updatelens' );
 	}
@@ -646,7 +709,7 @@ export function impactDescription(
 					);
 				case 'partial':
 					return __(
-						'Checks that could not be completed are listed below and are not counted as passed. Only a few specific patterns are checked, so this does not show that the update had no other effects.',
+						'Observations that could not be assessed are not counted as passed. Only a few specific patterns are checked, so this does not show that the update had no other effects.',
 						'updatelens'
 					);
 				default:
@@ -661,13 +724,10 @@ export function impactDescription(
 				'updatelens'
 			);
 		case 'expired':
-			return sprintf(
-				/* translators: %s: observation window length, e.g. "5 minutes". */
-				__(
-					'The post-update observation was not captured within %s, so there is no Net result to check. Changes observed during the update are still listed in the During update phase.',
-					'updatelens'
-				),
-				windowText( windowSeconds )
+			// Why is said once, in the status at the top of the report.
+			return __(
+				'Review rules need the Net result, which this partial report does not have. Changes observed during the update are listed in the During update phase.',
+				'updatelens'
 			);
 		case 'unavailable':
 			return sprintf(

@@ -490,6 +490,14 @@ final class PotentialImpactTest extends TestCase {
 						'autoload'      => 'on',
 						'is_autoloaded' => true,
 					),
+					'records'  => array(
+						array(
+							'list'  => 'added',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
+					'priority' => 'review',
 				),
 			),
 			$this->option_findings( array(), array( 'acme_cache' => array( self::bytes( 180000 ), 'on' ) ) )
@@ -634,6 +642,14 @@ final class PotentialImpactTest extends TestCase {
 						'autoload'      => 'on',
 						'is_autoloaded' => true,
 					),
+					'records'  => array(
+						array(
+							'list'  => 'changed',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
+					'priority' => 'review',
 				),
 			),
 			$this->option_findings( array( 'acme_cache' => array( $value, 'off' ) ), array( 'acme_cache' => array( $value, 'on' ) ) )
@@ -756,6 +772,14 @@ final class PotentialImpactTest extends TestCase {
 						),
 					),
 					'after'    => array( 'added_recurring' => array() ),
+					'records'  => array(
+						array(
+							'list'  => 'removed',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
+					'priority' => 'review',
 				),
 			),
 			$this->cron_findings(
@@ -1068,6 +1092,14 @@ final class PotentialImpactTest extends TestCase {
 						'interval'     => 3600,
 						'is_recurring' => true,
 					),
+					'records'  => array(
+						array(
+							'list'  => 'changed',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
+					'priority' => 'review',
 				),
 			),
 			$this->cron_findings(
@@ -1140,6 +1172,14 @@ final class PotentialImpactTest extends TestCase {
 						'cron_expression' => null,
 						'is_recurring'    => true,
 					),
+					'records'  => array(
+						array(
+							'list'  => 'changed',
+							'index' => 0,
+							'role'  => 'subject',
+						),
+					),
+					'priority' => 'review',
 				),
 			),
 			$this->action_scheduler_findings(
@@ -1459,10 +1499,10 @@ final class PotentialImpactTest extends TestCase {
 		$this->assertSame( array( 'phase', 'status', 'signals', 'findings' ), array_keys( $result ) );
 		$this->assertSame(
 			array(
-				array( 'code', 'signal', 'option', 'evidence', 'before', 'after' ),
-				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after' ),
-				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after' ),
-				array( 'code', 'signal', 'hook', 'group', 'evidence', 'before', 'after' ),
+				array( 'code', 'signal', 'option', 'evidence', 'before', 'after', 'records', 'priority' ),
+				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after', 'records', 'priority' ),
+				array( 'code', 'signal', 'hook', 'evidence', 'before', 'after', 'records', 'priority' ),
+				array( 'code', 'signal', 'hook', 'group', 'evidence', 'before', 'after', 'records', 'priority' ),
 			),
 			array_map( 'array_keys', $result['findings'] )
 		);

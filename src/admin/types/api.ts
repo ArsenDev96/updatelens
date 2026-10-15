@@ -145,6 +145,11 @@ export interface AnalysisHistoryItem extends AnalysisBase {
 	 * without findings; absent from APIs before it was added.
 	 */
 	site_checks?: Pick< SiteCheckImpact, 'status' | 'checks' >;
+	/**
+	 * The report's `potential_impact.assessment.high_priority` (only site
+	 * check rules are high priority); absent from APIs before it was added.
+	 */
+	high_priority?: number;
 }
 
 /** Options totals and signed deltas (`after - before`) in raw counts and bytes. */
@@ -445,6 +450,27 @@ export interface ImpactOptionSide {
 	is_autoloaded: boolean;
 }
 
+/**
+ * Priority of a finding, fixed per rule by the API (PotentialImpact::PRIORITIES):
+ * `high` only for a site check that passed (verified) before the update and
+ * failed after it, confirmed by both requests; `review` for every other rule.
+ * Changes no rule matched are not findings (informational, see
+ * ImpactAssessment); observations that could not be assessed have no priority.
+ */
+export type FindingPriority = 'high' | 'review';
+
+/**
+ * A Net result record a configuration finding covers: its list and index in
+ * `phases.final.<signal>` of the same report. `subject`: the change the
+ * finding is about; `replacement`: a recurring instance of the same hook
+ * added in the Net result, which the WP-Cron removal rule weighed.
+ */
+export interface FindingRecord {
+	list: 'added' | 'removed' | 'changed' | 'rescheduled';
+	index: number;
+	role: 'subject' | 'replacement';
+}
+
 export interface LargeAutoloadedOptionFinding {
 	code: 'large_autoloaded_option';
 	signal: 'options';
@@ -460,6 +486,8 @@ export interface LargeAutoloadedOptionFinding {
 	/** Null if added. */
 	before: ImpactOptionSide | null;
 	after: ImpactOptionSide;
+	records: FindingRecord[];
+	priority: FindingPriority;
 }
 
 /** A recurring WP-Cron instance (arguments never included). */
@@ -490,6 +518,8 @@ export interface RecurringCronEventRemovedFinding {
 	};
 	before: { removed_recurring: ImpactCronInstance[] };
 	after: { added_recurring: ImpactCronInstance[] };
+	records: FindingRecord[];
+	priority: FindingPriority;
 }
 
 export type ScheduleChange =
@@ -512,6 +542,8 @@ export interface CronScheduleChangedFinding {
 	evidence: { change: ScheduleChange };
 	before: ImpactCronSide;
 	after: ImpactCronSide;
+	records: FindingRecord[];
+	priority: FindingPriority;
 }
 
 export interface ImpactActionSide {
@@ -530,6 +562,8 @@ export interface ActionScheduleChangedFinding {
 	evidence: { change: ScheduleChange };
 	before: ImpactActionSide;
 	after: ImpactActionSide;
+	records: FindingRecord[];
+	priority: FindingPriority;
 }
 
 export type ImpactFinding =
@@ -618,6 +652,7 @@ export interface SiteCheckNewlyFailingFinding {
 	evidence: { failure: string; attempt_count: number };
 	before: SiteCheckSide;
 	after: SiteCheckSide;
+	priority: FindingPriority;
 }
 
 /**
@@ -634,6 +669,7 @@ export interface SiteCheckChangedFinding {
 	evidence: { change: 'redirect_appeared'; attempt_count: number };
 	before: SiteCheckSide;
 	after: SiteCheckSide;
+	priority: FindingPriority;
 }
 
 export type SiteCheckFinding =
@@ -669,6 +705,54 @@ export interface SiteCheckImpact {
 	findings: SiteCheckFinding[];
 }
 
+/** A signal or site check in the assessment's lists. */
+export type AssessmentSource =
+	| { type: 'signal'; name: Provider }
+	| { type: 'site_check'; name: SiteCheckId };
+
+/**
+ * Why something was not assessed (PotentialImpact::CATEGORY_*): the
+ * observation after the update expired; the report predates the source
+ * (historical); the source could not be collected, stored, read or
+ * compared; a site check without a usable check before and after the
+ * update. None of them means "no changes" or "passed".
+ */
+export type NotAssessedCategory =
+	'expired' | 'not_recorded' | 'unavailable' | 'not_compared';
+
+/** One signal's Net result records: all, covered by a finding, and the rest. */
+export interface NetResultRecords {
+	changes: number;
+	matched: number;
+	informational: number;
+}
+
+/**
+ * The report's decision summary (PotentialImpact::assess()): findings by
+ * priority, the Net result change records no finding covers (exact per
+ * record; the signal pages mark the same records), and what could not be
+ * assessed (never counted as a priority) or is still being observed.
+ */
+export interface ImpactAssessment {
+	high_priority: number;
+	needs_review: number;
+	/** Net result change records no finding covers, in the evaluated signals; null when none was. Never "safe". */
+	informational: number | null;
+	/** Net result change records of the evaluated signals; null when none was. */
+	assessed_changes: number | null;
+	/** Per signal; null when its Net result was not evaluated (or not applicable). */
+	net_result: Record< Provider, NetResultRecords | null >;
+	/** Not evaluated (missing, unsupported, inconclusive), with the reason and its category. */
+	not_assessed: Array<
+		AssessmentSource & {
+			reason: string | null;
+			category: NotAssessedCategory;
+		}
+	>;
+	/** Still being observed: the Net result while open, site checks that may still arrive. */
+	pending: AssessmentSource[];
+}
+
 /**
  * Review rules evaluated on the Net result (always `final`, whatever phase
  * is shown), plus the site checks taken around the update. Findings are
@@ -681,6 +765,7 @@ export interface PotentialImpact {
 	signals: Record< Provider, ImpactSignal >;
 	findings: ImpactFinding[];
 	site_checks: SiteCheckImpact;
+	assessment: ImpactAssessment;
 }
 
 /** GET /updatelens/v1/analyses/{id}. */

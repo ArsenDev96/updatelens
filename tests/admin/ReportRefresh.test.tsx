@@ -11,7 +11,7 @@ import type {
 } from '@/admin/types/api';
 
 import cases from '../fixtures/site-check-impact-cases.json';
-import { AWAITING, COMPLETED, restError } from './fixtures';
+import { AWAITING, COMPLETED, restError, withSiteCheckCase } from './fixtures';
 import { IMPACT } from './impact-fixtures';
 import { openReport, tab } from './report-view';
 
@@ -42,14 +42,11 @@ const DONE: AnalysisReport = { ...IMPACT };
  */
 function withSiteChecks( name: keyof typeof cases.cases ): AnalysisReport {
 	const data = cases.cases[ name ];
-	return {
-		...OPEN,
-		site_checks: data.site_checks as SiteChecks,
-		potential_impact: {
-			...OPEN.potential_impact,
-			site_checks: data.potential_impact_site_checks as SiteCheckImpact,
-		},
-	};
+	return withSiteCheckCase(
+		OPEN,
+		data.site_checks as SiteChecks,
+		data.potential_impact_site_checks as SiteCheckImpact
+	);
 }
 
 /** A read the test settles itself. */
@@ -63,10 +60,9 @@ function deferred() {
 	return { promise, resolve, reject };
 }
 
-const impact = () => screen.getByRole( 'region', { name: 'Potential impact' } );
+const impact = () => screen.getByRole( 'region', { name: 'Findings' } );
 /** The site response checks section (pending results and their refresh). */
-const site = () =>
-	screen.getByRole( 'region', { name: 'Site response checks' } );
+const site = () => screen.getByRole( 'region', { name: 'Site checks' } );
 const statusLine = () =>
 	screen.getByRole( 'region', { name: 'Analysis status' } );
 const refreshButton = () =>

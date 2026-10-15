@@ -14,7 +14,7 @@ import {
 	formatCount,
 	formatCountDelta,
 	formatDuration,
-	formatDurationDelta,
+	formatShift,
 } from '../utils/format';
 import {
 	cronPhaseNote,
@@ -608,7 +608,7 @@ function ChangedEventRow( { event }: { event: ChangedCronEvent } ) {
  * @param props.event Event.
  */
 function RescheduledEventRow( { event }: { event: RescheduledCronEvent } ) {
-	const delta = formatDurationDelta( event.timestamp_delta );
+	const delta = formatShift( event.timestamp_delta );
 
 	return (
 		<ChangeRow
@@ -625,16 +625,27 @@ function RescheduledEventRow( { event }: { event: RescheduledCronEvent } ) {
 			<RowDetails
 				rows={ [
 					[
+						__( 'What changed', 'updatelens' ),
+						delta
+							? sprintf(
+									/* translators: %s: how far the next run moved, e.g. "about 1 hour later". */
+									__(
+										'Only the next run moved (%s); the recurrence is unchanged.',
+										'updatelens'
+									),
+									delta
+								)
+							: __(
+									'Only the next run moved; the recurrence is unchanged.',
+									'updatelens'
+								),
+					],
+					[
 						__( 'Next run', 'updatelens' ),
 						<span key="t" className="tabular-nums">
 							<Time timestamp={ event.before_timestamp } />
 							<To />
 							<Time timestamp={ event.after_timestamp } />
-							{ delta && (
-								<span className="ml-1.5 text-muted-foreground">
-									({ delta })
-								</span>
-							) }
 						</span>,
 					],
 				] }

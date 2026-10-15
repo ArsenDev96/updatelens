@@ -137,6 +137,7 @@ final class PotentialImpactSiteChecksTest extends TestCase {
 				),
 				'before'   => $report['checks']['home']['before'],
 				'after'    => $report['checks']['home']['after'],
+				'priority' => 'high',
 			),
 			$finding
 		);

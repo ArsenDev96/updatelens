@@ -146,7 +146,7 @@ describe( 'Action Scheduler in reports', () => {
 				'5 changes',
 			] );
 			expect( cardTexts()[ 2 ] ).toMatch(
-				/^Action SchedulerPending and in-progress background actions\.5 changes Added \d+/
+				/^Action Scheduler5 changes · Added \d+/
 			);
 			// Net result: 6 options + 5 WP-Cron + 5 Action Scheduler.
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
@@ -154,7 +154,10 @@ describe( 'Action Scheduler in reports', () => {
 				'After update, 5 changes',
 				'Net result, 16 changes',
 			] );
-			expect( screen.getByText( '16 observed changes' ) ).toBeVisible();
+			// The summary names the Net result total.
+			expect(
+				screen.getByRole( 'region', { name: 'Report summary' } )
+			).toHaveTextContent( '16 changes observed' );
 			// Rows are on the Action Scheduler page, not the overview.
 			expect( document.body ).not.toHaveTextContent( 'fetch_patterns' );
 			cleanup();
@@ -294,9 +297,11 @@ describe( 'Action Scheduler in reports', () => {
 			await renderReport( report, null );
 			const user = userEvent.setup();
 
-			expect( phasePanel() ).toHaveTextContent(
-				'Changes were observed in Action Scheduler. No changes were observed in Options & autoload and WP-Cron.'
-			);
+			expect( cardStates() ).toEqual( [
+				'No changes',
+				'No changes',
+				'5 changes',
+			] );
 			// The other signals keep their place, without breakdowns.
 			expect( cardStates() ).toEqual( [
 				'No changes',
@@ -374,12 +379,12 @@ describe( 'Action Scheduler in reports', () => {
 			],
 			[
 				'settle_expired',
-				'Not captured',
+				'Observation expired',
 				'Post-update Action Scheduler state was not captured within 5 minutes of the update.',
 			],
 			[
 				'not_captured',
-				'Not captured',
+				'Not recorded for this report',
 				'Action Scheduler was not captured for this phase.',
 			],
 			[
@@ -409,7 +414,7 @@ describe( 'Action Scheduler in reports', () => {
 					'6 changes'
 				);
 				expect( signalCard( 'Action Scheduler' ) ).toHaveTextContent(
-					`Not available ${ title }`
+					`Not available · ${ title }`
 				);
 				cleanup();
 
@@ -443,7 +448,9 @@ describe( 'Action Scheduler in reports', () => {
 			} );
 
 			expect( tab( /^Net result/ ) ).toHaveTextContent( 'Not available' );
-			expect( signalPanel() ).toHaveTextContent( 'Not captured' );
+			expect( signalPanel() ).toHaveTextContent(
+				'Not recorded for this report'
+			);
 			expect( signalPanel() ).not.toHaveTextContent( 'No changes' );
 		} );
 
@@ -498,11 +505,12 @@ describe( 'Action Scheduler in reports', () => {
 				asReport( 53, () => ( {} ) ),
 				null
 			);
-			expect(
-				screen.getByText(
-					'No tracked changes observed during this phase.'
-				)
-			).toBeInTheDocument();
+			// Every signal says so in its own row; no all-zero counts.
+			expect( cardStates() ).toEqual( [
+				'No changes',
+				'No changes',
+				'No changes',
+			] );
 		} );
 
 		it( 'shows the summary with "No longer active" and quiet rescheduling', async () => {

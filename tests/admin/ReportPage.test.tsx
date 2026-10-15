@@ -277,6 +277,47 @@ describe( 'ReportPage', () => {
 			expect( panel() ).not.toHaveTextContent( 'settle_expired' );
 		} );
 
+		it( 'keeps the partial report short, with why behind a closed disclosure', async () => {
+			renderReport( EXPIRED );
+			const user = userEvent.setup();
+
+			const status = await screen.findByRole( 'region', {
+				name: 'Analysis status',
+			} );
+			expect( status ).toHaveTextContent(
+				'Partial report: the observation after the update expired'
+			);
+			expect( status ).toHaveTextContent(
+				'The plugin update completed and the changes during it were recorded.'
+			);
+			expect( status ).toHaveTextContent(
+				'Missing does not mean unchanged.'
+			);
+
+			const why = within( status ).getByText(
+				'Why is this report incomplete?'
+			);
+			const disclosure = why.closest( 'details' )!;
+			expect( disclosure ).not.toHaveAttribute( 'open' );
+			const explanation = within( disclosure ).getByText(
+				/within 5 minutes, and none arrived in time\.$/
+			);
+			// Only inside the disclosure, never repeated before it.
+			expect( status.textContent?.match( /none arrived/g ) ).toHaveLength(
+				1
+			);
+			expect(
+				screen.getByRole( 'region', { name: 'Site checks' } )
+			).not.toHaveTextContent( /none arrived/ );
+
+			expect( explanation ).not.toBeVisible();
+			// jsdom does not open <details> from the keyboard; the browser
+			// walkthrough covers Enter and Space.
+			await user.click( why );
+			expect( disclosure ).toHaveAttribute( 'open' );
+			expect( explanation ).toBeVisible();
+		} );
+
 		it( 'labels an expired observation a partial report on the overview and every signal page', async () => {
 			for ( const signal of [
 				undefined,

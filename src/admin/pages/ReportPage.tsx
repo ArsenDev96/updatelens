@@ -886,6 +886,20 @@ function StatusLine( {
 							<span key={ detail }> { detail }</span>
 						) ) }
 					</p>
+					{ notice.why && (
+						<details className="group pt-1">
+							<summary className="-mx-1 inline-flex cursor-pointer select-none list-none items-center gap-1.5 rounded px-1 py-0.5 font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+								<Icon
+									name="chevron-down"
+									className="size-4 -rotate-90 text-slate-500 transition-transform group-open:rotate-0"
+								/>
+								{ notice.why.label }
+							</summary>
+							<p className="mt-1 leading-relaxed text-muted-foreground">
+								{ notice.why.text }
+							</p>
+						</details>
+					) }
 				</div>
 			</div>
 			{ notice.open && (

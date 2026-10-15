@@ -587,6 +587,25 @@ export function impactCompleteness(
 }
 
 /**
+ * What an evaluated result is missing, from the API's statuses: a
+ * configuration source of the Net result that was not evaluated (`status`
+ * `partial`; not applicable sources do not count), and site checks that
+ * could not be compared (their own status, never part of the Net result).
+ *
+ * @param impact API evaluation.
+ */
+export function impactGaps( impact: PotentialImpact ): {
+	configuration: boolean;
+	siteChecks: boolean;
+} {
+	const site = impact.site_checks?.status;
+	return {
+		configuration: impact.status === 'partial',
+		siteChecks: site === 'partial' || site === 'not_evaluated',
+	};
+}
+
+/**
  * Headline of the section.
  *
  * @param impact API evaluation.
@@ -616,11 +635,27 @@ export function impactHeadline(
 						'No findings yet — site checks are still pending.',
 						'updatelens'
 					);
-				case 'partial':
-					return __(
-						'No findings in the completed observations; some observations were not assessed.',
-						'updatelens'
-					);
+				case 'partial': {
+					// Says what is missing: configuration sources (named in
+					// the summary's Not assessed row), site checks (named in
+					// its Site checks row), or both.
+					const gaps = impactGaps( impact );
+					if ( gaps.configuration && gaps.siteChecks ) {
+						return __(
+							'No findings in the completed observations; some configuration sources were not assessed and not all site checks were compared.',
+							'updatelens'
+						);
+					}
+					return gaps.siteChecks
+						? __(
+								'No findings in the completed observations; not all site checks were compared.',
+								'updatelens'
+							)
+						: __(
+								'No findings in the completed observations; some configuration sources were not assessed.',
+								'updatelens'
+							);
+				}
 				default:
 					return __(
 						'No findings matched the completed observations.',

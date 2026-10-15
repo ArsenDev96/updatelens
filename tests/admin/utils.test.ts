@@ -28,7 +28,9 @@ import {
 	statusTone,
 	unavailableReasonText,
 } from '@/admin/utils/labels';
+import type { AnalysisReport } from '@/admin/types/api';
 import { notAssessedLines } from '@/admin/utils/glance';
+import { siteCheckOutcome } from '@/admin/utils/siteChecks';
 import { parseRoute, routeHref } from '@/admin/utils/route';
 
 import {
@@ -141,6 +143,34 @@ describe( 'notAssessedLines', () => {
 		expect( notAssessedLines( report ) ).toEqual( [
 			'Observation expired: Options & autoload, WP-Cron and Action Scheduler · Homepage and REST API checks after the update',
 		] );
+
+		// With the site checks in the report, the summary's Site checks row
+		// names them ("Not compared"), so only the configuration sources stay.
+		const expiredCheck = {
+			status: 'not_evaluated' as const,
+			reason: 'settle_expired',
+			state: 'not_run',
+			change: null,
+			finding_count: null,
+		};
+		const withChecks = {
+			...report,
+			site_checks: { status: 'unavailable' },
+			potential_impact: {
+				...report.potential_impact,
+				site_checks: {
+					...report.potential_impact.site_checks,
+					status: 'not_evaluated',
+					checks: { home: expiredCheck, rest: expiredCheck },
+				},
+			},
+		} as unknown as AnalysisReport;
+		expect( notAssessedLines( withChecks ) ).toEqual( [
+			'Observation expired: Options & autoload, WP-Cron and Action Scheduler',
+		] );
+		expect(
+			siteCheckOutcome( withChecks.potential_impact.site_checks ).value
+		).toBe( 'Not compared' );
 	} );
 } );
 

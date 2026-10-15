@@ -97,7 +97,10 @@ final class AdminPageTest extends TestCase {
 	public function test_shell_names_the_view() {
 		$page   = new AdminPage();
 		$loaded = new ReflectionProperty( AdminPage::class, 'assets_loaded' );
-		$loaded->setAccessible( true );
+		// Needed before PHP 8.1 only; deprecated since PHP 8.5.
+		if ( PHP_VERSION_ID < 80100 ) {
+			$loaded->setAccessible( true );
+		}
 		$loaded->setValue( $page, true );
 
 		foreach ( array(

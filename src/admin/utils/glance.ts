@@ -162,12 +162,26 @@ export function siteChecksGlance( report: AnalysisReport ): GlanceItem & {
  *                   after the update)", the reasons themselves are in the
  *                   Site checks section.
  *
+ * Site checks the summary's Site checks row already names as not compared
+ * (siteChecksGlance(): its value or each check's state) are left out, so the
+ * summary says it once; the API's entries are unchanged.
+ *
  * Empty when everything applicable was assessed or is still being observed.
  *
  * @param report Report.
  */
 export function notAssessedLines( report: AnalysisReport ): string[] {
-	const entries = report.potential_impact.assessment.not_assessed;
+	const evaluation =
+		report.site_checks === undefined
+			? undefined
+			: report.potential_impact.site_checks;
+	const entries = report.potential_impact.assessment.not_assessed.filter(
+		( entry ) =>
+			entry.type !== 'site_check' ||
+			evaluation === undefined ||
+			evaluation.status === 'not_applicable' ||
+			evaluation.checks[ entry.name ]?.status !== 'not_evaluated'
+	);
 	const name = ( entry: ( typeof entries )[ number ] ) =>
 		entry.type === 'signal'
 			? providerLabel( entry.name )

@@ -1070,6 +1070,8 @@ export interface ReportNotice {
 	description: string;
 	/** Extra sentences (settle outcome, error). */
 	details: string[];
+	/** Background behind a closed disclosure, e.g. why a report is partial. */
+	why?: { label: string; text: string };
 	tone: Tone;
 	/** The analysis is still open; a refresh may show more. */
 	open: boolean;
@@ -1091,7 +1093,8 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 		case 'completed': {
 			if ( report.settle_outcome === 'expired' ) {
 				// The one full explanation of a partial report; the other
-				// sections only refer to it.
+				// sections only refer to it. Why it is partial (the request
+				// that never came) is background, behind a closed disclosure.
 				return {
 					...base,
 					tone: 'caution',
@@ -1099,20 +1102,24 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 						'Partial report: the observation after the update expired',
 						'updatelens'
 					),
-					description: sprintf(
-						/* translators: %s: observation window length, e.g. "5 minutes". */
-						__(
-							'The update completed and the changes during it were recorded. To capture the state after it, UpdateLens needs a request from the browser that ran the update, or another admin page, within %s, and none arrived in time.',
-							'updatelens'
-						),
-						windowLength
+					description: __(
+						'The plugin update completed and the changes during it were recorded. The After update and Net result phases, the review rules and the site checks after the update are missing. Missing does not mean unchanged.',
+						'updatelens'
 					),
-					details: [
-						__(
-							'So the After update and Net result phases, the review rules and the site checks after the update are missing. Missing does not mean unchanged.',
+					why: {
+						label: __(
+							'Why is this report incomplete?',
 							'updatelens'
 						),
-					],
+						text: sprintf(
+							/* translators: %s: observation window length, e.g. "5 minutes". */
+							__(
+								'To capture the state after the update, UpdateLens needs a request from the browser that ran the update, or another admin page, within %s, and none arrived in time.',
+								'updatelens'
+							),
+							windowLength
+						),
+					},
 				};
 			}
 			const outcome = settleOutcomeText(

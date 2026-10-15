@@ -235,9 +235,62 @@ describe( 'Report summary', () => {
 	it( 'checks that were not compared: no findings is not "no problems"', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'no_baseline' ) );
 		expect( rows().Findings ).toMatch(
-			/^No findings in the completed observations; some observations were not assessed\./
+			/^No findings in the completed observations; not all site checks were compared\./
 		);
 	} );
+
+	it.each( [
+		[
+			'configuration sources only',
+			MALFORMED_CRON,
+			null,
+			'No findings in the completed observations; some configuration sources were not assessed.',
+			'WP-Cron: WP-Cron analysis unavailable',
+		],
+		[
+			'site checks only',
+			COMPLETED,
+			'after_not_reported',
+			'No findings in the completed observations; not all site checks were compared.',
+			undefined,
+		],
+		[
+			'one site check only',
+			COMPLETED,
+			'one_unavailable',
+			'No findings in the completed observations; not all site checks were compared.',
+			undefined,
+		],
+		[
+			'both',
+			MALFORMED_CRON,
+			'no_baseline',
+			'No findings in the completed observations; some configuration sources were not assessed and not all site checks were compared.',
+			'WP-Cron: WP-Cron analysis unavailable',
+		],
+		[
+			'nothing missing',
+			COMPLETED,
+			'both_passed',
+			'No findings matched the completed observations.',
+			undefined,
+		],
+	] as Array<
+		[ string, AnalysisReport, CaseName | null, string, string | undefined ]
+	> )(
+		'without findings, the headline says what is missing: %s',
+		async ( _label, base, name, headline, notAssessed ) => {
+			await renderReport( name ? withSiteChecks( base, name ) : base );
+			// The headline, then the informational count.
+			expect( rows().Findings.startsWith( headline ) ).toBe( true );
+			// The summary names configuration sources only where its
+			// headline mentions them; site checks are in their own row.
+			expect( rows()[ 'Not assessed' ] ).toBe( notAssessed );
+			expect( document.body.textContent ).not.toMatch(
+				/some observations were not assessed/
+			);
+		}
+	);
 
 	it.each( [
 		[ 'disabled', 'Off for this update' ],
@@ -268,24 +321,41 @@ describe( 'Report summary', () => {
 	} );
 
 	it.each( [
+		[ 'no_baseline', 'Not compared' ],
+		[ 'after_not_reported', 'Not compared' ],
+		[ 'overlapping_update', 'Not compared' ],
 		[
-			'no_baseline',
-			'Site checks not compared: Homepage and REST API (no check before the update)',
+			'unconfirmed',
+			'1 of 2 comparedHomepage: not compared · REST API: passed before and after',
 		],
 		[
-			'after_not_reported',
-			'Site checks not compared: Homepage and REST API (no check after the update)',
+			'one_unavailable',
+			'1 of 2 comparedHomepage: passed before and after · REST API: not compared',
 		],
 	] as Array< [ CaseName, string ] > )(
-		'%s: names the site checks that were not compared, apart from the priorities',
-		async ( name, line ) => {
-			await renderReport( withSiteChecks( COMPLETED, name ) );
-			expect( rows()[ 'Not assessed' ] ).toBe( line );
+		'%s: site checks not compared are said once, in the Site checks row',
+		async ( name, site ) => {
+			const report = withSiteChecks( COMPLETED, name );
+			await renderReport( report );
+			expect( rows()[ 'Site checks' ] ).toBe( site );
+			// Not repeated under Not assessed; the API's entries are kept.
+			expect( rows()[ 'Not assessed' ] ).toBeUndefined();
+			expect(
+				report.potential_impact.assessment.not_assessed.some(
+					( entry ) => entry.type === 'site_check'
+				)
+			).toBe( true );
 			expect( rows().Findings ).not.toMatch( /priority|needs? review/ );
-			// Why is said once, in the Site checks section.
-			expect( rows()[ 'Site checks' ] ).toBe( 'Not compared' );
 		}
 	);
+
+	it( 'still lists configuration sources that were not assessed beside not compared checks', async () => {
+		await renderReport( withSiteChecks( MALFORMED_CRON, 'no_baseline' ) );
+		expect( rows()[ 'Site checks' ] ).toBe( 'Not compared' );
+		expect( rows()[ 'Not assessed' ] ).toBe(
+			'WP-Cron: WP-Cron analysis unavailable'
+		);
+	} );
 
 	it( 'a historical report: sources it predates are not recorded, not unavailable', async () => {
 		await renderReport( PRE_CRON );

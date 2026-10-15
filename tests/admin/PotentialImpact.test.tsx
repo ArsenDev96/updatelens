@@ -915,7 +915,7 @@ describe( 'Potential Impact', () => {
 			await renderReport( MALFORMED_CRON );
 
 			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				'No findings in the completed observations; some observations were not assessed.'
+				'No findings in the completed observations; some configuration sources were not assessed.'
 			);
 			// Kept apart from the priorities, with its reason.
 			expect( notAssessed() ).toHaveTextContent(

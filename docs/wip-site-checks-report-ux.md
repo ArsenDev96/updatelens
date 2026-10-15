@@ -67,7 +67,7 @@ Not done: axe accessibility scan of the new views (the scan script was interrupt
 5. Confirm on the real site which case ended the Duplicate Post report (Technical details → observation outcome).
 6. Only after approval: rebuild and revalidate a release ZIP (the current validated ZIP predates this work).
 
-## 6. Review fixes (2026-10-14, uncommitted on top of `c09091c`)
+## 6. Review fixes (2026-10-14, commit `767bcbd` on top of `c09091c`)
 
 From the visual review (`E:\updatelens-review\2026-10-14-report-ux\REVIEW.md`; before/after in `round2/`):
 
@@ -79,9 +79,43 @@ From the visual review (`E:\updatelens-review\2026-10-14-report-ux\REVIEW.md`; b
 
 Checks at this commit (PHP 8.1.10 locally): PHPUnit 1612 tests OK, PHPCS clean, `npm run check` clean, Vitest 733 passed. Screenshots (before/after at 1440, 390, 768 and 320 px) and `REVIEW-ROUND2.md` are outside the repository (`E:\updatelens-review\2026-10-14-report-ux\round2\`, ZIP `updatelens-report-ux-round2-2026-10-14.zip`).
 
-Still open after the review fixes (waiting for approval):
+Items 1–3 that were open after the review fixes are done in section 7.
 
-1. "Not compared" is said in the summary, in both table rows and in the shared sentence; possibly one line when both checks share a reason.
-2. The partial report's status line is 8 lines at 390 px; possibly move its second sentence behind a disclosure.
-3. Not done: axe scan, keyboard walkthrough, WordPress 6.2 / PHP 7.4 run (PHPUnit on PHP 7.4 too), `.pot` regeneration.
-4. Section 5 items 4–6 (Dashboard → Updates AFTER coverage, follow-up memory raise, the real Duplicate Post site, a new release ZIP only after approval).
+## 7. Final UX corrections (2026-10-15, on top of `767bcbd`)
+
+The redesign direction was approved, subject to these changes:
+
+- **"Not compared" once in the summary** (`notAssessedLines()` in `utils/glance.ts`): site checks the Site checks row already names as not compared (its value, or a check's state beside the other's) are left out of the "Not assessed" row. Configuration sources stay there. The API's `assessment.not_assessed` is unchanged, and both check rows in the Site checks section keep their own before/after results.
+- **Shorter partial report status**: the visible text says the observation expired, the plugin update completed, what is missing and "Missing does not mean unchanged." The follow-up request and the 5-minute window are behind a closed `<details>`, "Why is this report incomplete?" (`ReportNotice.why`, rendered by `StatusLine` in `pages/ReportPage.tsx`). At 390 px the panel is 5 lines plus the disclosure, down from 8.
+- **What a "no findings" headline is missing** (`impactGaps()` in `utils/impact.ts`, from the API's `status` and the site check status): "No findings in the completed observations; some configuration sources were not assessed." / "…; not all site checks were compared." / "…; some configuration sources were not assessed and not all site checks were compared." It replaces "some observations were not assessed", which pointed to a Not assessed row that is absent when only site checks are missing.
+- **PHP 8.5 tests**: `RequestStartTest` and `AdminPageTest` call `ReflectionProperty::setAccessible()` only below PHP 8.1 (deprecated since 8.5). Production code is unchanged.
+- CLAUDE.md (Admin UI rules, Potential Impact and site check wording) describes both UI changes.
+
+Verified on WordPress 6.2.2 / PHP 7.4.33 / MariaDB 10.11 (React 18.2.0, no `react-jsx-runtime`), Chrome, with the working tree staged as the release would ship it:
+
+- **Real "Update now" reports**:
+  - no changes, both checks passed;
+  - normal: a large autoloaded option and a recurring WP-Cron event, giving 1 Needs review finding and 1 informational change;
+  - High priority: homepage HTTP 500 confirmed by both requests;
+  - queued: two "Update now" clicks, `next_update`, not compared;
+  - partial: follow-up blocked, expired after 5 minutes;
+  - one check not compared ("1 of 2 compared").
+- **Layout**: screenshots at 1440, 768, 390 and 320 px. No horizontal overflow (56 checks, disclosures closed and open), no page errors.
+- **axe** (WCAG 2.0/2.1/2.2 A/AA and best practice): History, every overview collapsed and fully expanded, the three signal pages and Settings, at 1440 and 390 px (34 runs). No violations. The only "incomplete" items are color contrast on the decorative `→` (`aria-hidden`) and, at 390 px, backgrounds axe cannot resolve under wp-admin's mobile layout; the same elements pass at 1440 px.
+- **Keyboard** at 1440 and 390 px: every overview's tab order has a visible focus indicator on every stop. 36 interaction steps passed:
+  - the partial disclosure: Tab, Enter opens, Space closes and reopens;
+  - "Site check details" moves focus to Site checks; a check row opens with Enter and closes with Space;
+  - "Go to findings" moves focus to the Findings title; the finding opens with Enter; "Show the homepage requests" moves focus to the expanded check;
+  - a signal row opens its page with focus on the title, and Back returns to the overview.
+- **Checks**:
+  - PHPUnit 1612 tests / 24,157 assertions OK on PHP 7.4.33, 8.1.34 and 8.5.4;
+  - PHPCS clean;
+  - `npm run check` clean;
+  - Vitest 743 passed;
+  - `languages/updatelens.pot` regenerated (819 strings, no translator comment conflicts).
+
+Still open (not part of this task):
+
+1. Dashboard → Updates AFTER coverage and the follow-up memory raise (section 1; deferred: no evidence of a memory failure).
+2. The real Duplicate Post site's observation outcome (section 5 item 5).
+3. A new release ZIP only after approval (the validated 0.3.0 ZIP predates this branch).

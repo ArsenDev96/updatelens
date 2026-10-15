@@ -460,7 +460,7 @@ describe( 'Site checks in Potential Impact', () => {
 				within( impact() ).getByText( 'Based on Net result' )
 			).toBeInTheDocument();
 			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				'No findings in the completed observations; some observations were not assessed.'
+				'No findings in the completed observations; not all site checks were compared.'
 			);
 			const checked = await checkedRows( user );
 			expect( checked[ 'Homepage check' ] ).toBe(
@@ -554,7 +554,7 @@ describe( 'Site checks in Potential Impact', () => {
 		await renderReport( withSiteChecks( COMPLETED, 'one_unavailable' ) );
 
 		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			'No findings in the completed observations; some observations were not assessed.'
+			'No findings in the completed observations; not all site checks were compared.'
 		);
 		expect( siteSummary() ).toBe(
 			'1 of 2 comparedHomepage: passed before and after · REST API: not compared'

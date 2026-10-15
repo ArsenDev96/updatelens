@@ -13,10 +13,11 @@ import type {
 	SiteCheckSide,
 } from '../types/api';
 import type { ImpactView } from '../utils/impact';
-import { requestFailureText } from '../utils/labels';
+import { requestFailureText, type Tone } from '../utils/labels';
 import {
 	attemptView,
 	requestLabel,
+	sideCellParts,
 	sideSummaryText,
 	sideTimingText,
 	SITE_CHECKS,
@@ -31,48 +32,44 @@ import {
 	siteCheckReadingNote,
 	siteCheckResultLabel,
 	siteCheckRow,
-	siteCheckSideCell,
 	siteCheckViewKey,
 	type SiteCheckRowText,
 	siteChecksUnused,
 	siteCheckTitle,
 } from '../utils/siteChecks';
 import { TONE_ICON } from '../utils/tone';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
 
 /*
- * "Site checks" on the report overview: what the administrator's browser
+ * The "Website checks" tab of a report: what the administrator's browser
  * observed when it requested the homepage and the WordPress REST API before
  * and after the update. Not part of any phase and not a configuration
- * change, so it has its own section.
+ * change.
  *
  * Two compact rows, always shown (also when both passed): the check, what it
  * returned before and after the update, and the API's comparison. A reason
  * both checks share, and how to get a comparison on a future update, are said
- * once below the rows. Every request, the verification and the timing are
- * behind each row's disclosure. A check reads as passed only when the API
- * compared it as passed. Checks that were turned off, never recorded or
- * unsupported for the whole update are one quiet sentence instead of rows.
- * Findings stay in Findings; each side links to the other.
+ * once, above the rows. Every request, the verification and the timing are
+ * behind each row's disclosure, closed by default. A check reads as passed
+ * only when the API compared it as passed. Checks that were turned off,
+ * never recorded or unsupported for the whole update are one quiet sentence
+ * instead of rows. Findings stay in Update results; each side links to the
+ * other.
  */
 
 /** Relative link to the Settings screen (both are admin.php pages). */
 const SETTINGS_HREF = 'admin.php?page=updatelens-settings';
 
-/** Grid of a row from `md` up: check, before, after, result, chevron. */
-const COLUMNS =
-	'md:grid-cols-[minmax(9rem,1.1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_1.25rem]';
-
 /**
- * The section.
+ * The tab's content.
  *
  * @param props                Props.
  * @param props.siteChecks     The report's `site_checks`.
  * @param props.impact         `potential_impact.site_checks`.
  * @param props.pendingRefresh Background reads while results are pending.
- * @param props.view           Expanded rows (shared with Findings).
+ * @param props.view           Expanded rows (shared with Update results).
  * @param props.onViewChange   Updates them.
- * @param props.onShowFinding  Opens a check's finding in Findings.
+ * @param props.onShowFinding  Opens a check's finding in Update results.
  */
 export function SiteResponseChecks( {
 	siteChecks,
@@ -92,14 +89,6 @@ export function SiteResponseChecks( {
 	const title = useRef< HTMLHeadingElement >( null );
 	const refreshing =
 		pendingRefresh !== undefined && pendingRefresh.state !== 'off';
-	// Announced once when pending results arrive while the report is open.
-	const pending = siteChecks?.status === 'pending';
-	const [ wasPending, setWasPending ] = useState( pending );
-	const [ arrived, setArrived ] = useState( false );
-	if ( wasPending !== pending ) {
-		setWasPending( pending );
-		setArrived( ! pending );
-	}
 	// The refresh line disappears when results arrive: if it had focus, focus
 	// moves to the section title instead of being lost.
 	const refreshFocused = useRef( false );
@@ -132,8 +121,15 @@ export function SiteResponseChecks( {
 				]
 			: [];
 	} );
-	// A reason both checks share is said once, below them.
-	const shared = sharedReason( checks.map( ( { text } ) => text ) );
+	// A reason both checks share is said once, above them, under the status
+	// they share.
+	const texts = checks.map( ( { text } ) => text );
+	const shared = sharedReason( texts );
+	const sharedStatus =
+		shared !== null &&
+		texts.every( ( text ) => text.status === texts[ 0 ].status )
+			? texts[ 0 ].status
+			: null;
 	// How to get a comparison next time, once, when how the update ran
 	// explains why there is none. Nothing offers to compare this update later.
 	const nextTime = [
@@ -161,29 +157,29 @@ export function SiteResponseChecks( {
 	return (
 		<section
 			aria-labelledby="updatelens-site-checks-title"
-			className="rounded-xl border bg-card px-4 py-4 shadow-surface sm:px-6"
+			className="space-y-4"
 		>
-			<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+			<div>
 				<h3
 					id="updatelens-site-checks-title"
 					ref={ title }
 					tabIndex={ -1 }
-					className="text-base font-semibold text-slate-900 focus:outline-none"
+					className="text-lg font-semibold text-slate-900 focus:outline-none"
 				>
-					{ __( 'Site checks', 'updatelens' ) }
+					{ __( 'Website checks', 'updatelens' ) }
 				</h3>
 				{ /* Only for checks that ran: not for turned off, unsupported or unrecorded ones. */ }
 				{ ! unused && (
-					<p className="text-[13px] leading-5 text-muted-foreground">
+					<p className="mt-0.5 text-sm leading-6 text-muted-foreground">
 						{ __(
-							'Requested by your browser before and after the update. They do not test every page or feature.',
+							'Compare your homepage and WordPress REST API responses around this update. Results are shown only for checks that actually ran. They do not test every page or feature.',
 							'updatelens'
 						) }
 					</p>
 				) }
 			</div>
 			{ unused ? (
-				<p className="mt-2 flex max-w-3xl gap-2 text-sm leading-relaxed text-slate-600">
+				<p className="flex max-w-3xl gap-2 text-sm leading-relaxed text-slate-600">
 					<Icon
 						name="info"
 						className="mt-0.5 size-4 text-slate-500"
@@ -198,7 +194,7 @@ export function SiteResponseChecks( {
 									className="font-medium text-primary underline-offset-2 hover:underline focus:shadow-none focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 								>
 									{ __(
-										'Site check settings',
+										'Website check settings',
 										'updatelens'
 									) }
 								</a>
@@ -208,30 +204,41 @@ export function SiteResponseChecks( {
 				</p>
 			) : (
 				<>
-					{ refreshing && (
-						<PendingRefreshLine
-							refresh={ pendingRefresh }
-							onFocus={ () => {
-								refreshFocused.current = true;
-							} }
-						/>
+					{ shared && (
+						<Callout
+							tone={ texts[ 0 ].tone }
+							title={
+								sharedStatus ??
+								__( 'Not compared', 'updatelens' )
+							}
+						>
+							<p>{ shared }</p>
+							{ nextTime.map( ( sentence ) => (
+								<p key={ sentence }>{ sentence }</p>
+							) ) }
+							{ /* Both waiting: how the report checks for them belongs here. */ }
+							{ refreshing && texts[ 0 ].tone === 'progress' && (
+								<PendingRefreshLine
+									refresh={ pendingRefresh }
+									onFocus={ () => {
+										refreshFocused.current = true;
+									} }
+								/>
+							) }
+						</Callout>
 					) }
-					{ /* Column labels for wide screens; each row also names its fields for assistive technology and phones. */ }
-					<div
-						aria-hidden="true"
-						className={ cn(
-							'mt-3 hidden gap-x-4 px-3 text-xs font-medium text-muted-foreground md:grid',
-							COLUMNS
+					{ refreshing &&
+						! ( shared && texts[ 0 ].tone === 'progress' ) && (
+							<PendingRefreshLine
+								refresh={ pendingRefresh }
+								onFocus={ () => {
+									refreshFocused.current = true;
+								} }
+							/>
 						) }
-					>
-						<span>{ __( 'Check', 'updatelens' ) }</span>
-						<span>{ __( 'Before update', 'updatelens' ) }</span>
-						<span>{ __( 'After update', 'updatelens' ) }</span>
-						<span>{ __( 'Result', 'updatelens' ) }</span>
-					</div>
 					<ul
 						aria-label={ __( 'Checks', 'updatelens' ) }
-						className="mt-3 divide-y overflow-hidden rounded-lg border md:mt-1.5"
+						className="space-y-2"
 					>
 						{ checks.map( ( { check, comparison, text } ) => (
 							<CheckRow
@@ -239,7 +246,7 @@ export function SiteResponseChecks( {
 								check={ check }
 								comparison={ comparison }
 								text={
-									// A shared reason is said once below; a newly
+									// A shared reason is said once above; a newly
 									// failing check's sentence would repeat its After
 									// cell (the requests are in its details).
 									shared ||
@@ -269,14 +276,13 @@ export function SiteResponseChecks( {
 							/>
 						) ) }
 					</ul>
-					{ ( shared || nextTime.length > 0 ) && (
-						<div className="mt-3 flex max-w-3xl gap-2 text-[13px] leading-5 text-slate-700">
+					{ ! shared && nextTime.length > 0 && (
+						<div className="flex max-w-3xl gap-2 text-[13px] leading-5 text-slate-700">
 							<Icon
 								name="info"
 								className="mt-0.5 size-4 shrink-0 text-slate-500"
 							/>
 							<div className="space-y-1">
-								{ shared && <p>{ shared }</p> }
 								{ nextTime.map( ( sentence ) => (
 									<p key={ sentence }>{ sentence }</p>
 								) ) }
@@ -285,10 +291,77 @@ export function SiteResponseChecks( {
 					) }
 				</>
 			) }
-			<p role="status" className="sr-only">
-				{ arrived && __( 'Site check results arrived.', 'updatelens' ) }
-			</p>
 		</section>
+	);
+}
+
+/**
+ * Announces once that pending website check results arrived while the
+ * report is open. Rendered with the report, whichever tab is shown.
+ *
+ * @param props            Props.
+ * @param props.siteChecks The report's `site_checks`.
+ */
+export function SiteCheckArrival( {
+	siteChecks,
+}: {
+	siteChecks?: SiteChecks;
+} ) {
+	const pending = siteChecks?.status === 'pending';
+	const [ wasPending, setWasPending ] = useState( pending );
+	const [ arrived, setArrived ] = useState( false );
+	if ( wasPending !== pending ) {
+		setWasPending( pending );
+		setArrived( ! pending );
+	}
+	return (
+		<p role="status" className="sr-only">
+			{ arrived && __( 'Website check results arrived.', 'updatelens' ) }
+		</p>
+	);
+}
+
+/** Classes of a callout per tone. */
+const CALLOUT: Partial< Record< Tone, string > > = {
+	caution: 'border-amber-200 bg-amber-50/80',
+	progress: 'border-tint-border bg-tint',
+};
+
+/**
+ * A reason both checks share, above them, with its status as title.
+ *
+ * @param props          Props.
+ * @param props.tone     Tone (caution or progress).
+ * @param props.title    Status both checks share.
+ * @param props.children Sentences.
+ */
+function Callout( {
+	tone,
+	title,
+	children,
+}: {
+	tone: Tone;
+	title: string;
+	children: ReactNode;
+} ) {
+	return (
+		<div
+			className={ cn(
+				'flex gap-3 rounded-lg border px-4 py-3',
+				CALLOUT[ tone ] ?? 'border-slate-200 bg-slate-50'
+			) }
+		>
+			<Icon
+				name={ tone === 'progress' ? 'progress' : 'caution' }
+				className={ cn( 'mt-0.5', TONE_ICON[ tone ] ) }
+			/>
+			<div className="min-w-0 space-y-1 text-[13px] leading-5 text-slate-700">
+				<p className="text-sm font-semibold text-slate-900">
+					{ title }
+				</p>
+				{ children }
+			</div>
+		</div>
 	);
 }
 
@@ -329,11 +402,11 @@ function PendingRefreshLine( {
 							) } ${ requestFailureText( refresh.error ) ?? '' }`.trim()
 						: stopped
 							? __(
-									'Automatic checking stopped; the site check results have not arrived yet.',
+									'Automatic checking stopped; the website check results have not arrived yet.',
 									'updatelens'
 								)
 							: __(
-									'This report checks for the pending site check results every few seconds while it is open.',
+									'This report checks for the pending website check results every few seconds while it is open.',
 									'updatelens'
 								) }
 			</span>
@@ -361,6 +434,32 @@ function PendingRefreshLine( {
 	);
 }
 
+/** Icon of each check. */
+const CHECK_ICON: Record< SiteCheckId, IconName > = {
+	home: 'globe',
+	rest: 'api',
+};
+
+/**
+ * How a check makes its request, under its name.
+ *
+ * @param check Check.
+ */
+function checkContext( check: SiteCheckId ): string {
+	return check === 'home'
+		? __( 'Requested as a signed-out visitor', 'updatelens' )
+		: __( 'Requested as you, signed in', 'updatelens' );
+}
+
+/** Text color of the comparison, per tone. */
+const RESULT_TEXT: Record< Tone, string > = {
+	negative: 'text-rose-800',
+	caution: 'text-amber-900',
+	positive: 'text-emerald-800',
+	neutral: 'text-slate-900',
+	progress: 'text-slate-900',
+};
+
 /**
  * One check as a compact row: its name (the toggle), what it returned before
  * and after the update, and the comparison; one sentence below only when it
@@ -376,7 +475,7 @@ function PendingRefreshLine( {
  * @param props.expanded      Whether it is expanded.
  * @param props.onToggle      Expands or collapses it.
  * @param props.nextStep      What to check next, for a finding (with a link to it).
- * @param props.onShowFinding Opens its finding in Findings.
+ * @param props.onShowFinding Opens its finding in Update results.
  */
 function CheckRow( {
 	check,
@@ -402,49 +501,49 @@ function CheckRow( {
 	const id = useId();
 	const statusId = `${ id }-status`;
 	const panelId = `${ id }-panel`;
-	const sides: Array< [ string, string ] > = [
-		[
-			__( 'Before update', 'updatelens' ),
-			siteCheckSideCell( comparison.before, 'before', comparison ),
-		],
-		[
-			__( 'After update', 'updatelens' ),
-			siteCheckSideCell( comparison.after, 'after', comparison ),
-		],
-	];
+	const label = 'text-muted-foreground md:text-xs md:leading-5';
 
 	return (
-		<li data-check={ check } data-state={ comparison.state }>
+		<li
+			data-check={ check }
+			data-state={ comparison.state }
+			className={ cn(
+				'overflow-hidden rounded-lg border bg-card transition-colors',
+				expanded ? 'border-slate-300' : 'hover:border-slate-300'
+			) }
+		>
 			<div
 				className={ cn(
-					'relative grid grid-cols-[minmax(0,1fr)_1.25rem] items-start gap-x-4 gap-y-1 px-3 py-2.5 md:items-center',
-					COLUMNS,
-					expanded ? 'bg-slate-50' : 'hover:bg-slate-50/60'
+					'relative grid grid-cols-[minmax(0,1fr)_1.25rem] items-center gap-x-4 gap-y-3 px-3 py-3 sm:px-4 md:grid-cols-[minmax(11rem,1fr)_minmax(0,2.6fr)_1.25rem]',
+					! expanded && 'hover:bg-slate-50/60'
 				) }
 			>
-				<h4 className="flex min-w-0 items-center gap-2 text-sm font-semibold leading-6 text-slate-900">
-					<Icon
-						name={ text.icon }
-						className={ cn(
-							'size-4 shrink-0',
-							TONE_ICON[ text.tone ]
-						) }
-					/>
-					<button
-						type="button"
-						id={ siteCheckButtonId( check ) }
-						aria-expanded={ expanded }
-						aria-controls={ panelId }
-						aria-describedby={ statusId }
-						onClick={ onToggle }
-						className="text-left after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-ring"
-					>
-						{ siteCheckTitle( check ) }
-					</button>
-				</h4>
+				<div className="flex min-w-0 items-center gap-3">
+					<span className="grid size-10 shrink-0 place-items-center rounded-lg bg-tint text-primary">
+						<Icon name={ CHECK_ICON[ check ] } />
+					</span>
+					<div className="min-w-0">
+						<h4 className="text-sm font-semibold leading-5 text-slate-900">
+							<button
+								type="button"
+								id={ siteCheckButtonId( check ) }
+								aria-expanded={ expanded }
+								aria-controls={ panelId }
+								aria-describedby={ statusId }
+								onClick={ onToggle }
+								className="text-left after:absolute after:inset-0 focus-visible:outline-none focus-visible:after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-ring"
+							>
+								{ siteCheckTitle( check ) }
+							</button>
+						</h4>
+						<p className="text-xs leading-5 text-muted-foreground">
+							{ checkContext( check ) }
+						</p>
+					</div>
+				</div>
 				<span
 					aria-hidden="true"
-					className="col-start-2 row-start-1 mt-1 text-slate-500 md:col-start-5 md:mt-0"
+					className="col-start-2 row-start-1 text-slate-500 md:col-start-3"
 				>
 					<Icon
 						name="chevron-down"
@@ -456,38 +555,52 @@ function CheckRow( {
 				</span>
 				<dl
 					id={ statusId }
-					className="col-span-2 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 text-[13px] leading-5 md:col-span-3 md:col-start-2 md:row-start-1 md:grid-cols-3 md:gap-x-4"
+					className="col-span-2 grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[13px] leading-5 md:col-span-1 md:col-start-2 md:row-start-1 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.85fr)] md:items-start md:gap-x-4"
 				>
-					{ sides.map( ( [ label, value ] ) => (
-						<div key={ label } className="contents">
-							<dt className="text-muted-foreground md:sr-only">
-								{ label }
-							</dt>
-							<dd className="min-w-0 text-slate-700">
-								{ value }
-							</dd>
-						</div>
-					) ) }
-					<dt className="text-muted-foreground md:sr-only">
-						{ __( 'Result', 'updatelens' ) }
-					</dt>
-					<dd
-						className={ cn(
-							'min-w-0 font-semibold',
-							{
-								negative: 'text-rose-800',
-								caution: 'text-amber-900',
-								positive: 'text-emerald-800',
-								neutral: 'text-slate-900',
-								progress: 'text-slate-900',
-							}[ text.tone ]
-						) }
-					>
-						{ result }
-					</dd>
+					<div className="contents md:block">
+						<dt className={ label }>
+							{ __( 'Before update', 'updatelens' ) }
+						</dt>
+						<dd className="flex min-w-0 items-center gap-2 md:mt-1">
+							<SideCell
+								side={ comparison.before }
+								purpose="before"
+								comparison={ comparison }
+							/>
+							<Icon
+								name="arrow-right"
+								className="ml-auto hidden size-4 text-slate-400 md:block"
+							/>
+						</dd>
+					</div>
+					<div className="contents md:block">
+						<dt className={ label }>
+							{ __( 'After update', 'updatelens' ) }
+						</dt>
+						<dd className="flex min-w-0 items-center gap-2 md:mt-1">
+							<SideCell
+								side={ comparison.after }
+								purpose="after"
+								comparison={ comparison }
+							/>
+						</dd>
+					</div>
+					<div className="contents md:block">
+						<dt className={ label }>
+							{ __( 'Result', 'updatelens' ) }
+						</dt>
+						<dd
+							className={ cn(
+								'min-w-0 font-semibold md:mt-1 md:leading-6',
+								RESULT_TEXT[ text.tone ]
+							) }
+						>
+							{ result }
+						</dd>
+					</div>
 				</dl>
 				{ ( text.detail || nextStep ) && (
-					<div className="col-span-2 space-y-1 text-[13px] leading-5 md:col-span-4 md:col-start-2">
+					<div className="col-span-2 space-y-1 text-[13px] leading-5 md:col-span-1 md:col-start-2">
 						{ text.detail && (
 							<p className="text-slate-600">{ text.detail }</p>
 						) }
@@ -512,11 +625,14 @@ function CheckRow( {
 			</div>
 			<div id={ panelId } hidden={ ! expanded }>
 				{ expanded && (
-					<div className="border-t bg-slate-50/40 p-3">
-						<p className="text-[13px] font-medium leading-5 text-slate-800">
-							{ text.status }
-						</p>
-						<div className="mt-2 grid gap-3 xl:grid-cols-2">
+					<div className="border-t bg-slate-50/50 p-3 sm:p-4">
+						{ /* The status only when it says more than the result above. */ }
+						{ text.status !== result && (
+							<p className="mb-2 text-[13px] font-medium leading-5 text-slate-800">
+								{ text.status }
+							</p>
+						) }
+						<div className="grid gap-3 xl:grid-cols-2">
 							<SideView
 								check={ check }
 								side={ comparison.before }
@@ -539,6 +655,62 @@ function CheckRow( {
 				) }
 			</div>
 		</li>
+	);
+}
+
+/** Pill classes per verdict, and for a side without a result. */
+const PILL = {
+	pass: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+	fail: 'bg-rose-50 text-rose-800 ring-rose-200',
+	redirect: 'bg-amber-50 text-amber-900 ring-amber-200',
+	inconclusive: 'bg-slate-100 text-slate-700 ring-slate-200',
+	waiting: 'bg-tint text-tint-foreground ring-tint-border',
+	missing: 'bg-slate-100 text-slate-600 ring-slate-200',
+};
+
+/**
+ * What one side returned in a few words: its verdict as a pill, and how
+ * many requests showed it with their response ("Failed in both requests ·
+ * HTTP 500"); "Waiting" while the later check may still arrive, or "Not run".
+ *
+ * @param props            Props.
+ * @param props.side       Side.
+ * @param props.purpose    `before` or `after`.
+ * @param props.comparison The check's comparison.
+ */
+function SideCell( {
+	side,
+	purpose,
+	comparison,
+}: {
+	side: SiteCheckSide;
+	purpose: 'before' | 'after';
+	comparison: SiteCheckComparison;
+} ) {
+	const pill =
+		'whitespace-nowrap rounded-full px-2 text-xs font-semibold leading-5 ring-1 ring-inset';
+	if ( side.available && side.result !== null ) {
+		const { verdict, detail } = sideCellParts( side );
+		return (
+			<span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+				<span className={ cn( pill, PILL[ side.result.verdict ] ) }>
+					{ verdict }
+				</span>{ ' ' }
+				{ detail && (
+					<span className="tabular-nums text-slate-600">
+						{ detail }
+					</span>
+				) }
+			</span>
+		);
+	}
+	const waiting = purpose === 'after' && comparison.state === 'pending';
+	return (
+		<span className={ cn( pill, waiting ? PILL.waiting : PILL.missing ) }>
+			{ waiting
+				? __( 'Waiting', 'updatelens' )
+				: __( 'Not run', 'updatelens' ) }
+		</span>
 	);
 }
 

@@ -102,6 +102,13 @@ export const PHASE_KEYS: PhaseKey[] = [
 	'final',
 ];
 
+/** Phases in the order of the phase tabs: the Net result first. */
+export const PHASE_TAB_KEYS: PhaseKey[] = [
+	'final',
+	'during_update',
+	'post_update',
+];
+
 /**
  * A report refused because loading it would exceed the request's memory
  * budget (`updatelens_report_too_large`). Retrying does not help.
@@ -231,9 +238,10 @@ export function phaseNote( phase: PhaseKey ): string {
 }
 
 /**
- * Phase shown first: the first phase with changes (Net result, After
- * update, During update), else the first available one (Net result, During
- * update, After update). Null if no phase is available.
+ * Phase shown first unless the URL names one: always the Net result, also
+ * when it has no changes or is not available (yet), so the view never
+ * switches to another phase by itself; the other phases' counts are on
+ * their tabs. Null only if no phase is available at all (a failed update).
  *
  * @param phases Report phases.
  * @param counts Change counts of the phases (computed if omitted).
@@ -242,13 +250,9 @@ export function defaultPhase(
 	phases: Record< PhaseKey, ReportPhase >,
 	counts: Record< PhaseKey, PhaseChangeCounts > = reportChangeCounts( phases )
 ): PhaseKey | null {
-	const withChanges: PhaseKey[] = [ 'final', 'post_update', 'during_update' ];
-	const available: PhaseKey[] = [ 'final', 'during_update', 'post_update' ];
-	return (
-		withChanges.find( ( key ) => ( counts[ key ].total ?? 0 ) > 0 ) ??
-		available.find( ( key ) => counts[ key ].total !== null ) ??
-		null
-	);
+	return PHASE_KEYS.some( ( key ) => counts[ key ].total !== null )
+		? 'final'
+		: null;
 }
 
 /** Signals in display order (the stacked sections of a phase). */
@@ -1103,7 +1107,7 @@ export function reportNotice( report: AnalysisReport ): ReportNotice {
 						'updatelens'
 					),
 					description: __(
-						'The plugin update completed and the changes during it were recorded. The After update and Net result phases, the review rules and the site checks after the update are missing. Missing does not mean unchanged.',
+						'The plugin update completed and the changes during it were recorded. The After update and Net result phases, the review rules and the website checks after the update are missing. Missing does not mean unchanged.',
 						'updatelens'
 					),
 					why: {

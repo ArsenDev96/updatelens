@@ -29,14 +29,14 @@ const NOW = 1760090000000;
 
 const LABELS = {
 	prefix: 'UpdateLens:',
-	preparing: 'Preparing site checks…',
-	preparing_next: 'Preparing site checks for another update…',
-	ready: 'Ready to compare site responses',
+	preparing: 'Preparing website checks…',
+	preparing_next: 'Preparing website checks for another update…',
+	ready: 'Ready to compare website responses',
 	ready_home: 'Ready to compare the homepage only',
 	ready_rest: 'Ready to compare the REST API only',
-	unavailable: 'Site checks unavailable for now',
+	unavailable: 'Website checks unavailable for now',
 	other_screen:
-		'Site responses are compared only for updates started with “Update now” on Installed Plugins, not from this screen.',
+		'Website responses are compared only for updates started with “Update now” on Installed Plugins, not from this screen.',
 	plugins_link: 'Go to Installed Plugins',
 };
 
@@ -337,7 +337,7 @@ describe( 'mountReadinessLine', () => {
 		expect( element.getAttribute( 'role' ) ).toBe( 'status' );
 		expect( element.nextElementSibling?.className ).toBe( 'wp-header-end' );
 		expect( element.textContent ).toBe(
-			'UpdateLens: Preparing site checks…'
+			'UpdateLens: Preparing website checks…'
 		);
 		expect( element.querySelector( 'button, a, input' ) ).toBeNull();
 		const icon = element.querySelector( '.dashicons' )!;
@@ -348,7 +348,7 @@ describe( 'mountReadinessLine', () => {
 
 		line.render( 'ready', false );
 		expect( element.textContent ).toBe(
-			'UpdateLens: Ready to compare site responses'
+			'UpdateLens: Ready to compare website responses'
 		);
 		expect( ( element as HTMLElement ).dataset.state ).toBe( 'ready' );
 		line.remove();
@@ -486,14 +486,14 @@ describe( 'bindBaseline with the readiness line', () => {
 		const p = page();
 		bindBaseline( p.win );
 		expect( p.text() ).toBe(
-			'UpdateLens: Ready to compare site responses'
+			'UpdateLens: Ready to compare website responses'
 		);
 		await vi.advanceTimersByTimeAsync( 1000 );
 		expect( p.fetchFn ).not.toHaveBeenCalled();
 
 		p.fire( 'wp-plugin-updating' );
 		expect( p.text() ).toBe(
-			'UpdateLens: Preparing site checks for another update…'
+			'UpdateLens: Preparing website checks for another update…'
 		);
 	} );
 
@@ -513,16 +513,16 @@ describe( 'bindBaseline with the readiness line', () => {
 		bindBaseline( p.win );
 		await vi.advanceTimersByTimeAsync( 589000 );
 		expect( p.text() ).toBe(
-			'UpdateLens: Ready to compare site responses'
+			'UpdateLens: Ready to compare website responses'
 		);
 		await vi.advanceTimersByTimeAsync( 2000 );
-		expect( p.text() ).toBe( 'UpdateLens: Preparing site checks…' );
+		expect( p.text() ).toBe( 'UpdateLens: Preparing website checks…' );
 	} );
 
 	it( 'disappears when no plugin update is left', async () => {
 		const p = page( undefined, 0 );
 		bindBaseline( p.win );
-		expect( p.text() ).toBe( 'UpdateLens: Preparing site checks…' );
+		expect( p.text() ).toBe( 'UpdateLens: Preparing website checks…' );
 		// The due run asks; the server says nothing is left to update.
 		await vi.advanceTimersByTimeAsync( 1000 );
 		expect( p.fetchFn ).toHaveBeenCalledTimes( 1 );

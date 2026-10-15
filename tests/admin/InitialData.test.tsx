@@ -84,16 +84,25 @@ describe( 'Initial data printed by the admin page', () => {
 		expect( screen.queryByRole( 'alert' ) ).toBeNull();
 	} );
 
-	it( 'moves between its overview and signal pages without reading it again', async () => {
+	it( 'moves between its tabs and signal pages without reading it again', async () => {
 		restUnreadable();
 		visit( `?page=updatelens&analysis=${ COMPLETED.id }` );
 		print( printedReport( COMPLETED ) );
 		render( <App /> );
 		const user = userEvent.setup();
 
-		await user.click(
-			await screen.findByRole( 'link', { name: 'WP-Cron' } )
-		);
+		for ( const name of [ 'Website checks', 'Configuration changes' ] ) {
+			await user.click( await screen.findByRole( 'tab', { name } ) );
+		}
+		// A signal page (opened by a finding link).
+		await act( async () => {
+			window.history.pushState(
+				null,
+				'',
+				`/wp-admin/admin.php?page=updatelens&analysis=${ COMPLETED.id }&signal=cron`
+			);
+			window.dispatchEvent( new PopStateEvent( 'popstate' ) );
+		} );
 		expect(
 			await screen.findByRole( 'heading', { level: 2, name: 'WP-Cron' } )
 		).toBeInTheDocument();
@@ -222,11 +231,11 @@ describe( 'Initial data printed by the admin page', () => {
 		vi.useFakeTimers( { shouldAdvanceTime: true } );
 		restUnreadable();
 		const report = pendingReport();
-		visit( `?page=updatelens&analysis=${ report.id }` );
+		visit( `?page=updatelens&analysis=${ report.id }&tab=checks` );
 		print( printedReport( report ) );
 		render( <App /> );
 		const section = await screen.findByRole( 'region', {
-			name: 'Site checks',
+			name: 'Website checks',
 		} );
 
 		await act( () =>

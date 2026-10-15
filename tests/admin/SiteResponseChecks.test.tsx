@@ -12,17 +12,18 @@ import type {
 
 import cases from '../fixtures/site-check-impact-cases.json';
 import { COMPLETED, withSiteCheckCase } from './fixtures';
-import { openReport, tab } from './report-view';
+import type { ReportTab } from '@/admin/utils/route';
+
+import { openReport, reportTab, tab } from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
 
 /*
- * "Site response checks" on the report overview, from real API output
- * (tests/fixtures/site-check-impact-cases.json): always visible, above the
- * phase tabs, one row per check with the API's comparison state, never
- * "passed" unless compared as passed, and "Before update" / "After update"
- * with every request behind each row.
+ * The report's "Website checks" tab, from real API output
+ * (tests/fixtures/site-check-impact-cases.json): one row per check with the
+ * API's comparison state, never "passed" unless compared as passed, and
+ * "Before update" / "After update" with every request behind each row.
  */
 
 type CaseName = keyof typeof cases.cases;
@@ -41,14 +42,14 @@ function withSiteChecks(
 
 async function renderReport(
 	report: AnalysisReport,
-	options: { phase?: PhaseKey } = {}
+	options: { phase?: PhaseKey; tab?: ReportTab } = {}
 ) {
 	apiFetchMock.mockResolvedValue( report );
-	openReport( report.id, options );
+	openReport( report.id, { tab: 'checks', ...options } );
 	await screen.findByRole( 'heading', { level: 2 } );
 }
 
-const section = () => screen.getByRole( 'region', { name: 'Site checks' } );
+const section = () => screen.getByRole( 'region', { name: 'Website checks' } );
 
 /** The collapsed row of a check (before its details). */
 const rowOf = ( item: Element ) => item.firstElementChild!;
@@ -102,23 +103,23 @@ const checkButton = ( name: 'Homepage' | 'WordPress REST API' ) =>
 const FORBIDDEN =
 	/\bsafe\b|no issues|no conflicts?|risk-free|healthy|caused by|definitely|site (is|went) down|https?:\/\//i;
 
-describe( 'Site response checks on the report overview', () => {
+describe( 'Website checks tab', () => {
 	beforeEach( () => {
 		apiFetchMock.mockReset();
 	} );
 
-	it( 'both passed: its own section above the phase tabs, with compact rows', async () => {
+	it( 'both passed: its own tab, with compact rows', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
 
 		expect(
 			within( section() ).getByRole( 'heading', {
 				level: 3,
-				name: 'Site checks',
+				name: 'Website checks',
 			} )
 		).toBeInTheDocument();
 		// The brief statement of what these checks cover stays visible.
 		expect( section() ).toHaveTextContent(
-			'Requested by your browser before and after the update. They do not test every page or feature.'
+			'Compare your homepage and WordPress REST API responses around this update. Results are shown only for checks that actually ran. They do not test every page or feature.'
 		);
 		// Before → after → result; a pass needs no explanation.
 		expect( checkRows() ).toEqual( {
@@ -126,11 +127,11 @@ describe( 'Site response checks on the report overview', () => {
 			'WordPress REST API': 'Passed before and after',
 		} );
 		expect( sides( 'Homepage' ) ).toEqual( [
-			'Passed · HTTP 200',
-			'Passed · HTTP 200',
+			'Passed HTTP 200',
+			'Passed HTTP 200',
 		] );
 		expect( checkButton( 'Homepage' ) ).toHaveAccessibleDescription(
-			/^Before update Passed · HTTP.200 After update Passed · HTTP.200 Result Passed before and after$/
+			/^Before update Passed HTTP.200 After update Passed HTTP.200 Result Passed before and after$/
 		);
 		expect( checkButton( 'Homepage' ) ).toHaveAttribute(
 			'aria-expanded',
@@ -139,16 +140,19 @@ describe( 'Site response checks on the report overview', () => {
 		// Collapsed: no requests or explanations in the DOM.
 		expect( section() ).not.toHaveTextContent( 'Request 1' );
 		expect( section() ).not.toHaveTextContent( 'completion marker' );
-		// Not part of a phase: outside the tab panel, after Findings and
-		// before the configuration phases.
-		expect( section().closest( '[role="tabpanel"]' ) ).toBeNull();
-		const following = ( other: Element ) =>
-			section().compareDocumentPosition( other ) &
-			Node.DOCUMENT_POSITION_FOLLOWING;
-		expect( following( screen.getByRole( 'tablist' ) ) ).toBeTruthy();
+		// Not part of a phase: the tab has no phase tabs, and the other
+		// tabs' content is not rendered.
+		expect( section().closest( '[role="tabpanel"]' ) ).toHaveAccessibleName(
+			'Website checks'
+		);
 		expect(
-			following( screen.getByRole( 'region', { name: 'Findings' } ) )
-		).toBeFalsy();
+			screen.queryByRole( 'tablist', { name: 'Observation phases' } )
+		).toBeNull();
+		expect( screen.queryByText( 'Nothing flagged for review' ) ).toBeNull();
+		// "Passed before and after" is said once per check, never again.
+		expect(
+			section().textContent?.match( /Passed before and after/g )
+		).toHaveLength( 2 );
 	} );
 
 	it( 'expands with the keyboard to labelled fields before and after the update', async () => {
@@ -224,7 +228,7 @@ describe( 'Site response checks on the report overview', () => {
 			// The After cell says it; the sentence would repeat it.
 			expect( checkRows()!.Homepage ).toBe( 'Newly failing' );
 			expect( sides( 'Homepage' ) ).toEqual( [
-				'Passed · HTTP 200',
+				'Passed HTTP 200',
 				'Failed in both requests · HTTP 500',
 			] );
 			expect( checkRows()![ 'WordPress REST API' ] ).toBe(
@@ -248,6 +252,11 @@ describe( 'Site response checks on the report overview', () => {
 				} )
 			);
 			await act( () => vi.runOnlyPendingTimersAsync() );
+			// The finding is in Update results, which opens.
+			expect( reportTab( 'Update results' ) ).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
 			const finding = screen.getByRole( 'button', {
 				name: 'Homepage check newly failing, 1 finding, High priority',
 			} );
@@ -296,7 +305,7 @@ describe( 'Site response checks on the report overview', () => {
 		await renderReport( withSiteChecks( COMPLETED, 'no_baseline' ) );
 
 		const reason =
-			'No check from this login session had finished when the update started. These checks run in the background on Installed Plugins; wait until UpdateLens shows “Ready to compare site responses” there before clicking “Update now”.';
+			'No check from this login session had finished when the update started. These checks run in the background on Installed Plugins; wait until UpdateLens shows “Ready to compare website responses” there before clicking “Update now”.';
 		expect( checkRows() ).toEqual( {
 			Homepage: 'Not compared',
 			'WordPress REST API': 'Not compared',
@@ -320,7 +329,7 @@ describe( 'Site response checks on the report overview', () => {
 			'WordPress REST API': 'Not compared',
 		} );
 		expect( sides( 'Homepage' ) ).toEqual( [
-			'Passed · HTTP 200',
+			'Passed HTTP 200',
 			'Not run',
 		] );
 		expect( section() ).toHaveTextContent(
@@ -365,11 +374,11 @@ describe( 'Site response checks on the report overview', () => {
 			'Before and after the update'
 		);
 		expect( section() ).toHaveTextContent(
-			'Site checks were turned off when this update ran, so the homepage and the REST API were not checked.'
+			'Website checks were turned off when this update ran, so the homepage and the REST API were not checked.'
 		);
 		expect(
 			within( section() ).getByRole( 'link', {
-				name: 'Site check settings',
+				name: 'Website check settings',
 			} )
 		).toHaveAttribute( 'href', 'admin.php?page=updatelens-settings' );
 		expect( section().textContent ).not.toMatch( /Passed|failed/i );
@@ -379,7 +388,7 @@ describe( 'Site response checks on the report overview', () => {
 		await renderReport( withSiteChecks( COMPLETED, 'historical' ) );
 		expect( checkRows() ).toBeNull();
 		expect( section() ).toHaveTextContent(
-			'Site checks were not recorded for this update: it was observed before UpdateLens had them.'
+			'Website checks were not recorded for this update: it was observed before UpdateLens had them.'
 		);
 		expect( section().querySelector( '.bg-amber-50\\/70' ) ).toBeNull();
 		expect( section() ).not.toHaveTextContent(
@@ -387,7 +396,7 @@ describe( 'Site response checks on the report overview', () => {
 		);
 	} );
 
-	it( 'a report from an API without site checks reads the same', async () => {
+	it( 'a report from an API without website checks reads the same', async () => {
 		const { site_checks: omitted, ...older } = COMPLETED;
 		void omitted;
 		await renderReport( {
@@ -398,7 +407,7 @@ describe( 'Site response checks on the report overview', () => {
 			},
 		} as unknown as AnalysisReport );
 		expect( section() ).toHaveTextContent(
-			'Site checks were not recorded for this update'
+			'Website checks were not recorded for this update'
 		);
 	} );
 
@@ -436,7 +445,7 @@ describe( 'Site response checks on the report overview', () => {
 			).length - 1
 		).toBe( 1 );
 		expect( section() ).toHaveTextContent(
-			'This report checks for the pending site check results every few seconds while it is open.'
+			'This report checks for the pending website check results every few seconds while it is open.'
 		);
 		expect(
 			within( section() ).getByRole( 'button', {
@@ -457,7 +466,9 @@ describe( 'Site response checks on the report overview', () => {
 		await user.click( checkButton( 'WordPress REST API' ) );
 		const before = section().textContent;
 		for ( const name of [ /^After update/, /^Net result/ ] ) {
+			await user.click( reportTab( 'Configuration changes' ) );
 			await user.click( tab( name ) );
+			await user.click( reportTab( 'Website checks' ) );
 			expect( section().textContent ).toBe( before );
 			expect( checkButton( 'WordPress REST API' ) ).toHaveAttribute(
 				'aria-expanded',

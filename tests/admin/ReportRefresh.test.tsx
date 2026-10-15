@@ -13,7 +13,8 @@ import type {
 import cases from '../fixtures/site-check-impact-cases.json';
 import { AWAITING, COMPLETED, restError, withSiteCheckCase } from './fixtures';
 import { IMPACT } from './impact-fixtures';
-import { openReport, tab } from './report-view';
+import type { ReportTab } from '@/admin/utils/route';
+import { openReport, reportPanel, reportTab, tab } from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
@@ -60,9 +61,10 @@ function deferred() {
 	return { promise, resolve, reject };
 }
 
-const impact = () => screen.getByRole( 'region', { name: 'Findings' } );
-/** The site response checks section (pending results and their refresh). */
-const site = () => screen.getByRole( 'region', { name: 'Site checks' } );
+/** The selected tab's content. */
+const impact = () => reportPanel();
+/** The website checks (pending results and their refresh). */
+const site = () => screen.getByRole( 'region', { name: 'Website checks' } );
 const statusLine = () =>
 	screen.getByRole( 'region', { name: 'Analysis status' } );
 const refreshButton = () =>
@@ -77,10 +79,11 @@ const heading = () => screen.getByRole( 'heading', { level: 2 } );
  * Opens the report and waits until it is shown.
  *
  * @param served Report served first.
+ * @param tab    Tab of the report.
  */
-async function open( served: AnalysisReport ) {
+async function open( served: AnalysisReport, tab?: ReportTab ) {
 	apiFetchMock.mockResolvedValueOnce( served );
-	openReport( served.id );
+	openReport( served.id, { tab } );
 	expect(
 		await screen.findByRole( 'heading', { level: 2 } )
 	).toBeInTheDocument();
@@ -95,9 +98,10 @@ describe( 'Refresh', () => {
 	} );
 
 	it( 'updates the report in place, keeping the phase and expanded findings', async () => {
-		await open( OPEN );
+		await open( OPEN, 'configuration' );
 		const user = userEvent.setup();
 		await user.click( tab( /^During update/ ) );
+		await user.click( reportTab( 'Update results' ) );
 		await user.click( group( 'Large autoloaded options' ) );
 		expect( group( 'Large autoloaded options' ) ).toHaveAttribute(
 			'aria-expanded',
@@ -132,37 +136,41 @@ describe( 'Refresh', () => {
 			screen.queryByRole( 'region', { name: 'Analysis status' } )
 		).toBeNull();
 		expect( heading() ).toBe( title );
-		expect( tab( /^During update/ ) ).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
 		expect( group( 'Large autoloaded options' ) ).toHaveAttribute(
 			'aria-expanded',
+			'true'
+		);
+		await user.click( reportTab( 'Configuration changes' ) );
+		expect( tab( /^During update/ ) ).toHaveAttribute(
+			'aria-selected',
 			'true'
 		);
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 2 );
 	} );
 
-	it( 'keeps the default phase it showed, even if the new report would open another', async () => {
-		// Awaiting: only During update has data; once completed, the report
-		// alone would open on the Net result.
-		await open( AWAITING );
+	it( 'stays on the Net result while it fills in, never switching phase', async () => {
+		// Awaiting: only During update has data, the Net result is shown
+		// (not available yet) and fills in once completed.
+		await open( AWAITING, 'configuration' );
 		const user = userEvent.setup();
-		expect( tab( /^During update/ ) ).toHaveAttribute(
+		expect( tab( /^Net result/ ) ).toHaveAttribute(
 			'aria-selected',
 			'true'
 		);
+		expect( tab( /^Net result/ ) ).toHaveTextContent( 'Not available' );
 
 		apiFetchMock.mockResolvedValueOnce( { ...COMPLETED, id: AWAITING.id } );
 		await user.click( refreshButton() );
 		await screen.findByText( 'Report refreshed.' );
 
 		expect( tab( /^Net result/ ) ).not.toHaveTextContent( 'Not available' );
-		expect( tab( /^During update/ ) ).toHaveAttribute(
+		expect( tab( /^Net result/ ) ).toHaveAttribute(
 			'aria-selected',
 			'true'
 		);
-		expect( window.location.search ).not.toContain( 'phase=' );
+		expect( window.location.search ).toBe(
+			`?page=updatelens&analysis=${ AWAITING.id }&tab=configuration`
+		);
 	} );
 
 	it( 'keeps focus on Refresh while the analysis stays open, and moves it to the title when the line goes', async () => {
@@ -260,7 +268,7 @@ describe( 'Refresh', () => {
 	} );
 } );
 
-describe( 'Refresh with pending site check results', () => {
+describe( 'Refresh with pending website check results', () => {
 	beforeEach( () => {
 		apiFetchMock.mockReset();
 	} );
@@ -283,7 +291,7 @@ describe( 'Refresh with pending site check results', () => {
 	async function openPending() {
 		vi.useFakeTimers( { toFake: [ 'setTimeout', 'clearTimeout' ] } );
 		apiFetchMock.mockResolvedValueOnce( withSiteChecks( 'pending' ) );
-		openReport( OPEN.id );
+		openReport( OPEN.id, { tab: 'checks' } );
 		await wait( 0 );
 		expect( heading() ).toBeInTheDocument();
 	}
@@ -317,7 +325,7 @@ describe( 'Refresh with pending site check results', () => {
 		);
 		await wait( 0 );
 		expect(
-			screen.getByText( 'Site check results arrived.' )
+			screen.getByText( 'Website check results arrived.' )
 		).toBeInTheDocument();
 		expect( screen.getByText( 'Report refreshed.' ) ).toBeInTheDocument();
 		expect(
@@ -356,7 +364,7 @@ describe( 'Refresh with pending site check results', () => {
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 3 );
 		// Still pending: background reading goes on.
 		expect( site() ).toHaveTextContent(
-			'This report checks for the pending site check results every few seconds while it is open.'
+			'This report checks for the pending website check results every few seconds while it is open.'
 		);
 	} );
 } );

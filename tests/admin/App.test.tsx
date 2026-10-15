@@ -80,7 +80,7 @@ describe( 'App navigation', () => {
 		} );
 		expect( title ).toHaveFocus();
 		expect(
-			screen.getByRole( 'tab', { name: /Net result/ } )
+			screen.getByRole( 'tab', { name: 'Update results' } )
 		).toHaveAttribute( 'aria-selected', 'true' );
 
 		await act( async () => {
@@ -132,7 +132,7 @@ describe( 'App navigation', () => {
 		} );
 	} );
 
-	it( 'opens signal details from the overview and comes back', async () => {
+	it( 'keeps tabs and phases in the URL without adding history entries', async () => {
 		serveApi( [ COMPLETED ] );
 		visit( '?page=updatelens&paged=2&analysis=1' );
 		render( <App /> );
@@ -141,29 +141,54 @@ describe( 'App navigation', () => {
 
 		await screen.findAllByRole( 'tablist' );
 		await user.click(
+			screen.getByRole( 'tab', { name: 'Configuration changes' } )
+		);
+		await user.click(
 			screen.getByRole( 'tab', { name: /During update/ } )
 		);
-		// Choosing a phase replaces the entry; it never adds one.
+		// Choosing a tab or a phase replaces the entry; it never adds one.
 		expect( window.history.length ).toBe( entries );
 		expect( window.location.search ).toBe(
-			'?page=updatelens&paged=2&analysis=1&phase=during_update'
+			'?page=updatelens&paged=2&analysis=1&phase=during_update&tab=configuration'
 		);
-
-		await user.click( screen.getByRole( 'link', { name: 'WP-Cron' } ) );
+		await user.click(
+			screen.getByRole( 'tab', { name: 'Website checks' } )
+		);
+		expect( window.history.length ).toBe( entries );
 		expect( window.location.search ).toBe(
-			'?page=updatelens&paged=2&analysis=1&signal=cron&phase=during_update'
+			'?page=updatelens&paged=2&analysis=1&phase=during_update&tab=checks'
 		);
+		expect( apiFetchMock ).toHaveBeenCalledTimes( 1 );
+	} );
+
+	it( 'returns from signal details to the overview and back', async () => {
+		serveApi( [ COMPLETED ] );
+		visit( '?page=updatelens&paged=2&analysis=1' );
+		render( <App /> );
+		const user = userEvent.setup();
+		await screen.findAllByRole( 'tablist' );
+
+		// Signal pages are opened by finding links (a pushed entry).
+		await act( async () => {
+			window.history.pushState(
+				null,
+				'',
+				'/wp-admin/admin.php?page=updatelens&paged=2&analysis=1&signal=cron&phase=during_update'
+			);
+			window.dispatchEvent( new PopStateEvent( 'popstate' ) );
+		} );
 		expect(
 			screen.getByRole( 'heading', { level: 2, name: 'WP-Cron' } )
 		).toHaveFocus();
-		// Same report, same phase, no second request.
+		// Same report, no second request.
 		expect(
 			screen.getByRole( 'tab', { name: /During update/ } )
 		).toHaveAttribute( 'aria-selected', 'true' );
 		expect( apiFetchMock ).toHaveBeenCalledTimes( 1 );
 		expect( screen.queryByRole( 'list', { name: 'Signals' } ) ).toBeNull();
 
-		// A phase chosen on the details is kept on the overview.
+		// The breadcrumb returns to Update results; a phase chosen on the
+		// details is kept for Configuration changes.
 		await user.click( screen.getByRole( 'tab', { name: /After update/ } ) );
 		const breadcrumb = screen.getByRole( 'navigation', {
 			name: 'Breadcrumb',
@@ -174,7 +199,7 @@ describe( 'App navigation', () => {
 			} )
 		);
 		expect( window.location.search ).toBe(
-			'?page=updatelens&paged=2&analysis=1&phase=post_update'
+			'?page=updatelens&paged=2&analysis=1&phase=post_update&tab=results'
 		);
 		expect(
 			screen.getByRole( 'heading', {
@@ -182,6 +207,12 @@ describe( 'App navigation', () => {
 				name: 'UpdateLens Fixture A',
 			} )
 		).toHaveFocus();
+		expect(
+			screen.getByRole( 'tab', { name: 'Update results' } )
+		).toHaveAttribute( 'aria-selected', 'true' );
+		await user.click(
+			screen.getByRole( 'tab', { name: 'Configuration changes' } )
+		);
 		expect(
 			screen.getByRole( 'tab', { name: /After update/ } )
 		).toHaveAttribute( 'aria-selected', 'true' );
@@ -241,7 +272,15 @@ describe( 'App navigation', () => {
 			expect(
 				await screen.findByRole( 'heading', { level: 2, name: title } )
 			).toBeInTheDocument();
-			// The default phase and the overview.
+			// The overview on its first tab, and the default phase.
+			expect(
+				screen.getByRole( 'tab', { name: 'Update results' } )
+			).toHaveAttribute( 'aria-selected', 'true' );
+			await userEvent
+				.setup()
+				.click(
+					screen.getByRole( 'tab', { name: 'Configuration changes' } )
+				);
 			expect(
 				screen.getByRole( 'tab', { name: /Net result/ } )
 			).toHaveAttribute( 'aria-selected', 'true' );
@@ -339,6 +378,22 @@ describe( 'privacy', () => {
 			screen.getByRole( 'link', { name: /UpdateLens Fixture A/ } )
 		);
 		await screen.findAllByRole( 'tablist' );
+		const expandAll = async () => {
+			for ( const button of screen.queryAllByRole( 'button', {
+				expanded: false,
+			} ) ) {
+				await user.click( button );
+			}
+		};
+		// Every tab of the overview, everything expanded.
+		for ( const name of [ 'Update results', 'Website checks' ] ) {
+			await user.click( screen.getByRole( 'tab', { name } ) );
+			await expandAll();
+			check();
+		}
+		await user.click(
+			screen.getByRole( 'tab', { name: 'Configuration changes' } )
+		);
 		const everyPhase = async () => {
 			await user.click( screen.getByText( 'Technical details' ) );
 			for ( const name of [
@@ -357,14 +412,17 @@ describe( 'privacy', () => {
 		};
 		await everyPhase();
 
-		for ( const signal of [
-			'Options & autoload',
-			'WP-Cron',
-			'Action Scheduler',
-		] ) {
-			await user.click( screen.getByRole( 'link', { name: signal } ) );
+		for ( const signal of [ 'options', 'cron', 'action_scheduler' ] ) {
+			await act( async () => {
+				window.history.pushState(
+					null,
+					'',
+					`/wp-admin/admin.php?page=updatelens&analysis=1&signal=${ signal }`
+				);
+				window.dispatchEvent( new PopStateEvent( 'popstate' ) );
+			} );
 			await everyPhase();
-			if ( signal === 'WP-Cron' ) {
+			if ( signal === 'cron' ) {
 				// The Cron hooks themselves are shown.
 				expect( document.body ).toHaveTextContent(
 					'ul_fixture_cleanup'

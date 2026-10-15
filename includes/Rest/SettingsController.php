@@ -66,7 +66,7 @@ final class SettingsController extends WP_REST_Controller {
 					'permission_callback' => array( $this, 'update_item_permissions_check' ),
 					'args'                => array(
 						'site_checks' => array(
-							'description'       => __( 'Site check settings: exactly {"enabled": true|false}.', 'updatelens' ),
+							'description'       => __( 'Website check settings: exactly {"enabled": true|false}.', 'updatelens' ),
 							'type'              => 'object',
 							'required'          => true,
 							'validate_callback' => array( self::class, 'validate_site_checks' ),
@@ -267,7 +267,7 @@ final class SettingsController extends WP_REST_Controller {
 			'type'       => 'object',
 			'properties' => array(
 				'site_checks' => array(
-					'description'          => __( 'Site checks: homepage and REST API responses compared before and after supported manual plugin updates.', 'updatelens' ),
+					'description'          => __( 'Website checks: homepage and REST API responses compared before and after supported manual plugin updates.', 'updatelens' ),
 					'type'                 => 'object',
 					'context'              => array( 'view', 'edit' ),
 					'additionalProperties' => false,
@@ -277,12 +277,12 @@ final class SettingsController extends WP_REST_Controller {
 							'type'        => 'boolean',
 						),
 						'effective'   => array(
-							'description' => __( 'Whether site checks may run: the preference is on and the site configuration does not keep them off.', 'updatelens' ),
+							'description' => __( 'Whether website checks may run: the preference is on and the site configuration does not keep them off.', 'updatelens' ),
 							'type'        => 'boolean',
 							'readonly'    => true,
 						),
 						'restriction' => array(
-							'description' => __( 'Why site checks cannot run whatever the preference: "filter" (the updatelens_site_checks_enabled filter), or null.', 'updatelens' ),
+							'description' => __( 'Why website checks cannot run whatever the preference: "filter" (the updatelens_site_checks_enabled filter), or null.', 'updatelens' ),
 							'type'        => array( 'string', 'null' ),
 							'enum'        => array( self::RESTRICTION_FILTER, null ),
 							'readonly'    => true,

@@ -514,18 +514,19 @@ export function priorityLabel( priority: FindingPriority ): string {
 }
 
 /**
- * The evidence label: "Based on Net result", "Based on Net result and site
- * checks" when site checks were compared too, or "Based on site checks".
+ * The evidence label: "Based on Net result", "Based on Net result and
+ * website checks" when website checks were compared too, or "Based on
+ * website checks".
  *
  * @param net  Whether the Net result was evaluated.
  * @param site Whether at least one site check was compared.
  */
 export function impactSourceLabel( net: boolean, site: boolean ): string {
 	if ( site && net ) {
-		return __( 'Based on Net result and site checks', 'updatelens' );
+		return __( 'Based on Net result and website checks', 'updatelens' );
 	}
 	return site
-		? __( 'Based on site checks', 'updatelens' )
+		? __( 'Based on website checks', 'updatelens' )
 		: __( 'Based on Net result', 'updatelens' );
 }
 
@@ -632,7 +633,7 @@ export function impactHeadline(
 			switch ( impactCompleteness( impact ) ) {
 				case 'pending':
 					return __(
-						'No findings yet — site checks are still pending.',
+						'No findings yet — website checks are still pending.',
 						'updatelens'
 					);
 				case 'partial': {
@@ -642,13 +643,13 @@ export function impactHeadline(
 					const gaps = impactGaps( impact );
 					if ( gaps.configuration && gaps.siteChecks ) {
 						return __(
-							'No findings in the completed observations; some configuration sources were not assessed and not all site checks were compared.',
+							'No findings in the completed observations; some configuration sources were not assessed and not all website checks were compared.',
 							'updatelens'
 						);
 					}
 					return gaps.siteChecks
 						? __(
-								'No findings in the completed observations; not all site checks were compared.',
+								'No findings in the completed observations; not all website checks were compared.',
 								'updatelens'
 							)
 						: __(
@@ -693,18 +694,18 @@ export function impactDescription(
 			}
 			return impact.findings.length === 0
 				? __(
-						'Site check results that changed around the update and are worth a closer look. They do not show what caused the change, and it may not come from the updated plugin.',
+						'Website check results that changed around the update and are worth a closer look. They do not show what caused the change, and it may not come from the updated plugin.',
 						'updatelens'
 					)
 				: __(
-						'Site check results and changes in the Net result that are worth a closer look. They are not confirmed problems, and they may not come from the updated plugin.',
+						'Website check results and changes in the Net result that are worth a closer look. They are not confirmed problems, and they may not come from the updated plugin.',
 						'updatelens'
 					);
 		case 'none':
 			switch ( impactCompleteness( impact ) ) {
 				case 'pending':
 					return __(
-						'The site check results from after the update have not arrived yet; until they do, they are not counted as passed. Only a few specific patterns are checked.',
+						'The website check results from after the update have not arrived yet; until they do, they are not counted as passed. Only a few specific patterns are checked.',
 						'updatelens'
 					);
 				case 'partial':

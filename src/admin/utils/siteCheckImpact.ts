@@ -592,6 +592,53 @@ export function sideVerdictText( side: SiteCheckSide ): string {
 }
 
 /**
+ * A side for a compact cell: the verdict in one word ("Passed", "Failed",
+ * "Redirected", "Inconclusive"), and for a failure or redirect how many
+ * requests showed it ("in both requests"), with what every request showed
+ * ("HTTP 500"). The same facts as sideSummaryText().
+ *
+ * @param side Side with a result.
+ */
+export function sideCellParts( side: SiteCheckSide ): {
+	verdict: string;
+	detail: string | null;
+} {
+	const count = side.result?.attempts.length ?? 0;
+	const { response } = sideSummaryParts( side );
+	let verdict: string;
+	let requests: string | null = null;
+	switch ( side.result?.verdict ) {
+		case 'pass':
+			verdict = __( 'Passed', 'updatelens' );
+			break;
+		case 'fail':
+		case 'redirect':
+			verdict =
+				side.result.verdict === 'fail'
+					? __( 'Failed', 'updatelens' )
+					: __( 'Redirected', 'updatelens' );
+			requests =
+				count === 2
+					? __( 'in both requests', 'updatelens' )
+					: sprintf(
+							/* translators: %s: number of requests. */
+							_n(
+								'in %s request',
+								'in %s requests',
+								count,
+								'updatelens'
+							),
+							formatCount( count )
+						);
+			break;
+		default:
+			verdict = __( 'Inconclusive', 'updatelens' );
+	}
+	const detail = [ requests, response ].filter( Boolean ).join( ' · ' );
+	return { verdict, detail: detail === '' ? null : detail };
+}
+
+/**
  * The verdict with what every request showed, for scanning: "Passed · HTTP
  * 200", "Failed in both requests · HTTP 500", "… · no response". Only when
  * the requests agree; each request is still listed below it.
@@ -599,25 +646,43 @@ export function sideVerdictText( side: SiteCheckSide ): string {
  * @param side Side with a result.
  */
 export function sideSummaryText( side: SiteCheckSide ): string {
+	const { verdict, response } = sideSummaryParts( side );
+	return response === null ? verdict : `${ verdict } · ${ response }`;
+}
+
+/**
+ * The parts of sideSummaryText(): the verdict ("Failed in both requests")
+ * and what every request showed ("HTTP 500", "no response"), null when the
+ * requests do not agree.
+ *
+ * @param side Side with a result.
+ */
+export function sideSummaryParts( side: SiteCheckSide ): {
+	verdict: string;
+	response: string | null;
+} {
 	const verdict = sideVerdictText( side );
 	const attempts = side.result?.attempts ?? [];
 	const status = httpStatus( side );
 	if ( status !== null ) {
-		return `${ verdict } · ${ keepTogether(
-			sprintf(
-				/* translators: %s: HTTP status code, e.g. "200". */
-				__( 'HTTP %s', 'updatelens' ),
-				status
-			)
-		) }`;
+		return {
+			verdict,
+			response: keepTogether(
+				sprintf(
+					/* translators: %s: HTTP status code, e.g. "200". */
+					__( 'HTTP %s', 'updatelens' ),
+					status
+				)
+			),
+		};
 	}
 	if (
 		attempts.length > 0 &&
 		attempts.every( ( attempt ) => attempt.outcome === 'timeout' )
 	) {
-		return `${ verdict } · ${ __( 'no response', 'updatelens' ) }`;
+		return { verdict, response: __( 'no response', 'updatelens' ) };
 	}
-	return verdict;
+	return { verdict, response: null };
 }
 
 /**
@@ -1019,14 +1084,14 @@ function notUsedText(
 		? {
 				status: __( 'Not used', 'updatelens' ),
 				detail: __(
-					'Site checks were disabled for this update.',
+					'Website checks were disabled for this update.',
 					'updatelens'
 				),
 			}
 		: {
 				status: __( 'Not recorded', 'updatelens' ),
 				detail: __(
-					'This update was observed before UpdateLens recorded site checks.',
+					'This update was observed before UpdateLens recorded website checks.',
 					'updatelens'
 				),
 			};
@@ -1173,7 +1238,7 @@ export function beforeReasonText( reason: string ): string {
 			);
 		case 'missing':
 			return __(
-				'No check from this login session had finished when the update started. These checks run in the background on Installed Plugins; wait until UpdateLens shows “Ready to compare site responses” there before clicking “Update now”.',
+				'No check from this login session had finished when the update started. These checks run in the background on Installed Plugins; wait until UpdateLens shows “Ready to compare website responses” there before clicking “Update now”.',
 				'updatelens'
 			);
 		case 'corrupt':
@@ -1314,7 +1379,7 @@ export function siteCheckNextTimeText( reason: string | null ): string | null {
 		case 'overlapping_update':
 		case 'queued_update':
 			return __(
-				'For a comparison next time, update one plugin at a time: on Installed Plugins, wait for “Ready to compare site responses”, click “Update now”, and wait a few seconds after “Updated!” before starting the next update.',
+				'For a comparison next time, update one plugin at a time: on Installed Plugins, wait for “Ready to compare website responses”, click “Update now”, and wait a few seconds after “Updated!” before starting the next update.',
 				'updatelens'
 			);
 		case 'not_followed_up':
@@ -1473,7 +1538,7 @@ function inconclusiveText( side: SiteCheckSide | undefined ): string {
 export function siteCheckPatterns(): string[] {
 	return [
 		__(
-			'Site checks: a homepage or REST API check that passed before the update and failed in both requests after it, and a homepage that passed before the update and redirected after it.',
+			'Website checks: a homepage or REST API check that passed before the update and failed in both requests after it, and a homepage that passed before the update and redirected after it.',
 			'updatelens'
 		),
 	];
@@ -1483,7 +1548,7 @@ export function siteCheckPatterns(): string[] {
 export function siteCheckLimitations(): string[] {
 	return [
 		__(
-			'Site checks are separate requests from your browser before and after the update. They are not part of any phase, and are compared only when both ran under the same conditions.',
+			'Website checks are separate requests from your browser before and after the update. They are not part of any phase, and are compared only when both ran under the same conditions.',
 			'updatelens'
 		),
 		__(

@@ -1,0 +1,481 @@
+import apiFetch from '@wordpress/api-fetch';
+import { act, cleanup, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type {
+	AnalysisReport,
+	SiteCheckImpact,
+	SiteChecks,
+} from '@/admin/types/api';
+
+import cases from '../fixtures/site-check-impact-cases.json';
+import {
+	AWAITING,
+	COMPLETED,
+	EXPIRED,
+	FAILED,
+	MALFORMED_CRON,
+	PRE_CRON,
+	withSiteCheckCase,
+} from './fixtures';
+import {
+	HISTORICAL_NOT_INSTALLED,
+	IMPACT,
+	ONE_FINDING,
+} from './impact-fixtures';
+import {
+	openReport,
+	reportPanel,
+	reportTab,
+	reportTabs,
+	signalCard,
+} from './report-view';
+
+vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
+const apiFetchMock = vi.mocked( apiFetch );
+
+/*
+ * A report's three tabs, and the first of them, "Update results": the
+ * decision. With findings, they are listed by the priority the API gave
+ * them; without, one panel worded by how complete the observations were
+ * (green only when everything applicable was assessed and no website check
+ * failed after the update). What could not be assessed and the changes no
+ * rule matched (informational) are kept apart from the priorities. Never
+ * one verdict on the update.
+ */
+
+type CaseName = keyof typeof cases.cases;
+
+/**
+ * A report with a site check case (real API output).
+ *
+ * @param base Report.
+ * @param name Case.
+ */
+function withSiteChecks( base: AnalysisReport, name: CaseName ) {
+	const data = cases.cases[ name ];
+	return withSiteCheckCase(
+		base,
+		data.site_checks as SiteChecks,
+		data.potential_impact_site_checks as SiteCheckImpact
+	);
+}
+
+async function renderReport( report: AnalysisReport ) {
+	apiFetchMock.mockResolvedValue( report );
+	openReport( report.id );
+	await screen.findByRole( 'heading', { level: 2 } );
+}
+
+/** The result panel shown without findings, or null. */
+const panel = () =>
+	document.querySelector< HTMLElement >(
+		'[aria-labelledby="updatelens-result-title"]'
+	);
+
+/** Lines of "Not assessed", or null without it. */
+function notAssessed(): string[] | null {
+	const region = screen.queryByRole( 'region', { name: 'Not assessed' } );
+	return region
+		? within( region )
+				.getAllByRole( 'listitem' )
+				.map( ( item ) => item.textContent ?? '' )
+		: null;
+}
+
+/** Priority groups as their headings' accessible names, in order. */
+const priorityGroups = () =>
+	Array.from(
+		reportPanel().querySelectorAll< HTMLElement >(
+			'section[data-priority]'
+		)
+	).map(
+		( group ) =>
+			within( group ).getByRole( 'heading', { level: 3 } ).textContent
+	);
+
+const FORBIDDEN =
+	/\bsafe\b|healthy|no issues|no problems|passed update|update passed|successful update|caused by|\brisk|\bcomplete\b/i;
+
+describe( 'Report tabs', () => {
+	beforeEach( () => {
+		apiFetchMock.mockReset();
+	} );
+
+	it( 'opens on Update results: one tab bar of three, one panel', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
+		expect( reportTabs().map( ( item ) => item.textContent ) ).toEqual( [
+			'Update results',
+			'Website checks',
+			'Configuration changes',
+		] );
+		expect( reportTab( 'Update results' ) ).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+		// Only the selected tab is in the tab order, and only its panel exists.
+		expect(
+			reportTabs().map( ( item ) => item.getAttribute( 'tabindex' ) )
+		).toEqual( [ '0', '-1', '-1' ] );
+		expect(
+			screen.getByRole( 'tabpanel', { name: 'Update results' } )
+		).toBe( reportPanel() );
+		expect(
+			screen.queryByRole( 'region', { name: 'Website checks' } )
+		).toBeNull();
+		expect(
+			screen.queryByRole( 'region', { name: 'Configuration changes' } )
+		).toBeNull();
+		// The header stays above the tabs.
+		expect(
+			screen
+				.getByRole( 'banner' )
+				.compareDocumentPosition( reportTabs()[ 0 ] ) &
+				Node.DOCUMENT_POSITION_FOLLOWING
+		).toBeTruthy();
+	} );
+
+	it( 'switches tabs with the keyboard, keeping focus on the tabs', async () => {
+		const user = userEvent.setup();
+		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
+		await user.click( reportTab( 'Update results' ) );
+		await user.keyboard( '{ArrowRight}' );
+		expect( reportTab( 'Website checks' ) ).toHaveFocus();
+		expect( reportTab( 'Website checks' ) ).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+		expect(
+			screen.getByRole( 'region', { name: 'Website checks' } )
+		).toBeInTheDocument();
+		expect( window.location.search ).toContain( 'tab=checks' );
+		await user.keyboard( '{End}' );
+		expect( reportTab( 'Configuration changes' ) ).toHaveFocus();
+		expect(
+			screen.getByRole( 'region', { name: 'Configuration changes' } )
+		).toBeInTheDocument();
+		await user.keyboard( '{ArrowRight}' );
+		expect( reportTab( 'Update results' ) ).toHaveFocus();
+		await user.keyboard( '{ArrowLeft}' );
+		expect( reportTab( 'Configuration changes' ) ).toHaveFocus();
+		await user.keyboard( '{Home}' );
+		expect( reportTab( 'Update results' ) ).toHaveFocus();
+		expect( panel() ).not.toBeNull();
+	} );
+
+	it( 'opens the tab the URL names; a URL with a phase opens Configuration changes', async () => {
+		apiFetchMock.mockResolvedValue( COMPLETED );
+		openReport( COMPLETED.id, { tab: 'checks' } );
+		await screen.findByRole( 'heading', { level: 2 } );
+		expect( reportTab( 'Website checks' ) ).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+		cleanup();
+		// Older report URLs chose a phase on the overview.
+		openReport( COMPLETED.id, { phase: 'during_update' } );
+		await screen.findByRole( 'heading', { level: 2 } );
+		expect( reportTab( 'Configuration changes' ) ).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+		// A phase in the URL wins over the Net result default.
+		expect(
+			within(
+				screen.getByRole( 'tablist', { name: 'Observation phases' } )
+			).getByRole( 'tab', { selected: true } )
+		).toHaveTextContent( /^During update/ );
+	} );
+
+	it( 'Configuration changes: Net result first, every source opens in place and links to its page', async () => {
+		const user = userEvent.setup();
+		apiFetchMock.mockResolvedValue( COMPLETED );
+		openReport( COMPLETED.id, { tab: 'configuration' } );
+		await screen.findByRole( 'heading', { level: 2 } );
+		const phases = within(
+			screen.getByRole( 'tablist', { name: 'Observation phases' } )
+		).getAllByRole( 'tab' );
+		expect(
+			phases.map( ( item ) => item.textContent?.split( ',' )[ 0 ] )
+		).toEqual( [ 'Net result', 'During update', 'After update' ] );
+		expect( phases[ 0 ] ).toHaveAttribute( 'aria-selected', 'true' );
+
+		// Every row links to its signal page, with changes or without.
+		const links = () =>
+			within(
+				screen.getByRole( 'list', { name: 'Signals' } )
+			).getAllByRole( 'link' );
+		expect( links().map( ( link ) => link.textContent ) ).toEqual( [
+			'Open page',
+			'Open page',
+			'Open page',
+		] );
+		expect( links()[ 0 ] ).toHaveAccessibleName(
+			'Open page: Options & autoload'
+		);
+		expect( links()[ 2 ] ).toHaveAccessibleName(
+			'Open page: Action Scheduler'
+		);
+		expect( links()[ 1 ] ).toHaveAttribute(
+			'href',
+			expect.stringContaining(
+				`analysis=${ COMPLETED.id }&signal=cron&tab=configuration`
+			)
+		);
+
+		// The changes still open in place.
+		const options = screen.getByRole( 'button', {
+			name: 'Options & autoload',
+		} );
+		await user.click( options );
+		expect( options ).toHaveAttribute( 'aria-expanded', 'true' );
+
+		await user.click( links()[ 1 ] );
+		expect(
+			await screen.findByRole( 'heading', { level: 2, name: 'WP-Cron' } )
+		).toHaveFocus();
+
+		// Back: Configuration changes again, the source still expanded and
+		// focus on the link that was opened.
+		await user.click(
+			within(
+				screen.getByRole( 'navigation', { name: 'Breadcrumb' } )
+			).getAllByRole( 'link' )[ 1 ]
+		);
+		expect( reportTab( 'Configuration changes' ) ).toHaveAttribute(
+			'aria-selected',
+			'true'
+		);
+		expect(
+			screen.getByRole( 'button', { name: 'Options & autoload' } )
+		).toHaveAttribute( 'aria-expanded', 'true' );
+		expect( links()[ 1 ] ).toHaveFocus();
+	} );
+} );
+
+describe( 'Update results', () => {
+	beforeEach( () => {
+		apiFetchMock.mockReset();
+	} );
+
+	it( 'without findings: nothing flagged, in green only when everything was assessed', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
+		expect( panel() ).toHaveAttribute( 'data-tone', 'positive' );
+		expect( panel() ).toHaveTextContent(
+			'Nothing flagged for reviewNo concerning patterns matched the completed observations.UpdateLens checks selected patterns only, so this does not guarantee that the update had no other effects.'
+		);
+		expect( priorityGroups() ).toEqual( [] );
+		expect( notAssessed() ).toBeNull();
+		// The changes no rule matched are informational, never "safe".
+		expect( reportPanel() ).toHaveTextContent(
+			/\d+ of \d+ configuration changes? in the Net result matched no review rule \(informational\)\./
+		);
+		expect( reportPanel().textContent ).not.toMatch( FORBIDDEN );
+	} );
+
+	it( 'lists findings by priority, high priority first', async () => {
+		await renderReport( withSiteChecks( IMPACT, 'home_newly_failing' ) );
+		expect( panel() ).toBeNull();
+		expect( priorityGroups() ).toEqual( [
+			'High priority, 1',
+			'Needs review, 5',
+		] );
+		expect( reportPanel() ).toHaveTextContent(
+			'Based on Net result and website checks'
+		);
+		expect( reportPanel().textContent ).not.toMatch( FORBIDDEN );
+	} );
+
+	it( 'one finding to review', async () => {
+		await renderReport( ONE_FINDING );
+		expect( priorityGroups() ).toEqual( [ 'Needs review, 1' ] );
+	} );
+
+	it( 'both checks newly failing are two high priority findings', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'both_newly_failing' ) );
+		expect( priorityGroups() ).toEqual( [ 'High priority, 2' ] );
+	} );
+
+	it( 'pending results: nothing flagged so far, never passed', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'pending' ) );
+		expect( panel() ).toHaveAttribute( 'data-tone', 'progress' );
+		expect( panel() ).toHaveTextContent( /^Nothing flagged so far/ );
+		expect( panel() ).toHaveTextContent( 'they are not counted as passed' );
+		// Waiting is not "not assessed".
+		expect( notAssessed() ).toBeNull();
+		expect( reportPanel().textContent ).not.toMatch( /Passed/ );
+	} );
+
+	it.each( [
+		[
+			'configuration sources only',
+			MALFORMED_CRON,
+			null,
+			[ 'WP-Cron: WP-Cron analysis unavailable' ],
+		],
+		[
+			'website checks only',
+			COMPLETED,
+			'after_not_reported',
+			[
+				'Website checks not compared: Homepage and REST API (no check after the update)',
+			],
+		],
+		[
+			'one website check only',
+			COMPLETED,
+			'one_unavailable',
+			[
+				'Website checks not compared: REST API (no check before the update)',
+			],
+		],
+		[
+			'both',
+			MALFORMED_CRON,
+			'no_baseline',
+			[
+				'WP-Cron: WP-Cron analysis unavailable',
+				'Website checks not compared: Homepage and REST API (no check before the update)',
+			],
+		],
+	] as Array< [ string, AnalysisReport, CaseName | null, string[] ] > )(
+		'without findings, what was not assessed is listed and the panel is not green: %s',
+		async ( _label, base, name, lines ) => {
+			await renderReport( name ? withSiteChecks( base, name ) : base );
+			expect( panel() ).toHaveAttribute( 'data-tone', 'neutral' );
+			expect( panel() ).toHaveTextContent(
+				'No concerning patterns matched the completed observations, but not everything could be assessed.'
+			);
+			expect( notAssessed() ).toEqual( lines );
+			// Not assessed is never a priority.
+			expect( priorityGroups() ).toEqual( [] );
+		}
+	);
+
+	it.each( [ 'failing_both', 'redirect_then_failure' ] as CaseName[] )(
+		'%s: a check failing after the update keeps the panel from reading as a pass',
+		async ( name ) => {
+			await renderReport( withSiteChecks( COMPLETED, name ) );
+			expect( panel() ).toHaveAttribute( 'data-tone', 'neutral' );
+			expect( panel() ).toHaveTextContent( 'Nothing flagged for review' );
+		}
+	);
+
+	it.each( [ 'disabled', 'historical', 'both_cross_origin' ] as CaseName[] )(
+		'%s: website checks that were not used do not count against completeness',
+		async ( name ) => {
+			await renderReport( withSiteChecks( COMPLETED, name ) );
+			expect( panel() ).toHaveAttribute( 'data-tone', 'positive' );
+			expect( notAssessed() ).toBeNull();
+		}
+	);
+
+	it( 'leads from what was not assessed to Website checks', async () => {
+		vi.useFakeTimers( { shouldAdvanceTime: true } );
+		try {
+			const user = userEvent.setup( {
+				advanceTimers: vi.advanceTimersByTime,
+			} );
+			await renderReport( withSiteChecks( COMPLETED, 'no_baseline' ) );
+			await user.click(
+				screen.getByRole( 'button', { name: 'View website checks' } )
+			);
+			await act( () => vi.runOnlyPendingTimersAsync() );
+			expect( reportTab( 'Website checks' ) ).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
+			expect(
+				screen.getByRole( 'heading', { name: 'Website checks' } )
+			).toHaveFocus();
+		} finally {
+			vi.useRealTimers();
+		}
+	} );
+
+	it( 'leads from the informational changes to Configuration changes', async () => {
+		vi.useFakeTimers( { shouldAdvanceTime: true } );
+		try {
+			const user = userEvent.setup( {
+				advanceTimers: vi.advanceTimersByTime,
+			} );
+			await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
+			await user.click(
+				screen.getByRole( 'button', {
+					name: 'View configuration changes',
+				} )
+			);
+			await act( () => vi.runOnlyPendingTimersAsync() );
+			expect(
+				screen.getByRole( 'heading', { name: 'Configuration changes' } )
+			).toHaveFocus();
+		} finally {
+			vi.useRealTimers();
+		}
+	} );
+
+	it( 'lists unavailable sources apart from the priorities', async () => {
+		await renderReport( HISTORICAL_NOT_INSTALLED );
+		expect( notAssessed() ).toEqual( [
+			'Action Scheduler not detected (not confirmed for the whole update)',
+		] );
+	} );
+
+	it( 'a historical report: sources it predates are not recorded, not unavailable', async () => {
+		const user = userEvent.setup();
+		await renderReport( PRE_CRON );
+		expect( notAssessed()?.[ 0 ] ).toMatch(
+			/^Not recorded for this report: WP-Cron/
+		);
+		expect( notAssessed()?.join( ' ' ) ).not.toMatch(
+			/expired|unavailable/i
+		);
+		await user.click( reportTab( 'Configuration changes' ) );
+		expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
+			/^WP-CronNot available · /
+		);
+	} );
+
+	it( 'an expired observation: explained once, by the status above the tabs', async () => {
+		await renderReport( EXPIRED );
+		expect(
+			screen.getByRole( 'region', { name: 'Analysis status' } )
+		).toHaveTextContent( /^Partial report/ );
+		expect( panel() ).toHaveAttribute( 'data-tone', 'neutral' );
+		expect( panel() ).toHaveTextContent(
+			/^Not assessed in this partial report/
+		);
+		// The status already names what expired.
+		expect( notAssessed() ).toBeNull();
+		expect( reportPanel() ).not.toHaveTextContent( 'Observation expired' );
+	} );
+
+	it( 'an open analysis is still observing, not "not assessed"', async () => {
+		await renderReport( AWAITING );
+		expect( panel() ).toHaveAttribute( 'data-tone', 'progress' );
+		expect( panel() ).toHaveTextContent( /^Waiting for the Net result/ );
+		expect( notAssessed() ).toBeNull();
+	} );
+
+	it( 'a failed analysis: the review rules are not available', async () => {
+		await renderReport( FAILED );
+		expect( panel() ).toHaveTextContent( /^Not available for this report/ );
+		expect( priorityGroups() ).toEqual( [] );
+	} );
+
+	it( 'what UpdateLens checks: the review rules behind one button', async () => {
+		const user = userEvent.setup();
+		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
+		const button = screen.getByRole( 'button', {
+			name: 'View review rules',
+		} );
+		expect( button ).toHaveAttribute( 'aria-expanded', 'false' );
+		expect( screen.queryByText( 'Patterns checked' ) ).toBeNull();
+		await user.click( button );
+		expect( button ).toHaveAttribute( 'aria-expanded', 'true' );
+		expect( button ).toHaveTextContent( 'Hide review rules' );
+		expect( screen.getByText( 'Patterns checked' ) ).toBeInTheDocument();
+		expect( screen.getByText( 'What was checked' ) ).toBeInTheDocument();
+	} );
+} );

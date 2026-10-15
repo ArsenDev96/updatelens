@@ -16,7 +16,9 @@ import type {
 import cases from '../fixtures/site-check-impact-cases.json';
 import { IMPACT } from './impact-fixtures';
 import { withSiteCheckCase } from './fixtures';
-import { openReport, tab } from './report-view';
+import type { ReportTab } from '@/admin/utils/route';
+
+import { openReport, reportPanel, reportTab } from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
@@ -48,11 +50,16 @@ function report( name: CaseName ): AnalysisReport {
  *
  * @param served Report served first.
  * @param phase  Phase in the URL.
+ * @param tab    Tab of the report (default: Website checks).
  */
-async function open( served: AnalysisReport, phase?: PhaseKey ) {
+async function open(
+	served: AnalysisReport,
+	phase?: PhaseKey,
+	tab: ReportTab = 'checks'
+) {
 	vi.useFakeTimers( { toFake: [ 'setTimeout', 'clearTimeout' ] } );
 	apiFetchMock.mockResolvedValue( served );
-	openReport( served.id, { phase } );
+	openReport( served.id, { phase, tab } );
 	await wait( 0 );
 	expect( screen.getByRole( 'heading', { level: 2 } ) ).toBeInTheDocument();
 }
@@ -68,14 +75,17 @@ async function wait( ms: number ) {
 	} );
 }
 
-const impact = () => screen.getByRole( 'region', { name: 'Findings' } );
-/** The site response checks section (pending results and their refresh). */
-const site = () => screen.getByRole( 'region', { name: 'Site checks' } );
+/** The selected tab's content. */
+const impact = () => reportPanel();
+/** The website checks (pending results and their refresh). */
+const site = () => screen.getByRole( 'region', { name: 'Website checks' } );
 
-/** Titles of the finding rows. */
+/** Titles of the finding rows (Update results). */
 const rowTitles = () =>
 	Array.from(
-		impact().querySelectorAll( 'ul[aria-label="Findings"] > li h4 button' )
+		impact().querySelectorAll(
+			'section[data-priority] > ul > li h4 button'
+		)
 	).map( ( button ) => button.firstChild!.textContent );
 
 /** The button of a finding row by its title. */
@@ -84,7 +94,7 @@ const rowButton = ( title: string ) =>
 		name: new RegExp( `^${ title }` ),
 	} );
 
-describe( 'Pending site check results', () => {
+describe( 'Pending website check results', () => {
 	beforeEach( () => {
 		apiFetchMock.mockReset();
 	} );
@@ -94,7 +104,11 @@ describe( 'Pending site check results', () => {
 	} );
 
 	it( 'updates the open report in place when they arrive, then stops reading', async () => {
-		await open( report( 'pending_with_finding' ), 'during_update' );
+		await open(
+			report( 'pending_with_finding' ),
+			'during_update',
+			'results'
+		);
 		const rest = rowButton( 'REST API check newly failing' );
 		fireEvent.click( rest );
 		rest.focus();
@@ -119,13 +133,12 @@ describe( 'Pending site check results', () => {
 		expect( rowButton( 'REST API check newly failing' ) ).toBe( rest );
 		expect( rest ).toHaveAttribute( 'aria-expanded', 'true' );
 		expect( rest ).toHaveFocus();
-		expect( tab( /^During update/ ) ).toHaveAttribute(
-			'aria-selected',
-			'true'
-		);
+		expect( window.location.search ).toContain( 'phase=during_update' );
+		// Announced whichever tab is open.
 		expect( screen.getByRole( 'status' ) ).toHaveTextContent(
-			'Site check results arrived.'
+			'Website check results arrived.'
 		);
+		fireEvent.click( reportTab( 'Website checks' ) );
 		expect(
 			within( site() ).queryByRole( 'button', {
 				name: 'Refresh results',
@@ -160,7 +173,7 @@ describe( 'Pending site check results', () => {
 			1 + PENDING_REFRESH_MAX_REQUESTS
 		);
 		expect( site() ).toHaveTextContent(
-			'Automatic checking stopped; the site check results have not arrived yet.'
+			'Automatic checking stopped; the website check results have not arrived yet.'
 		);
 		// It only reads the report again: the same name in both states.
 		const again = within( site() ).getByRole( 'button', {
@@ -171,12 +184,11 @@ describe( 'Pending site check results', () => {
 			1 + PENDING_REFRESH_MAX_REQUESTS
 		);
 
-		// Still pending: visible in the summary and the section, never passed.
+		// Still pending: visible in the rows, never passed.
 		expect( site() ).toHaveTextContent( 'Waiting' );
-		expect(
-			screen.getByRole( 'region', { name: 'Report summary' } )
-		).toHaveTextContent( 'Waiting for results' );
-		expect( impact().textContent ).not.toMatch( /Passed at both/ );
+		expect( impact().textContent ).not.toMatch(
+			/Passed at both|Passed before and after/
+		);
 		again.focus();
 		fireEvent.click( again );
 		await wait( 0 );
@@ -212,6 +224,7 @@ describe( 'Pending site check results', () => {
 		);
 		expect( screen.queryByRole( 'alert' ) ).not.toBeInTheDocument();
 		expect( document.body ).not.toHaveTextContent( 'not a valid JSON' );
+		fireEvent.click( reportTab( 'Update results' ) );
 		expect( rowTitles() ).toHaveLength( 4 );
 
 		await wait( PENDING_REFRESH_INTERVAL_MS * 5 );

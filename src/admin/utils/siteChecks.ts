@@ -343,14 +343,14 @@ function notUsedRow(
 		? quiet(
 				__( 'Not checked', 'updatelens' ),
 				__(
-					'Site checks were turned off when this update ran.',
+					'Website checks were turned off when this update ran.',
 					'updatelens'
 				)
 			)
 		: quiet(
 				__( 'Not recorded', 'updatelens' ),
 				__(
-					'This update was observed before UpdateLens recorded site checks.',
+					'This update was observed before UpdateLens recorded website checks.',
 					'updatelens'
 				)
 			);
@@ -375,7 +375,7 @@ export function siteChecksUnused(
 		return {
 			reason: 'not_captured',
 			text: __(
-				'Site checks were not recorded for this update: it was observed before UpdateLens had them.',
+				'Website checks were not recorded for this update: it was observed before UpdateLens had them.',
 				'updatelens'
 			),
 		};
@@ -393,14 +393,14 @@ export function siteChecksUnused(
 		? {
 				reason: 'disabled',
 				text: __(
-					'Site checks were turned off when this update ran, so the homepage and the REST API were not checked.',
+					'Website checks were turned off when this update ran, so the homepage and the REST API were not checked.',
 					'updatelens'
 				),
 			}
 		: {
 				reason: 'not_captured',
 				text: __(
-					'Site checks were not recorded for this update: it was observed before UpdateLens had them.',
+					'Website checks were not recorded for this update: it was observed before UpdateLens had them.',
 					'updatelens'
 				),
 			};

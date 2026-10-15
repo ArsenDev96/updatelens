@@ -1,7 +1,7 @@
 /**
  * The readiness line on Installed Plugins: whether the earlier (BEFORE) site
- * checks are in place for the next "Update now" ("Preparing site checks…",
- * "Ready to compare site responses", "Preparing site checks for another
+ * checks are in place for the next "Update now" ("Preparing website checks…",
+ * "Ready to compare website responses", "Preparing website checks for another
  * update…"). Ready means a comparison is possible, never that it will pass.
  * On Dashboard → Updates, whose updates get no later check, a fixed note
  * says so instead and links to Installed Plugins.

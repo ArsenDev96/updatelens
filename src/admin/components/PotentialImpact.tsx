@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 
 import type {
 	ActionScheduleType,
+	AnalysisReport,
 	FindingPriority,
 	ImpactActionSide,
 	ImpactCronInstance,
@@ -31,6 +32,7 @@ import {
 	formatDuration,
 	keepTogether,
 } from '../utils/format';
+import { notAssessedLines } from '../utils/glance';
 import {
 	checkedPatterns,
 	checkLimitations,
@@ -41,10 +43,9 @@ import {
 	groupFindings,
 	groupSubjects,
 	groupSummary,
-	impactDescription,
+	impactCompleteness,
 	impactSignalText,
 	impactSourceLabel,
-	impactState,
 	priorityLabel,
 	thresholdText,
 	whatChanged,
@@ -54,6 +55,11 @@ import {
 	type FindingGroup,
 	type ImpactView,
 } from '../utils/impact';
+import {
+	informationalText,
+	resultPanel,
+	type ResultPanel,
+} from '../utils/results';
 import { siteCheckFindingButtonId } from '../utils/siteChecks';
 import {
 	SITE_CHECKS,
@@ -75,26 +81,31 @@ import {
 	actionScheduleTypeLabel,
 	PROVIDERS,
 	providerLabel,
+	type Tone,
 } from '../utils/labels';
+import type { ReportTab } from '../utils/route';
 import { AppLink } from './AppLink';
 import { Time, To } from './DiffRow';
 import { Icon, type IconName } from './Icon';
 import { Identifier, RowDetails } from './SignalParts';
 
 /*
- * Findings on the report overview: the review rules the API evaluated on the
- * Net result and on the site checks, whatever phase is selected below.
+ * The "Update results" tab of a report: the review rules the API evaluated
+ * on the Net result and on the website checks, whatever phase is selected
+ * in Configuration changes.
  *
- * Highest priority first, each with the priority the API gave it (`high`,
- * `review`). Progressive disclosure: findings are grouped by rule and
- * signal, and each group starts as one compact row (priority, title, count,
- * signal, the first names and one actionable sentence). Its details (what
- * changed, why it might matter, what to check next, and the evidence: one
- * row per finding with the exact before → after values and a link to the
- * located entry) are rendered only while it is expanded, a few findings at a
- * time. Observations that could not be assessed are listed in the report
- * summary, never here as a priority; everything that was checked, and what a
- * result cannot show, is in "What was checked".
+ * With findings, they are listed by the priority the API gave them (High
+ * priority, then Needs review). Progressive disclosure: findings are grouped
+ * by rule and signal, and each group starts as one compact row (title,
+ * count, signal, the first names and one actionable sentence). Its details
+ * (what changed, why it might matter, what to check next, and the evidence:
+ * one row per finding with the exact before → after values and a link to
+ * the located entry) are rendered only while it is expanded, a few findings
+ * at a time. Without findings, one result panel says so, worded by how
+ * complete the observations were (never "safe"). What could not be assessed
+ * and the informational changes follow, kept apart from the priorities;
+ * every pattern checked, and what a result cannot show, is behind "View
+ * review rules".
  */
 
 /** Findings shown when a group is expanded, before "Show more". */
@@ -103,46 +114,44 @@ export const DEFAULT_VISIBLE_FINDINGS = 3;
 /** Findings revealed per "Show more". */
 const FINDINGS_STEP = 50;
 
+/** Id of the review rules disclosure's content. */
+const RULES_ID = 'updatelens-review-rules';
+
 /**
- * The Findings section.
+ * The Update results tab.
  *
  * @param props                 Props.
- * @param props.impact          API evaluation.
- * @param props.siteChecks      The report's site checks (timing of compared checks).
- * @param props.windowSeconds   Observation window length from the API.
+ * @param props.report          Report.
  * @param props.findingHref     Link target of a finding's signal details.
  * @param props.onOpenFinding   Opens a finding's signal details in the app.
  * @param props.view            Expanded groups and disclosures.
  * @param props.onViewChange    Updates them.
- * @param props.onShowSiteCheck Opens a check in "Site checks".
+ * @param props.onShowSiteCheck Opens a check in Website checks.
+ * @param props.onShowTab       Opens another tab of the report.
  */
-export function PotentialImpact( {
-	impact,
-	siteChecks,
-	windowSeconds,
+export function UpdateResults( {
+	report,
 	findingHref,
 	onOpenFinding,
 	view,
 	onViewChange,
 	onShowSiteCheck,
+	onShowTab,
 }: {
-	impact: PotentialImpactData;
-	siteChecks?: SiteChecks;
-	windowSeconds: number;
+	report: AnalysisReport;
 	findingHref: ( finding: ImpactFinding ) => string;
 	onOpenFinding: ( finding: ImpactFinding ) => void;
 	view: ImpactView;
 	onViewChange: ( view: ImpactView ) => void;
 	onShowSiteCheck: ( check: SiteCheckId ) => void;
+	onShowTab: ( tab: ReportTab ) => void;
 } ) {
-	const state = impactState( impact );
+	const impact = report.potential_impact;
 	const groups = useMemo(
 		() => groupFindings( impact.findings ),
 		[ impact.findings ]
 	);
 	const siteFindings = siteCheckFindings( impact );
-	const netEvaluated = impact.status !== 'not_evaluated';
-	const siteEvaluated = siteChecksEvaluated( impact );
 	// Position of each finding in the API's list, for links and focus.
 	const indexes = useMemo(
 		() =>
@@ -151,22 +160,14 @@ export function PotentialImpact( {
 			),
 		[ impact.findings ]
 	);
-	// Highest priority first: confirmed newly failing site checks, then the
-	// rules that merit a review (configuration, then site check changes).
-	const highSite = siteFindings.filter(
-		( finding ) => finding.priority === 'high'
-	);
-	const reviewSite = siteFindings.filter(
-		( finding ) => finding.priority !== 'high'
-	);
-	// A "Needs review" badge on every row would only repeat the summary;
-	// it is shown when the list mixes priorities. High priority always is.
-	const mixed =
-		new Set(
-			[ ...impact.findings, ...siteFindings ].map(
-				( finding ) => finding.priority
-			)
-		).size > 1;
+	const panel = resultPanel( report );
+	// An expired observation is explained once, by the status above the
+	// tabs: only what else could not be assessed is listed here.
+	const notAssessed = notAssessedLines( report, {
+		siteChecks: true,
+		expired: false,
+	} );
+	const informational = informationalText( report );
 	const setVisible = ( key: string, visible: number | null ) => {
 		const open = { ...view.open };
 		if ( visible === null ) {
@@ -185,7 +186,6 @@ export function PotentialImpact( {
 				key={ key }
 				finding={ finding }
 				onShowSiteCheck={ onShowSiteCheck }
-				showPriority={ mixed || finding.priority === 'high' }
 				expanded={ expanded }
 				onToggle={ () =>
 					setVisible(
@@ -196,77 +196,354 @@ export function PotentialImpact( {
 			/>
 		);
 	};
+	const groupItem = ( group: FindingGroup ) => (
+		<FindingGroupItem
+			key={ group.key }
+			group={ group }
+			visible={ view.open[ group.key ] ?? null }
+			onVisibleChange={ ( visible ) => setVisible( group.key, visible ) }
+			indexes={ indexes }
+			findingHref={ findingHref }
+			onOpenFinding={ onOpenFinding }
+		/>
+	);
+	const isHigh = ( priority: FindingPriority ) => priority === 'high';
+	// Highest priority first: confirmed newly failing website checks, then
+	// the rules that merit a review (configuration, then website check
+	// changes).
+	const high = [
+		...siteFindings
+			.filter( ( finding ) => isHigh( finding.priority ) )
+			.map( siteItem ),
+		...groups
+			.filter( ( group ) => isHigh( group.findings[ 0 ].priority ) )
+			.map( groupItem ),
+	];
+	const review = [
+		...groups
+			.filter( ( group ) => ! isHigh( group.findings[ 0 ].priority ) )
+			.map( groupItem ),
+		...siteFindings
+			.filter( ( finding ) => ! isHigh( finding.priority ) )
+			.map( siteItem ),
+	];
+	// Findings listed while website check results are still on their way.
+	const pending =
+		panel === null && impactCompleteness( impact ) === 'pending';
 
 	return (
-		<section
-			aria-labelledby="updatelens-impact-title"
-			className="rounded-xl border bg-card px-4 py-4 shadow-surface sm:px-6"
-		>
-			<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-				<h3
-					id="updatelens-impact-title"
-					// The report summary's "Go to findings" moves focus here.
-					tabIndex={ -1 }
-					className="text-base font-semibold text-slate-900 focus:outline-none"
-				>
-					{ __( 'Findings', 'updatelens' ) }
-				</h3>
-				<p className="text-[13px] leading-5 text-muted-foreground">
-					{ impactSourceLabel( netEvaluated, siteEvaluated ) }
-				</p>
-			</div>
-			{ /* Without findings, the summary already says why (impactHeadline()): only what it means here. */ }
-			<p className="mt-1 max-w-3xl text-[13px] leading-5 text-slate-600">
-				{ impactDescription( impact, state, windowSeconds ) }
-			</p>
-			{ groups.length + siteFindings.length > 0 && (
-				<ul
-					aria-label={ __( 'Findings', 'updatelens' ) }
-					className="mt-3 space-y-2"
-				>
-					{ highSite.map( ( finding ) => siteItem( finding ) ) }
-					{ groups.map( ( group ) => (
-						<FindingGroupItem
-							key={ group.key }
-							group={ group }
-							visible={ view.open[ group.key ] ?? null }
-							onVisibleChange={ ( visible ) =>
-								setVisible( group.key, visible )
-							}
-							indexes={ indexes }
-							findingHref={ findingHref }
-							onOpenFinding={ onOpenFinding }
-							showPriority={
-								mixed || group.findings[ 0 ].priority === 'high'
+		<div className="space-y-5">
+			{ panel ? (
+				<ResultPanelView panel={ panel } />
+			) : (
+				<div className="space-y-6">
+					<p className="text-[13px] leading-5 text-muted-foreground">
+						{ impactSourceLabel(
+							impact.status !== 'not_evaluated',
+							siteChecksEvaluated( impact )
+						) }
+					</p>
+					{ high.length > 0 && (
+						<PriorityGroup
+							priority="high"
+							count={ impact.assessment.high_priority }
+						>
+							{ high }
+						</PriorityGroup>
+					) }
+					{ review.length > 0 && (
+						<PriorityGroup
+							priority="review"
+							count={ impact.assessment.needs_review }
+						>
+							{ review }
+						</PriorityGroup>
+					) }
+				</div>
+			) }
+			{ ( pending || notAssessed.length > 0 || informational ) && (
+				<div className="space-y-3">
+					{ pending && (
+						<Remark icon="progress" tone="progress">
+							{ __(
+								'The website checks after the update have not arrived yet; until they do, they are not counted as passed. This report checks for them by itself while it is open.',
+								'updatelens'
+							) }
+						</Remark>
+					) }
+					{ notAssessed.length > 0 && (
+						<NotAssessed
+							lines={ notAssessed }
+							onShowChecks={
+								impact.assessment.not_assessed.some(
+									( entry ) => entry.type === 'site_check'
+								)
+									? () => onShowTab( 'checks' )
+									: null
 							}
 						/>
-					) ) }
-					{ reviewSite.map( ( finding ) => siteItem( finding ) ) }
-				</ul>
+					) }
+					{ informational && (
+						<Remark icon="info" tone="neutral">
+							{ informational }{ ' ' }
+							<TextButton
+								onClick={ () => onShowTab( 'configuration' ) }
+							>
+								{ __(
+									'View configuration changes',
+									'updatelens'
+								) }
+							</TextButton>
+						</Remark>
+					) }
+				</div>
 			) }
-			<WhatWasChecked
+			<ReviewRules
 				impact={ impact }
-				siteChecks={ siteChecks }
-				windowSeconds={ windowSeconds }
+				siteChecks={ report.site_checks }
+				windowSeconds={ report.observation_window_seconds }
 				open={ view.checks }
 				onToggle={ ( checks ) => onViewChange( { ...view, checks } ) }
 			/>
+		</div>
+	);
+}
+
+/** Classes of the result panel and its badge, per tone. */
+const PANEL: Record< Tone, { panel: string; badge: string } > = {
+	positive: {
+		panel: 'border-emerald-200 bg-emerald-50/70',
+		badge: 'bg-emerald-600 text-white ring-emerald-100',
+	},
+	neutral: {
+		panel: 'border-slate-200 bg-slate-50',
+		badge: 'bg-slate-200 text-slate-700 ring-slate-100',
+	},
+	progress: {
+		panel: 'border-tint-border bg-tint',
+		badge: 'bg-primary text-primary-foreground ring-tint-strong',
+	},
+	caution: {
+		panel: 'border-amber-200 bg-amber-50',
+		badge: 'bg-amber-500 text-white ring-amber-100',
+	},
+	negative: {
+		panel: 'border-rose-200 bg-rose-50',
+		badge: 'bg-rose-600 text-white ring-rose-100',
+	},
+};
+
+/**
+ * The result without findings: a spacious panel with its answer.
+ *
+ * @param props       Props.
+ * @param props.panel Panel.
+ */
+function ResultPanelView( { panel }: { panel: ResultPanel } ) {
+	const style = PANEL[ panel.tone ];
+	return (
+		<section
+			aria-labelledby="updatelens-result-title"
+			data-tone={ panel.tone }
+			className={ cn(
+				'flex flex-col gap-4 rounded-xl border px-5 py-6 sm:flex-row sm:items-center sm:gap-7 sm:px-8 sm:py-8',
+				style.panel
+			) }
+		>
+			<span
+				className={ cn(
+					'grid size-12 shrink-0 place-items-center rounded-full ring-[6px] sm:size-16 sm:ring-8',
+					style.badge
+				) }
+			>
+				<Icon
+					name={ panel.icon === 'check' ? 'checkmark' : panel.icon }
+					className="size-6 stroke-[2.5] sm:size-8"
+				/>
+			</span>
+			<div className="min-w-0 space-y-1.5">
+				<h3
+					id="updatelens-result-title"
+					className="text-xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-[1.375rem]"
+				>
+					{ panel.title }
+				</h3>
+				<p className="max-w-2xl text-[15px] leading-relaxed text-slate-700">
+					{ panel.text }
+				</p>
+				{ panel.note && (
+					<p className="max-w-2xl text-sm leading-relaxed text-slate-600">
+						{ panel.note }
+					</p>
+				) }
+			</div>
 		</section>
 	);
 }
 
 /**
- * "What was checked": every signal's state, the patterns checked and what a
- * result cannot show. Collapsed by default.
+ * The findings of one priority, under its heading with the API's count.
+ *
+ * @param props          Props.
+ * @param props.priority Priority.
+ * @param props.count    Findings of this priority (the API's count).
+ * @param props.children Rows.
+ */
+function PriorityGroup( {
+	priority,
+	count,
+	children,
+}: {
+	priority: FindingPriority;
+	count: number;
+	children: ReactNode;
+} ) {
+	const id = useId();
+	return (
+		<section aria-labelledby={ id } data-priority={ priority }>
+			<h3
+				id={ id }
+				className={ cn(
+					'flex items-center gap-2 text-base font-semibold',
+					priority === 'high' ? 'text-rose-800' : 'text-amber-900'
+				) }
+			>
+				<Icon
+					name={ priority === 'high' ? 'failure' : 'caution' }
+					className="size-[1.125rem]"
+				/>
+				{ priorityLabel( priority ) }
+				<span
+					className={ cn(
+						'inline-flex min-w-6 justify-center rounded-full px-2 text-xs font-semibold tabular-nums leading-5 ring-1 ring-inset',
+						priority === 'high'
+							? 'bg-rose-50 text-rose-800 ring-rose-200'
+							: 'bg-amber-50 text-amber-900 ring-amber-200'
+					) }
+				>
+					<span className="sr-only">{ ', ' }</span>
+					{ formatCount( count ) }
+				</span>
+			</h3>
+			<ul className="mt-2.5 space-y-2">{ children }</ul>
+		</section>
+	);
+}
+
+/**
+ * What could not be assessed, one line per API category, apart from the
+ * priorities (never a finding, never "passed").
+ *
+ * @param props              Props.
+ * @param props.lines        Lines (notAssessedLines()).
+ * @param props.onShowChecks Opens Website checks, when a check is named.
+ */
+function NotAssessed( {
+	lines,
+	onShowChecks,
+}: {
+	lines: string[];
+	onShowChecks: ( () => void ) | null;
+} ) {
+	const id = useId();
+	return (
+		<section
+			aria-labelledby={ id }
+			className="rounded-xl border bg-card px-4 py-3 sm:px-5"
+		>
+			<h3
+				id={ id }
+				className="flex items-center gap-2 text-sm font-semibold text-slate-900"
+			>
+				<Icon name="info" className="size-4 text-slate-500" />
+				{ __( 'Not assessed', 'updatelens' ) }
+			</h3>
+			<ul className="mt-1 space-y-0.5 pl-6 text-[13px] leading-5 text-slate-700">
+				{ lines.map( ( line ) => (
+					<li key={ line }>{ line }</li>
+				) ) }
+			</ul>
+			{ onShowChecks && (
+				<p className="mt-1.5 pl-6 text-[13px]">
+					<TextButton onClick={ onShowChecks }>
+						{ __( 'View website checks', 'updatelens' ) }
+					</TextButton>
+				</p>
+			) }
+		</section>
+	);
+}
+
+/**
+ * One quiet line with an icon.
+ *
+ * @param props          Props.
+ * @param props.icon     Icon.
+ * @param props.tone     Tone of the icon.
+ * @param props.children Text.
+ */
+function Remark( {
+	icon,
+	tone,
+	children,
+}: {
+	icon: IconName;
+	tone: Tone;
+	children: ReactNode;
+} ) {
+	return (
+		<p className="flex gap-2 px-1 text-[13px] leading-5 text-slate-600">
+			<Icon
+				name={ icon }
+				className={ cn(
+					'mt-0.5 size-4',
+					tone === 'progress' ? 'text-primary' : 'text-slate-500'
+				) }
+			/>
+			<span>{ children }</span>
+		</p>
+	);
+}
+
+/**
+ * A button that reads as a link (it moves within the report).
+ *
+ * @param props          Props.
+ * @param props.onClick  Action.
+ * @param props.children Text.
+ */
+function TextButton( {
+	onClick,
+	children,
+}: {
+	onClick: () => void;
+	children: ReactNode;
+} ) {
+	return (
+		<button
+			type="button"
+			onClick={ onClick }
+			className="inline-flex min-h-6 items-center gap-1 rounded font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+		>
+			{ children }
+			<Icon name="arrow-right" className="size-3.5" />
+		</button>
+	);
+}
+
+/**
+ * "What UpdateLens checks": what the review rules look at, in two
+ * sentences, and behind "View review rules" every signal's state, the
+ * patterns checked and what a result cannot show (rendered only while open).
  *
  * @param props               Props.
  * @param props.impact        API evaluation.
  * @param props.siteChecks    The report's site checks (timing of compared checks).
  * @param props.windowSeconds Observation window length from the API.
- * @param props.open          Whether it is open.
+ * @param props.open          Whether the rules are shown.
  * @param props.onToggle      Reports a new open state.
  */
-function WhatWasChecked( {
+function ReviewRules( {
 	impact,
 	siteChecks,
 	windowSeconds,
@@ -279,27 +556,88 @@ function WhatWasChecked( {
 	open: boolean;
 	onToggle: ( open: boolean ) => void;
 } ) {
+	return (
+		<section
+			aria-labelledby="updatelens-rules-title"
+			className="rounded-xl border bg-card"
+		>
+			<div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
+				<span className="hidden size-10 shrink-0 place-items-center rounded-lg bg-tint text-primary sm:grid">
+					<Icon name="info" />
+				</span>
+				<div className="min-w-0 flex-1">
+					<h3
+						id="updatelens-rules-title"
+						className="text-sm font-semibold text-slate-900"
+					>
+						{ __( 'What UpdateLens checks', 'updatelens' ) }
+					</h3>
+					<p className="mt-0.5 max-w-3xl text-[13px] leading-5 text-slate-600">
+						{ __(
+							'UpdateLens reviews the Net result for selected changes to options, WP-Cron events and Action Scheduler actions, and compares homepage and REST API responses when website checks ran.',
+							'updatelens'
+						) }
+					</p>
+				</div>
+				<Button
+					type="button"
+					variant="outline"
+					aria-expanded={ open }
+					aria-controls={ RULES_ID }
+					onClick={ () => onToggle( ! open ) }
+					className="shrink-0 self-start sm:self-center"
+				>
+					{ open
+						? __( 'Hide review rules', 'updatelens' )
+						: __( 'View review rules', 'updatelens' ) }
+					<Icon
+						name="chevron-down"
+						className={ cn(
+							'size-4 transition-transform',
+							open && 'rotate-180'
+						) }
+					/>
+				</Button>
+			</div>
+			<div id={ RULES_ID } hidden={ ! open }>
+				{ open && (
+					<WhatWasChecked
+						impact={ impact }
+						siteChecks={ siteChecks }
+						windowSeconds={ windowSeconds }
+					/>
+				) }
+			</div>
+		</section>
+	);
+}
+
+/**
+ * Every signal's state, the patterns checked and what a result cannot show.
+ *
+ * @param props               Props.
+ * @param props.impact        API evaluation.
+ * @param props.siteChecks    The report's site checks (timing of compared checks).
+ * @param props.windowSeconds Observation window length from the API.
+ */
+function WhatWasChecked( {
+	impact,
+	siteChecks,
+	windowSeconds,
+}: {
+	impact: PotentialImpactData;
+	siteChecks?: SiteChecks;
+	windowSeconds: number;
+} ) {
 	// Site checks that were off or not recorded: one quiet row, not one per check.
 	const notUsed = siteChecksNotUsed( impact );
 	return (
-		<details
-			open={ open }
-			onToggle={ ( event ) => {
-				if ( event.currentTarget.open !== open ) {
-					onToggle( event.currentTarget.open );
-				}
-			} }
-			className="group mt-4 border-t pt-3"
-		>
-			<summary className="-mx-1 inline-flex cursor-pointer select-none list-none items-center gap-1.5 rounded px-1 py-1 text-sm font-medium text-slate-700 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-				<Icon
-					name="chevron-down"
-					className="size-4 -rotate-90 text-slate-500 transition-transform group-open:rotate-0"
-				/>
-				{ __( 'What was checked', 'updatelens' ) }
-			</summary>
-			<div className="mt-2 space-y-4 pb-1 text-[13px] leading-5">
-				<dl className="grid gap-x-6 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)]">
+		<div className="space-y-4 border-t px-4 py-4 text-[13px] leading-5 sm:px-5">
+			<div>
+				<h4 className="font-semibold text-slate-800">
+					{ __( 'What was checked', 'updatelens' ) }
+				</h4>
+				<dl className="mt-1.5 grid gap-x-6 gap-y-2 sm:grid-cols-[auto_minmax(0,1fr)]">
 					{ PROVIDERS.map( ( signal ) => (
 						<CheckedRow
 							key={ signal }
@@ -315,7 +653,7 @@ function WhatWasChecked( {
 					{ notUsed ? (
 						<CheckedRow
 							icon="site_checks"
-							label={ __( 'Site checks', 'updatelens' ) }
+							label={ __( 'Website checks', 'updatelens' ) }
 							text={ {
 								...notUsed,
 								category: 'not_applicable',
@@ -339,7 +677,7 @@ function WhatWasChecked( {
 												siteChecks?.checks[ check ]
 											),
 											// The earlier and later checks are in
-											// "Site response checks".
+											// Website checks.
 											detail: null,
 											description: null,
 										} }
@@ -349,34 +687,34 @@ function WhatWasChecked( {
 						} )
 					) }
 				</dl>
-				<div>
-					<h4 className="font-semibold text-slate-800">
-						{ __( 'Patterns checked', 'updatelens' ) }
-					</h4>
-					<ul className="mt-1 list-disc space-y-0.5 pl-5 text-slate-600 marker:text-slate-400">
-						{ [
-							...checkedPatterns(),
-							...( notUsed ? [] : siteCheckPatterns() ),
-						].map( ( line ) => (
-							<li key={ line }>{ line }</li>
-						) ) }
-					</ul>
-				</div>
-				<div>
-					<h4 className="font-semibold text-slate-800">
-						{ __( 'What this does not show', 'updatelens' ) }
-					</h4>
-					<ul className="mt-1 list-disc space-y-0.5 pl-5 text-slate-600 marker:text-slate-400">
-						{ [
-							...checkLimitations( ! notUsed ),
-							...( notUsed ? [] : siteCheckLimitations() ),
-						].map( ( line ) => (
-							<li key={ line }>{ line }</li>
-						) ) }
-					</ul>
-				</div>
 			</div>
-		</details>
+			<div>
+				<h4 className="font-semibold text-slate-800">
+					{ __( 'Patterns checked', 'updatelens' ) }
+				</h4>
+				<ul className="mt-1 list-disc space-y-0.5 pl-5 text-slate-600 marker:text-slate-400">
+					{ [
+						...checkedPatterns(),
+						...( notUsed ? [] : siteCheckPatterns() ),
+					].map( ( line ) => (
+						<li key={ line }>{ line }</li>
+					) ) }
+				</ul>
+			</div>
+			<div>
+				<h4 className="font-semibold text-slate-800">
+					{ __( 'What this does not show', 'updatelens' ) }
+				</h4>
+				<ul className="mt-1 list-disc space-y-0.5 pl-5 text-slate-600 marker:text-slate-400">
+					{ [
+						...checkLimitations( ! notUsed ),
+						...( notUsed ? [] : siteCheckLimitations() ),
+					].map( ( line ) => (
+						<li key={ line }>{ line }</li>
+					) ) }
+				</ul>
+			</div>
+		</div>
 	);
 }
 
@@ -454,7 +792,6 @@ function CheckedRow( {
  * @param props.indexes         Position of each finding in the API's list.
  * @param props.findingHref     Link target of a finding's signal details.
  * @param props.onOpenFinding   Opens a finding's signal details in the app.
- * @param props.showPriority    Whether its priority badge is shown.
  */
 function FindingGroupItem( {
 	group,
@@ -463,7 +800,6 @@ function FindingGroupItem( {
 	indexes,
 	findingHref,
 	onOpenFinding,
-	showPriority,
 }: {
 	group: FindingGroup;
 	visible: number | null;
@@ -471,7 +807,6 @@ function FindingGroupItem( {
 	indexes: ReadonlyMap< ImpactFinding, number >;
 	findingHref: ( finding: ImpactFinding ) => string;
 	onOpenFinding: ( finding: ImpactFinding ) => void;
-	showPriority: boolean;
 } ) {
 	const { names, more } = groupSubjects( group );
 
@@ -479,7 +814,6 @@ function FindingGroupItem( {
 		<CompactRow
 			icon={ group.signal }
 			priority={ group.findings[ 0 ].priority }
-			showPriority={ showPriority }
 			title={ findingGroupTitle( group ) }
 			count={ group.findings.length }
 			source={
@@ -548,33 +882,29 @@ function FindingGroupItem( {
  * @param props.finding         Finding.
  * @param props.expanded        Whether it is expanded.
  * @param props.onToggle        Expands or collapses it.
- * @param props.onShowSiteCheck Opens the check in "Site response checks".
- * @param props.showPriority    Whether its priority badge is shown.
+ * @param props.onShowSiteCheck Opens the check in Website checks.
  */
 function SiteCheckFindingItem( {
 	finding,
 	expanded,
 	onToggle,
 	onShowSiteCheck,
-	showPriority,
 }: {
 	finding: SiteCheckFinding;
 	expanded: boolean;
 	onToggle: () => void;
 	onShowSiteCheck: ( check: SiteCheckId ) => void;
-	showPriority: boolean;
 } ) {
 	return (
 		<CompactRow
 			icon="site_checks"
 			priority={ finding.priority }
-			showPriority={ showPriority }
 			title={ siteCheckFindingTitle( finding ) }
 			count={ 1 }
 			buttonId={ siteCheckFindingButtonId( finding.check ) }
 			source={
 				<>
-					<span>{ __( 'Site checks', 'updatelens' ) }</span>{ ' ' }
+					<span>{ __( 'Website checks', 'updatelens' ) }</span>{ ' ' }
 					<span aria-hidden="true">·</span>{ ' ' }
 					<span>{ siteCheckSubject( finding.check ) }</span>
 				</>
@@ -602,7 +932,7 @@ function SiteCheckFindingItem( {
 						</DetailHeading>
 						<p className="mt-1 text-[13px] leading-5 text-slate-700">
 							{ __(
-								'The requests before and after the update, with their responses and verification, are in Site checks.',
+								'The requests before and after the update, with their responses and verification, are in Website checks.',
 								'updatelens'
 							) }{ ' ' }
 							<button
@@ -637,8 +967,8 @@ function SiteCheckFindingItem( {
  *
  * @param props          Props.
  * @param props.icon     Icon of the source.
- * @param props.priority     Priority from the API (always in the accessible name).
- * @param props.showPriority Whether the priority badge is shown.
+ * @param props.priority Priority from the API (in the accessible name; the
+ *                       list's heading shows it).
  * @param props.title    Title.
  * @param props.count    Number of findings.
  * @param props.source   Source line (signal and subjects).
@@ -651,7 +981,6 @@ function SiteCheckFindingItem( {
 function CompactRow( {
 	icon,
 	priority,
-	showPriority,
 	title,
 	count,
 	buttonId,
@@ -663,7 +992,6 @@ function CompactRow( {
 }: {
 	icon: IconName;
 	priority: FindingPriority;
-	showPriority: boolean;
 	title: string;
 	count: number;
 	buttonId?: string;
@@ -703,13 +1031,9 @@ function CompactRow( {
 					<Icon name={ icon } className="size-[1.125rem]" />
 				</span>
 				<div className="min-w-0 flex-1">
-					{ showPriority && <PriorityBadge priority={ priority } /> }
 					<h4
 						id={ titleId }
-						className={ cn(
-							'text-[15px] font-semibold leading-6 text-slate-900',
-							showPriority && 'mt-1'
-						) }
+						className="text-[15px] font-semibold leading-6 text-slate-900"
 					>
 						<button
 							type="button"
@@ -827,32 +1151,6 @@ function DetailHeading( { children }: { children: ReactNode } ) {
 		<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
 			{ children }
 		</h5>
-	);
-}
-
-/**
- * The priority the API gave a finding, as a small label.
- *
- * @param props          Props.
- * @param props.priority Priority.
- */
-function PriorityBadge( { priority }: { priority: FindingPriority } ) {
-	return (
-		<span
-			aria-hidden="true"
-			className={ cn(
-				'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
-				priority === 'high'
-					? 'bg-rose-50 text-rose-800 ring-rose-200'
-					: 'bg-amber-50 text-amber-900 ring-amber-200'
-			) }
-		>
-			<Icon
-				name={ priority === 'high' ? 'failure' : 'caution' }
-				className="size-3.5"
-			/>
-			{ priorityLabel( priority ) }
-		</span>
 	);
 }
 

@@ -31,7 +31,7 @@ import {
 import type { AnalysisReport } from '@/admin/types/api';
 import { notAssessedLines } from '@/admin/utils/glance';
 import { siteCheckOutcome } from '@/admin/utils/siteChecks';
-import { parseRoute, routeHref } from '@/admin/utils/route';
+import { parseRoute, reportTab, routeHref } from '@/admin/utils/route';
 
 import {
 	AWAITING,
@@ -297,9 +297,9 @@ describe( 'labels', () => {
 } );
 
 describe( 'defaultPhase', () => {
-	it( 'prefers Net result, then During update, then After update', () => {
+	it( 'is always the Net result while any phase is available', () => {
 		expect( defaultPhase( COMPLETED.phases ) ).toBe( 'final' );
-		expect( defaultPhase( EXPIRED.phases ) ).toBe( 'during_update' );
+		expect( defaultPhase( EXPIRED.phases ) ).toBe( 'final' );
 		expect( defaultPhase( CORRUPT_POST.phases ) ).toBe( 'final' );
 		expect(
 			defaultPhase( {
@@ -324,7 +324,7 @@ describe( 'defaultPhase', () => {
 					),
 				},
 			} )
-		).toBe( 'post_update' );
+		).toBe( 'final' );
 		// A phase with only WP-Cron available still counts.
 		expect( defaultPhase( CRON_ONLY.phases ) ).toBe( 'final' );
 		expect( defaultPhase( FAILED.phases ) ).toBeNull();
@@ -350,6 +350,7 @@ describe( 'routes', () => {
 			page: 1,
 			phase: null,
 			signal: null,
+			tab: null,
 			item: null,
 		} );
 		expect(
@@ -362,8 +363,40 @@ describe( 'routes', () => {
 			page: 2,
 			phase: 'post_update',
 			signal: 'action_scheduler',
+			tab: null,
 			item: null,
 		} );
+	} );
+
+	it( 'parses and builds the tab of a report', () => {
+		expect(
+			parseRoute( '?page=updatelens&analysis=42&tab=checks' )
+		).toMatchObject( { tab: 'checks', phase: null } );
+		expect(
+			parseRoute( '?page=updatelens&analysis=42&tab=configuration' )
+		).toMatchObject( { tab: 'configuration' } );
+		// Unknown tabs fall back to the default.
+		expect(
+			parseRoute( '?page=updatelens&analysis=42&tab=overview' )
+		).toMatchObject( { tab: null } );
+		const route = {
+			view: 'report',
+			id: 42,
+			page: 1,
+			phase: 'during_update',
+			signal: null,
+			tab: 'configuration',
+		} as const;
+		expect( routeHref( route, base ) ).toBe(
+			'/wp-admin/admin.php?page=updatelens&analysis=42&phase=during_update&tab=configuration'
+		);
+		// The default tab: Update results, or Configuration changes for a
+		// URL that chooses a phase (older report URLs).
+		expect( reportTab( { ...route, tab: null, phase: null } ) ).toBe(
+			'results'
+		);
+		expect( reportTab( { ...route, tab: null } ) ).toBe( 'configuration' );
+		expect( reportTab( { ...route, tab: 'results' } ) ).toBe( 'results' );
 	} );
 
 	it( 'parses a located item on signal details only', () => {
@@ -460,12 +493,15 @@ describe( 'routes', () => {
 	} );
 
 	it.each( [
-		[ 'signal=Options', { phase: null, signal: null, item: null } ],
-		[ 'signal=as', { phase: null, signal: null, item: null } ],
-		[ 'phase=net', { phase: null, signal: null, item: null } ],
+		[
+			'signal=Options',
+			{ phase: null, signal: null, tab: null, item: null },
+		],
+		[ 'signal=as', { phase: null, signal: null, tab: null, item: null } ],
+		[ 'phase=net', { phase: null, signal: null, tab: null, item: null } ],
 		[
 			'signal=cron&phase=final',
-			{ phase: 'final', signal: 'cron', item: null },
+			{ phase: 'final', signal: 'cron', tab: null, item: null },
 		],
 	] )(
 		'falls back to the overview and default phase (%s)',

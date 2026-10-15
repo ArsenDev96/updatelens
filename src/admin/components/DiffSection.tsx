@@ -3,6 +3,7 @@ import { useId, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
+import { useEmbedded } from '../utils/embedded';
 import { useLocated } from '../utils/highlight';
 
 /** Rows of a diff list shown before "Show more". */
@@ -49,6 +50,8 @@ export function DiffSection< T >( {
 	icon?: ReactNode;
 } ) {
 	const located = useLocated();
+	// Inside a report's Configuration changes: one heading level lower.
+	const embedded = useEmbedded();
 	const [ expanded, setExpanded ] = useState(
 		() =>
 			located !== null &&
@@ -85,23 +88,32 @@ export function DiffSection< T >( {
 	);
 
 	if ( appearance === 'card' ) {
+		const Heading = embedded ? 'h5' : 'h3';
 		return (
-			<section aria-labelledby={ headingId } className="space-y-3">
+			<section
+				aria-labelledby={ headingId }
+				className={ embedded ? 'space-y-2' : 'space-y-3' }
+			>
 				<div className="flex items-center gap-2.5">
 					{ icon }
-					<h3
+					<Heading
 						id={ headingId }
 						className={ cn(
-							'text-base',
+							embedded ? 'text-sm' : 'text-base',
 							quiet
 								? 'font-medium text-slate-600'
 								: 'font-semibold text-slate-900'
 						) }
 					>
 						{ title }
-					</h3>
+					</Heading>
 				</div>
-				<div className="overflow-hidden rounded-xl border bg-card shadow-surface">
+				<div
+					className={ cn(
+						'overflow-hidden border bg-card',
+						embedded ? 'rounded-lg' : 'rounded-xl shadow-surface'
+					) }
+				>
 					<ul id={ listId } className="divide-y">
 						{ visible.map( renderItem ) }
 					</ul>

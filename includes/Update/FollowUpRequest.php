@@ -14,12 +14,16 @@ defined( 'ABSPATH' ) || exit;
  * Pure: the WordPress side (nonce, capability, response) is in
  * PluginUpdateTracker, so these rules are unit-tested without WordPress.
  *
- * After a successful plugin update from the WordPress updates UI, the browser
- * asks once (when the update queue is idle) for the post-update observation of
- * the plugins it updated. The request is a new PHP request, so it runs the
- * updated plugins' new code (`plugins_loaded`, `init`, `admin_init`) before
- * the settled snapshot is taken. Only analyses of the listed plugins that the
- * current user started are settled; other pending analyses are left alone.
+ * After plugin updates from the WordPress updates UI, the browser asks once
+ * (when the update queue is idle) for the post-update observation of the
+ * plugins it updated. It lists a plugin also when WordPress answered its
+ * update with an error, since the plugin may still have been installed (a
+ * translation update in the same request failed): only analyses this site's
+ * upgrader hooks saw installed are settled, others answer `not_pending`. The
+ * request is a new PHP request, so it runs the updated plugins' new code
+ * (`plugins_loaded`, `init`, `admin_init`) before the settled snapshot is
+ * taken. Only analyses of the listed plugins that the current user started
+ * are settled; other pending analyses are left alone.
  */
 final class FollowUpRequest {
 

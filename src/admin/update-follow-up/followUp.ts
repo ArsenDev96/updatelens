@@ -4,19 +4,33 @@
  * take the post-update observation (`admin-ajax.php`, FollowUpRequest in PHP).
  *
  * Event-driven, never polling:
+ * - every `update-plugin` request is observed on its own XMLHttpRequest
+ *   (`observeUpdateRequest()`: a passive `loadend` listener, attached through
+ *   that request's `xhr` factory in jQuery's `ajaxSend`). When it ends, the
+ *   plugin its response names is recorded, whether WordPress answered with
+ *   success or an error: a plugin can be installed although the answer is an
+ *   error (a translation download after the update failed, e.g. HTTP 401).
+ *   The browser never decides whether the update worked: PHP settles only
+ *   analyses its own updater hooks saw complete (others are `not_pending`).
  * - `wp-plugin-update-success` (fired by `updates.js` for each successful
- *   plugin update) records the plugin;
- * - jQuery's global `ajaxComplete` (fired after the update request's own
- *   callbacks, so after `updates.js` has unlocked its queue and started the
- *   next queued job, if any) checks whether the queue is idle and then sends
- *   one request for all recorded plugins.
+ *   plugin update) records the plugin as well;
+ * - when an observed request ends, and on jQuery's global `ajaxComplete`,
+ *   the follow-up checks whether the updates are idle and then sends one
+ *   request for all recorded plugins.
  *
- * Failed updates, theme updates and other events record nothing. While more
- * updates are queued nothing is sent: each next update ends the previous
- * one's observation on the server (`next_update`). The request is
- * best-effort: `keepalive` lets it outlive the page in browsers that support
- * it, and if it is lost, the next eligible admin page (within the observation
- * window) still takes the observation.
+ * Idle means no observed update request in flight and nothing in
+ * `updates.js`'s queue, not `wp.updates.ajaxLocked`: since WordPress 6.5,
+ * `updatePluginError()` throws on Installed Plugins, so after an error
+ * answer `wp-plugin-update-error` and `ajaxComplete` never fire and the lock
+ * stays set until the page reloads. Only if an update request could not be
+ * observed does the lock count as well (the earlier rule).
+ *
+ * Theme updates, installs and other requests record nothing, and their
+ * requests are never touched. While more updates are queued nothing is sent:
+ * each next update ends the previous one's observation on the server
+ * (`next_update`). The request is best-effort: `keepalive` lets it outlive
+ * the page in browsers that support it, and if it is lost, the next eligible
+ * admin page (within the observation window) still takes the observation.
  *
  * With site checks enabled (`siteChecks` in the settings), the response
  * names the analyses this request settled; their AFTER site checks then run
@@ -46,7 +60,7 @@ export interface UpdatesState {
 export const MAX_PLUGINS = 100;
 
 export interface FollowUp {
-	/** A plugin update succeeded (`response.plugin` of `wp-plugin-update-success`). */
+	/** A plugin update request ended (the plugin its response names; PHP decides whether it updated). */
 	pluginUpdated: ( plugin: unknown ) => void;
 	/** Send the follow-up if plugins are waiting and the update queue is idle. */
 	check: () => void;
@@ -93,16 +107,160 @@ export function createFollowUp( options: {
 	};
 }
 
+/** The plugin update requests the follow-up observed. */
+export interface UpdateRequests {
+	/** Observed update requests that have not ended yet. */
+	inFlight: number;
+	/** Whether an update request could not be observed on this page. */
+	unobserved: boolean;
+}
+
 /**
- * Whether `updates.js` has no running or queued job.
+ * Whether no plugin update runs or waits: no observed update request in
+ * flight and nothing in `updates.js`'s queue. `ajaxLocked` counts only once
+ * an update request could not be observed: it stays set after core's error
+ * handler throws (WordPress 6.5+), so it alone would wait forever.
  *
- * @param updates `wp.updates`.
+ * @param updates  `wp.updates`.
+ * @param requests The observed update requests.
  */
-export function isQueueIdle( updates: UpdatesState ): boolean {
+export function isUpdatesIdle(
+	updates: UpdatesState,
+	requests: UpdateRequests
+): boolean {
 	return (
-		! updates.ajaxLocked &&
-		! ( Array.isArray( updates.queue ) && updates.queue.length > 0 )
+		requests.inFlight === 0 &&
+		! ( Array.isArray( updates.queue ) && updates.queue.length > 0 ) &&
+		! ( requests.unobserved && updates.ajaxLocked )
 	);
+}
+
+/** The parts of jQuery's request settings (`ajaxSend`) read here. */
+interface AjaxSettings {
+	type?: unknown;
+	data?: unknown;
+	xhr?: unknown;
+}
+
+/** What an observed update request reports. */
+export interface UpdateRequestObserver {
+	/** The request's XMLHttpRequest exists and its end will be reported. */
+	started: () => void;
+	/** The request ended (loaded, failed or aborted), with the plugin its response names. */
+	ended: ( plugin: string | undefined ) => void;
+	/** An update request whose end cannot be seen. */
+	unobservable: () => void;
+}
+
+/**
+ * Whether jQuery's request settings are those of a plugin update by
+ * `updates.js` (`wp.ajax.send( 'update-plugin', … )`: a POST whose data
+ * jQuery has already serialized).
+ *
+ * @param settings The settings `ajaxSend` passes.
+ */
+export function isPluginUpdateRequest( settings: unknown ): boolean {
+	if ( typeof settings !== 'object' || settings === null ) {
+		return false;
+	}
+	const { type, data } = settings as AjaxSettings;
+
+	return (
+		typeof type === 'string' &&
+		type.toUpperCase() === 'POST' &&
+		typeof data === 'string' &&
+		/(?:^|&)action=update-plugin(?:&|$)/.test( data )
+	);
+}
+
+/**
+ * The plugin an ended update request's response names (`data.plugin` of
+ * `wp_ajax_update_plugin()`'s answer, in its success and its error
+ * responses), or undefined: aborted, not 2xx, not JSON, another shape.
+ * Nothing else of the response is read or kept.
+ *
+ * @param xhr The request's XMLHttpRequest.
+ */
+export function respondedPlugin( xhr: {
+	status?: unknown;
+	responseText?: unknown;
+} ): string | undefined {
+	try {
+		const status = xhr.status;
+		const text = xhr.responseText;
+		if (
+			typeof status !== 'number' ||
+			status < 200 ||
+			status > 299 ||
+			typeof text !== 'string'
+		) {
+			return undefined;
+		}
+		const json: unknown = JSON.parse( text );
+		const data =
+			typeof json === 'object' && json !== null
+				? ( json as { data?: unknown } ).data
+				: undefined;
+		if ( typeof data !== 'object' || data === null ) {
+			return undefined;
+		}
+		const { update, plugin } = data as {
+			update?: unknown;
+			plugin?: unknown;
+		};
+
+		return update === 'plugin' &&
+			typeof plugin === 'string' &&
+			plugin !== ''
+			? plugin
+			: undefined;
+	} catch {
+		// Not JSON, or a response type without text.
+		return undefined;
+	}
+}
+
+/**
+ * Observe one plugin update request's end on its own XMLHttpRequest, so the
+ * end is seen even when WordPress's callbacks throw and jQuery's completion
+ * events never fire. Only this request's `xhr` factory is wrapped (jQuery
+ * calls it right after `ajaxSend`); the wrapper returns the same object,
+ * adds one passive `loadend` listener and changes nothing else: not the
+ * request, its data, headers or response, nor WordPress's callbacks. Other
+ * requests are left untouched.
+ *
+ * @param settings The settings `ajaxSend` passes.
+ * @param observer Receives the request's start and end.
+ */
+export function observeUpdateRequest(
+	settings: unknown,
+	observer: UpdateRequestObserver
+): void {
+	if ( ! isPluginUpdateRequest( settings ) ) {
+		return;
+	}
+	const ajax = settings as AjaxSettings;
+	const create = ajax.xhr;
+	if ( typeof create !== 'function' ) {
+		observer.unobservable();
+		return;
+	}
+	ajax.xhr = function ( this: unknown, ...args: unknown[] ): unknown {
+		const xhr: unknown = create.apply( this, args );
+		try {
+			( xhr as XMLHttpRequest ).addEventListener(
+				'loadend',
+				() =>
+					observer.ended( respondedPlugin( xhr as XMLHttpRequest ) ),
+				{ once: true }
+			);
+		} catch {
+			observer.unobservable();
+			return xhr;
+		}
+		observer.started();
+		return xhr;
+	};
 }
 
 /**
@@ -159,7 +317,7 @@ export function sendFollowUp(
 type JQueryLike = ( target: unknown ) => {
 	on: (
 		events: string,
-		handler: ( event: unknown, response?: unknown ) => void
+		handler: ( event: unknown, ...args: unknown[] ) => void
 	) => unknown;
 };
 
@@ -217,10 +375,13 @@ export function bindUpdateFollowUp( win: FollowUpWindow ): boolean {
 		return false;
 	}
 
+	const requests: UpdateRequests = { inFlight: 0, unobserved: false };
+	const isIdle = () => isUpdatesIdle( updates, requests );
+
 	const siteChecks = settings.siteChecks;
 	const afterChecks = siteChecks
 		? createAfterChecks( {
-				isIdle: () => isQueueIdle( updates ),
+				isIdle,
 				run: ( analysis, signal ) =>
 					runSiteChecks(
 						{ ajaxUrl: settings.ajaxUrl, nonce: siteChecks.nonce },
@@ -234,7 +395,7 @@ export function bindUpdateFollowUp( win: FollowUpWindow ): boolean {
 			} )
 		: null;
 	const followUp = createFollowUp( {
-		isIdle: () => isQueueIdle( updates ),
+		isIdle,
 		send: ( plugins ) => {
 			const token = afterChecks?.followUpSent() ?? 0;
 			sendFollowUp( fetchFn.bind( win ), settings, plugins ).then(
@@ -253,6 +414,30 @@ export function bindUpdateFollowUp( win: FollowUpWindow ): boolean {
 				? ( response as { plugin?: unknown } ).plugin
 				: undefined
 		);
+	} );
+	// Every plugin update request's own end, also when core's callbacks throw.
+	document.on( 'ajaxSend', ( _event, _jqXHR, ajax ) => {
+		try {
+			observeUpdateRequest( ajax, {
+				started: () => {
+					requests.inFlight++;
+				},
+				ended: ( plugin ) => {
+					requests.inFlight = Math.max( 0, requests.inFlight - 1 );
+					try {
+						followUp.pluginUpdated( plugin );
+						followUp.check();
+					} catch {
+						// Never in the way of WordPress; a later admin page can still settle.
+					}
+				},
+				unobservable: () => {
+					requests.unobserved = true;
+				},
+			} );
+		} catch {
+			requests.unobserved = true;
+		}
 	} );
 	document.on( 'ajaxComplete', () => followUp.check() );
 

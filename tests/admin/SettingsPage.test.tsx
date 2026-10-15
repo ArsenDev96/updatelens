@@ -82,7 +82,7 @@ function openSettings() {
 
 function checkbox() {
 	return screen.getByRole( 'checkbox', {
-		name: 'Check site responses around plugin updates',
+		name: 'Check website responses around plugin updates',
 	} );
 }
 
@@ -91,7 +91,7 @@ function saveButton() {
 }
 
 function section() {
-	return screen.getByRole( 'region', { name: /Site checks/ } );
+	return screen.getByRole( 'region', { name: /Website checks/ } );
 }
 
 /** The stored state's badge ("Saved setting: On"). */
@@ -113,11 +113,11 @@ describe( 'Settings page', () => {
 		expect( screen.getByText( 'Loading settings…' ) ).toBeInTheDocument();
 		expect( await screen.findByRole( 'checkbox' ) ).not.toBeChecked();
 		expect(
-			screen.getByRole( 'heading', { level: 3, name: 'Site checks' } )
+			screen.getByRole( 'heading', { level: 3, name: 'Website checks' } )
 		).toBeInTheDocument();
 		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
 		expect( checkbox() ).toHaveAccessibleDescription(
-			'Compare your homepage and WordPress REST API responses before and after a plugin update. Each report shows the results in its “Site response checks” section.'
+			'Compare your homepage and WordPress REST API responses before and after a plugin update. Each report shows the results in its “Website checks” tab.'
 		);
 		// The workflow, visible without opening anything.
 		expect(
@@ -127,13 +127,13 @@ describe( 'Settings page', () => {
 				.getAllByRole( 'listitem' )
 				.map( ( item ) => item.textContent )
 		).toEqual( [
-			'Open Installed Plugins and wait until UpdateLens shows “Ready to compare site responses”.',
+			'Open Installed Plugins and wait until UpdateLens shows “Ready to compare website responses”.',
 			'Click “Update now” for the plugin there.',
 			'Keep that tab open for a few seconds after “Updated!” appears, so the checks after the update can finish.',
 		] );
 		// Further explanations are in "How site checks work".
 		for ( const point of [
-			/Turning site checks on does not test your site right away\./,
+			/Turning website checks on does not test your site right away\./,
 			/Updates from Dashboard → Updates get no check after the update, so they are not compared\./,
 			/Missing, inconclusive and unsupported checks are never counted as passed\./,
 		] ) {
@@ -187,7 +187,7 @@ describe( 'Settings page', () => {
 			],
 		] );
 		expect( await screen.findByRole( 'status' ) ).toHaveTextContent(
-			'Settings saved. Site checks are on. They start the next time Plugins or Updates is opened while plugin updates are available.'
+			'Settings saved. Website checks are on. They start the next time Plugins or Updates is opened while plugin updates are available.'
 		);
 		expect( badge() ).toHaveTextContent( /^Saved setting: On$/ );
 		expect(
@@ -211,7 +211,7 @@ describe( 'Settings page', () => {
 		expect( badge() ).toHaveTextContent( /^Saved setting: On$/ );
 	} );
 
-	it( 'turns site checks off', async () => {
+	it( 'turns website checks off', async () => {
 		serve( ON );
 		openSettings();
 		const user = userEvent.setup();
@@ -224,7 +224,7 @@ describe( 'Settings page', () => {
 			site_checks: { enabled: false },
 		} );
 		expect( await screen.findByRole( 'status' ) ).toHaveTextContent(
-			'Settings saved. Site checks are off. Existing reports keep their site check results.'
+			'Settings saved. Website checks are off. Existing reports keep their website check results.'
 		);
 		expect( checkbox() ).not.toBeChecked();
 		expect( badge() ).toHaveTextContent( /^Saved setting: Off$/ );
@@ -254,7 +254,7 @@ describe( 'Settings page', () => {
 		expect( saveButton() ).toHaveTextContent( 'Save settings' );
 		expect( saveButton() ).not.toHaveAttribute( 'aria-disabled', 'true' );
 		expect( screen.getByRole( 'status' ) ).toHaveTextContent(
-			/Settings saved\. Site checks are on\./
+			/Settings saved\. Website checks are on\./
 		);
 	} );
 
@@ -341,7 +341,7 @@ describe( 'Settings page', () => {
 		).not.toBeInTheDocument();
 		expect(
 			screen.getByText(
-				/Your saved setting is on, but this site's configuration keeps site checks off, so none run\./
+				/Your saved setting is on, but this site's configuration keeps website checks off, so none run\./
 			)
 		).toBeInTheDocument();
 		expect(
@@ -360,7 +360,7 @@ describe( 'Settings page', () => {
 			within( section() ).queryByText( 'Off for this site' )
 		).not.toBeInTheDocument();
 		const note = screen.getByText(
-			/This site's configuration also keeps site checks off, so turning them on here would have no effect until that changes./
+			/This site's configuration also keeps website checks off, so turning them on here would have no effect until that changes./
 		);
 		expect( note.closest( '.bg-amber-50' ) ).toBeNull();
 		expect( note ).toHaveTextContent( 'updatelens_site_checks_enabled' );
@@ -370,7 +370,7 @@ describe( 'Settings page', () => {
 		await user.click( saveButton() );
 
 		expect( await screen.findByRole( 'status' ) ).toHaveTextContent(
-			"Settings saved. Site checks stay off because of this site's configuration."
+			"Settings saved. Website checks stay off because of this site's configuration."
 		);
 		expect( badge() ).toHaveTextContent(
 			/^Saved setting: Off for this site$/
@@ -419,7 +419,7 @@ describe( 'Settings page', () => {
 			const warning = screen.queryByText(
 				/Your saved setting is on, but/
 			);
-			const quiet = screen.queryByText( /also keeps site checks off/ );
+			const quiet = screen.queryByText( /also keeps website checks off/ );
 			expect( Boolean( warning ) ).toBe( note === 'warning' );
 			expect( Boolean( quiet ) ).toBe( note === 'quiet' );
 			expect( section().textContent ).not.toMatch( /\bactive\b/i );
@@ -478,7 +478,7 @@ describe( 'Settings page', () => {
 		expect( saveButton() ).toHaveFocus();
 
 		await user.tab();
-		const summary = screen.getByText( 'How site checks work' );
+		const summary = screen.getByText( 'How website checks work' );
 		expect( summary.closest( 'summary' ) ).toHaveFocus();
 		// jsdom does not open <details> from the keyboard (checked in a real browser).
 		await user.click( summary );
@@ -494,7 +494,7 @@ describe( 'Settings page', () => {
 		}
 	} );
 
-	it( 'explains site checks without claiming more than they do', async () => {
+	it( 'explains website checks without claiming more than they do', async () => {
 		serve( OFF );
 		openSettings();
 		await screen.findByRole( 'checkbox' );
@@ -505,7 +505,7 @@ describe( 'Settings page', () => {
 			'a signed-in request to a standard WordPress endpoint.'
 		);
 		expect( text ).toContain(
-			'Plugin updates never wait for a site check.'
+			'Plugin updates never wait for a website check.'
 		);
 		expect( text ).toContain(
 			'Results are observations, not proof that an updated plugin caused a problem.'
@@ -517,7 +517,7 @@ describe( 'Settings page', () => {
 			'never response bodies, cookies or credentials. Nothing is sent to an UpdateLens service.'
 		);
 		expect( text ).toContain(
-			"Site checks don't test your whole site and are not uptime monitoring."
+			"Website checks don't test your whole site and are not uptime monitoring."
 		);
 		for ( const claim of [
 			/healthy/i,

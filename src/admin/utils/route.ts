@@ -5,7 +5,9 @@ import type { PhaseKey, Provider } from '../types/api';
  *
  *   admin.php?page=updatelens                                   History
  *   admin.php?page=updatelens&paged=2                           History, page 2
- *   admin.php?page=updatelens&analysis=42                       Report 42, overview
+ *   admin.php?page=updatelens&analysis=42                       Report 42, Update results
+ *   admin.php?page=updatelens&analysis=42&tab=checks            …its Website checks
+ *   admin.php?page=updatelens&analysis=42&tab=configuration     …its Configuration changes
  *   admin.php?page=updatelens&analysis=42&signal=cron           Report 42, WP-Cron details
  *   admin.php?page=updatelens&analysis=42&phase=during_update   …with a chosen phase
  *   …&signal=cron&phase=final&item=acme_sync                    …with rows of a hook located
@@ -13,8 +15,11 @@ import type { PhaseKey, Provider } from '../types/api';
  *   …&signal=cron&phase=final&item=acme_sync&kind=removed       …only its removed rows
  *   …&item=acme_sync&kind=changed&finding=3                     …the rows of finding 3
  *
- * `paged` is kept on reports for the way back. Without `phase` the report
- * opens its default phase; unknown values fall back to the defaults. `item`
+ * `paged` is kept on reports for the way back. Without `tab` the report
+ * opens Update results, or Configuration changes when the URL chooses a
+ * phase (older report URLs). `tab` is kept on a signal's details, so its
+ * breadcrumb returns to the tab it was opened from. Without `phase` the
+ * report opens its default phase; unknown values fall back to the defaults. `item`
  * (an option name or hook, from a Potential Impact finding), `group`
  * (Action Scheduler; may be empty) and `kind` (which list: added, removed
  * or changed) only apply to a signal's details; `finding` (index in the
@@ -30,9 +35,30 @@ export type Route =
 			phase: PhaseKey | null;
 			/** Signal whose details are shown; null shows the overview. */
 			signal: Provider | null;
+			/** Explicitly chosen tab of the overview; null or absent: the default. */
+			tab?: ReportTab | null;
 			/** Rows to locate on the signal's details; null for none. */
 			item?: RouteItem | null;
 	  };
+
+/** Tabs of a report's overview. */
+export type ReportTab = 'results' | 'checks' | 'configuration';
+
+export const REPORT_TABS: readonly ReportTab[] = [
+	'results',
+	'checks',
+	'configuration',
+];
+
+/**
+ * The tab a report route shows: the chosen one, else Configuration changes
+ * for a URL that chooses a phase (older report URLs), else Update results.
+ *
+ * @param route Report route.
+ */
+export function reportTab( route: ReportRoute ): ReportTab {
+	return route.tab ?? ( route.phase !== null ? 'configuration' : 'results' );
+}
 
 /** An option name or hook to locate, and for Action Scheduler its group. */
 export interface RouteItem {
@@ -63,6 +89,7 @@ export const ITEM_PARAM = 'item';
 export const GROUP_PARAM = 'group';
 export const KIND_PARAM = 'kind';
 export const FINDING_PARAM = 'finding';
+export const TAB_PARAM = 'tab';
 
 const PHASES: readonly PhaseKey[] = [ 'during_update', 'post_update', 'final' ];
 const SIGNALS: readonly Provider[] = [ 'options', 'cron', 'action_scheduler' ];
@@ -112,6 +139,7 @@ export function parseRoute( search: string ): Route {
 		page,
 		phase: oneOf( PHASES, params.get( PHASE_PARAM ) ),
 		signal,
+		tab: oneOf( REPORT_TABS, params.get( TAB_PARAM ) ),
 		item:
 			signal !== null && name
 				? {
@@ -142,6 +170,7 @@ export function routeHref( route: Route, current: string ): string {
 		GROUP_PARAM,
 		KIND_PARAM,
 		FINDING_PARAM,
+		TAB_PARAM,
 	] ) {
 		url.searchParams.delete( param );
 	}
@@ -155,6 +184,9 @@ export function routeHref( route: Route, current: string ): string {
 		}
 		if ( route.phase ) {
 			url.searchParams.set( PHASE_PARAM, route.phase );
+		}
+		if ( route.tab ) {
+			url.searchParams.set( TAB_PARAM, route.tab );
 		}
 		if ( route.signal && route.item ) {
 			url.searchParams.set( ITEM_PARAM, route.item.name );

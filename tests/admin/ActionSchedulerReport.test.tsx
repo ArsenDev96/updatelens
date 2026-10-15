@@ -58,14 +58,14 @@ const apiFetchMock = vi.mocked( apiFetch );
  * Opens a report on the Action Scheduler page (or another view).
  *
  * @param report Report served by the API.
- * @param signal Signal page; null for the overview.
+ * @param signal Signal page; null for the overview's Configuration changes.
  */
 function renderReport(
 	report: AnalysisReport,
 	signal: Provider | null = 'action_scheduler'
 ) {
 	apiFetchMock.mockResolvedValue( report );
-	openReport( report.id, { signal: signal ?? undefined } );
+	openReport( report.id, signal ? { signal } : { tab: 'configuration' } );
 	return screen.findAllByRole( 'tablist' );
 }
 
@@ -77,11 +77,14 @@ const tabNames = ( list: string ) =>
 const signalPanel = phasePanel;
 const section = ( name: string | RegExp ) =>
 	within( signalPanel() ).getByRole( 'region', { name } );
-/** The state line of each overview card, in signal order. */
+/** The state of each source row in Configuration changes, in signal order. */
 const cardStates = () =>
 	within( screen.getByRole( 'list', { name: 'Signals' } ) )
 		.getAllByRole( 'listitem' )
-		.map( ( card ) => card.querySelector( 'p > span' )!.textContent );
+		.filter( ( card ) => card.hasAttribute( 'data-signal' ) )
+		.map( ( card ) =>
+			card.querySelector( 'p > span' )!.textContent!.replace( / ·$/, '' )
+		);
 /** A number as the UI formats it in the host locale. */
 const num = ( n: number ) => new Intl.NumberFormat().format( n );
 const row = ( hook: string ) =>
@@ -146,27 +149,24 @@ describe( 'Action Scheduler in reports', () => {
 				'5 changes',
 			] );
 			expect( cardTexts()[ 2 ] ).toMatch(
-				/^Action Scheduler5 changes · Added \d+/
+				// Name, count badge, then the counts (the total for screen readers).
+				/^Action Scheduler55 changes · Added \d+/
 			);
 			// Net result: 6 options + 5 WP-Cron + 5 Action Scheduler.
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'Net result, 16 changes',
 				'During update, 1 change',
 				'After update, 5 changes',
-				'Net result, 16 changes',
 			] );
-			// The summary names the Net result total.
-			expect(
-				screen.getByRole( 'region', { name: 'Report summary' } )
-			).toHaveTextContent( '16 changes observed' );
-			// Rows are on the Action Scheduler page, not the overview.
+			// Rows appear only when a source is expanded.
 			expect( document.body ).not.toHaveTextContent( 'fetch_patterns' );
 			cleanup();
 
 			await renderReport( WOOCOMMERCE );
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'Net result, 5 changes',
 				'During update, 1 change',
 				'After update, 5 changes',
-				'Net result, 5 changes',
 			] );
 			expect( signalPanel() ).toHaveTextContent( 'fetch_patterns' );
 		} );
@@ -210,9 +210,9 @@ describe( 'Action Scheduler in reports', () => {
 
 			// The Action Scheduler page counts Action Scheduler only.
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'Net result, 5 changes',
 				'During update, Not available',
 				'After update, 0 changes',
-				'Net result, 5 changes',
 			] );
 			expect( signalPanel() ).toHaveTextContent(
 				'5 observed Action Scheduler changes'
@@ -241,9 +241,9 @@ describe( 'Action Scheduler in reports', () => {
 				null
 			);
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'Net result, 5 changes',
 				'During update, 0 changes',
 				'After update, 0 changes',
-				'Net result, 5 changes',
 			] );
 		} );
 
@@ -276,8 +276,16 @@ describe( 'Action Scheduler in reports', () => {
 			for ( const signal of [ null, 'action_scheduler' ] as const ) {
 				await renderReport( WOOCOMMERCE, signal );
 
-				expect( screen.getAllByRole( 'tablist' ) ).toHaveLength( 1 );
-				expect( screen.getAllByRole( 'tab' ) ).toHaveLength( 3 );
+				// The report's tabs (overview only) and the phases.
+				expect(
+					screen
+						.getAllByRole( 'tablist' )
+						.map( ( list ) => list.getAttribute( 'aria-label' ) )
+				).toEqual(
+					signal
+						? [ 'Observation phases' ]
+						: [ 'Report', 'Observation phases' ]
+				);
 				expect(
 					screen.queryByRole( 'tab', { name: /^Action Scheduler/ } )
 				).toBeNull();
@@ -309,15 +317,16 @@ describe( 'Action Scheduler in reports', () => {
 				'5 changes',
 			] );
 
+			// Its changes open in place.
 			await user.click(
-				screen.getByRole( 'link', { name: 'Action Scheduler' } )
+				screen.getByRole( 'button', { name: 'Action Scheduler' } )
 			);
-			expect( signalPanel() ).toHaveTextContent(
+			expect( signalCard( 'Action Scheduler' ) ).toHaveTextContent(
 				'wpforms_admin_notifications_update'
 			);
 			await user.click( tab( /During update/ ) );
-			expect( signalPanel() ).toHaveTextContent(
-				'No Action Scheduler changes observed'
+			expect( signalCard( 'Action Scheduler' ) ).toHaveTextContent(
+				/^Action SchedulerNo changesOpen page$/
 			);
 			expect( document.body ).not.toHaveTextContent(
 				'wpforms_admin_notifications_update'

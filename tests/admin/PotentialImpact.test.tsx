@@ -1,5 +1,5 @@
 import apiFetch from '@wordpress/api-fetch';
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,7 +56,13 @@ import {
 	manyFindings,
 	ONE_FINDING,
 } from './impact-fixtures';
-import { openReport, phasePanel, tab } from './report-view';
+import {
+	openReport,
+	phasePanel,
+	reportPanel,
+	reportTab,
+	tab,
+} from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
@@ -79,21 +85,50 @@ async function renderReport(
 	} = {}
 ) {
 	apiFetchMock.mockResolvedValue( report );
-	openReport( report.id, options );
+	// The overview opens on Update results, where the findings are.
+	openReport(
+		report.id,
+		options.signal ? options : { ...options, tab: 'results' }
+	);
 	await screen.findByRole( 'heading', { level: 2 } );
 }
 
-/** The Potential Impact section. */
-const impact = () => screen.getByRole( 'region', { name: 'Findings' } );
+/** The Update results tab's content. */
+const impact = () => reportPanel();
 
-/** Finding groups (rule and signal). */
+/** Finding groups (rule and signal), across the priority lists. */
 const groups = () =>
-	within( within( impact() ).getByRole( 'list', { name: 'Findings' } ) )
-		.getAllByRole( 'listitem' )
-		.filter(
-			( item ) =>
-				item.parentElement?.getAttribute( 'aria-label' ) === 'Findings'
-		);
+	Array.from(
+		impact().querySelectorAll< HTMLElement >(
+			'section[data-priority] > ul > li'
+		)
+	);
+
+/** Priority lists as their headings' accessible names, in order. */
+const priorityGroups = () =>
+	Array.from( impact().querySelectorAll( 'section[data-priority]' ) ).map(
+		( group ) =>
+			within( group as HTMLElement ).getByRole( 'heading', { level: 3 } )
+				.textContent
+	);
+
+/** The panel shown without findings. */
+const resultPanel = () =>
+	document.querySelector< HTMLElement >(
+		'[aria-labelledby="updatelens-result-title"]'
+	);
+
+/** The review rules' button. */
+const rulesButton = () =>
+	within( impact() ).getByRole( 'button', { name: /review rules$/ } );
+
+/** The review rules, shown first if needed. */
+function rules(): HTMLElement {
+	if ( rulesButton().getAttribute( 'aria-expanded' ) !== 'true' ) {
+		fireEvent.click( rulesButton() );
+	}
+	return document.getElementById( 'updatelens-review-rules' )!;
+}
 
 /** The expand/collapse button of a group (in its title). */
 const groupButton = ( group: HTMLElement ) =>
@@ -117,7 +152,7 @@ async function expandAll( user: ReturnType< typeof userEvent.setup > ) {
  * the longer description.
  */
 const checkTexts = () =>
-	within( impact().querySelector( 'details dl' )! )
+	within( rules().querySelector( 'dl' )! )
 		.getAllByRole( 'definition' )
 		.map( ( item ) =>
 			( item.textContent ?? '' ).replace(
@@ -126,21 +161,9 @@ const checkTexts = () =>
 			)
 		);
 
-/** The report summary. */
-const summary = () => screen.getByRole( 'region', { name: 'Report summary' } );
-
-/**
- * One row of the summary (its answer and action), or null.
- *
- * @param label Row label, e.g. "Findings".
- */
-const summaryRow = ( label: string ) =>
-	within( summary() )
-		.queryAllByRole( 'term' )
-		.find( ( term ) => term.textContent === label )?.parentElement ?? null;
-
-/** Sources that could not be assessed, always visible in the summary. */
-const notAssessed = () => summaryRow( 'Not assessed' );
+/** Sources that could not be assessed, or null. */
+const notAssessed = () =>
+	screen.queryByRole( 'region', { name: 'Not assessed' } );
 
 /** Wording that must never appear: no verdicts, no attribution. */
 const FORBIDDEN =
@@ -151,29 +174,19 @@ describe( 'Potential Impact', () => {
 		apiFetchMock.mockReset();
 	} );
 
-	it( 'comes right after the summary, before site checks and configuration changes', async () => {
-		await renderReport( IMPACT );
+	it( 'is the Update results tab, the default, with the findings by priority', async () => {
+		apiFetchMock.mockResolvedValue( IMPACT );
+		openReport( IMPACT.id );
+		await screen.findByRole( 'heading', { level: 2 } );
 
-		const configuration = screen.getByRole( 'region', {
-			name: 'Configuration changes',
-		} );
-		const following = ( a: Element, b: Element ) =>
-			Boolean(
-				a.compareDocumentPosition( b ) &
-				Node.DOCUMENT_POSITION_FOLLOWING
-			);
-		expect( following( summary(), impact() ) ).toBe( true );
-		expect(
-			following(
-				impact(),
-				screen.getByRole( 'region', { name: 'Site checks' } )
-			)
-		).toBe( true );
-		expect( following( impact(), configuration ) ).toBe( true );
-		// The summary counts them by priority and leads to them.
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			/^Findings5 need review/
+		expect( reportTab( 'Update results' ) ).toHaveAttribute(
+			'aria-selected',
+			'true'
 		);
+		expect( impact() ).toHaveAccessibleName( 'Update results' );
+		// Counted by the priority the API gave them, once.
+		expect( priorityGroups() ).toEqual( [ 'Needs review, 5' ] );
+		expect( resultPanel() ).toBeNull();
 	} );
 
 	it( 'starts with compact group rows: title, count, signal, names and one sentence', async () => {
@@ -194,9 +207,7 @@ describe( 'Potential Impact', () => {
 			)
 		).toEqual( [ 'false', 'false', 'false', 'false' ] );
 		expect(
-			within( impact() )
-				.getAllByRole( 'button', { expanded: false } )
-				.map( ( button ) => button.textContent )
+			groups().map( ( group ) => groupButton( group ).textContent )
 		).toEqual( [
 			'Large autoloaded options2, 2 findings, Needs review',
 			'Recurring WP-Cron event no longer observed, 1 finding, Needs review',
@@ -351,20 +362,23 @@ describe( 'Potential Impact', () => {
 		).toBeInTheDocument();
 	} );
 
-	it( 'says what was checked in a collapsed disclosure', async () => {
+	it( 'says what was checked behind "View review rules"', async () => {
 		const user = userEvent.setup();
 		await renderReport( IMPACT );
 
-		const details = impact().querySelector( 'details' )!;
-		expect( details.open ).toBe( false );
-		await user.click( within( impact() ).getByText( 'What was checked' ) );
-		expect( details.open ).toBe( true );
+		expect( rulesButton() ).toHaveAttribute( 'aria-expanded', 'false' );
+		expect(
+			document.getElementById( 'updatelens-review-rules' )
+		).toBeEmptyDOMElement();
+		await user.click( rulesButton() );
+		expect( rulesButton() ).toHaveAttribute( 'aria-expanded', 'true' );
+		const details = rules();
 		expect( checkTexts() ).toEqual( [
 			'Checked · 2 findings',
 			'Checked · 2 findings',
 			'Checked · 1 finding',
 			// Recorded before site checks: one quiet row, not a warning.
-			'Not recorded · This update was observed before UpdateLens recorded site checks.',
+			'Not recorded · This update was observed before UpdateLens recorded website checks.',
 		] );
 		expect( details ).toHaveTextContent(
 			'WP-Cron: recurring events no longer observed, and recurring schedules that changed.'
@@ -378,17 +392,19 @@ describe( 'Potential Impact', () => {
 		const user = userEvent.setup();
 		await renderReport( IMPACT, { phase: 'during_update' } );
 
-		// Outside the phase tabs: labelled with its source, never a phase.
+		// No phase tabs here: labelled with its source, never a phase.
 		expect( within( impact() ).queryByRole( 'tabpanel' ) ).toBeNull();
 		expect(
 			within( impact() ).getByText( 'Based on Net result' )
 		).toBeInTheDocument();
 		const before = groups().map( ( group ) => group.textContent );
+		await user.click( reportTab( 'Configuration changes' ) );
 		await user.click( tab( /^Net result/ ) );
 		expect( tab( /^Net result/ ) ).toHaveAttribute(
 			'aria-selected',
 			'true'
 		);
+		await user.click( reportTab( 'Update results' ) );
 		expect( groups().map( ( group ) => group.textContent ) ).toEqual(
 			before
 		);
@@ -757,7 +773,7 @@ describe( 'Potential Impact', () => {
 
 			// Overview: the API's totals, never recounted.
 			await renderReport( report );
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+			expect( impact() ).toHaveTextContent(
 				`${ assessment.informational } of ${ assessment.assessed_changes } configuration changes in the Net result matched no review rule (informational).`
 			);
 
@@ -865,9 +881,7 @@ describe( 'Potential Impact', () => {
 		it( 'one finding, Action Scheduler not applicable', async () => {
 			await renderReport( ONE_FINDING );
 
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				/^Findings1 needs review/
-			);
+			expect( priorityGroups() ).toEqual( [ 'Needs review, 1' ] );
 			expect( groups() ).toHaveLength( 1 );
 			expect( groupButton( groups()[ 0 ] ) ).toHaveAttribute(
 				'aria-expanded',
@@ -878,34 +892,28 @@ describe( 'Potential Impact', () => {
 				'Checked · 1 finding',
 				'Not applicable · Action Scheduler was not detected during this update.',
 				// Recorded before site checks: one quiet row, not a warning.
-				'Not recorded · This update was observed before UpdateLens recorded site checks.',
+				'Not recorded · This update was observed before UpdateLens recorded website checks.',
 			] );
 			// Not applicable is not "not assessed".
 			expect( notAssessed() ).toBeNull();
 			expect( impact().textContent ).not.toMatch( /Not checked/ );
 		} );
 
-		it( 'evaluated without findings: compact, no verdict', async () => {
+		it( 'evaluated without findings: one panel, no verdict', async () => {
 			await renderReport( RANK_MATH );
 
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				'No findings matched the completed observations.'
+			expect( resultPanel() ).toHaveTextContent(
+				'Nothing flagged for reviewNo concerning patterns matched the completed observations.UpdateLens checks selected patterns only, so this does not guarantee that the update had no other effects.'
 			);
-			// Said once: the section explains what it means, not the headline again.
-			expect( impact() ).not.toHaveTextContent(
-				'No findings matched the completed observations.'
-			);
-			expect( impact() ).toHaveTextContent(
-				'Only a few specific patterns are checked, so this does not show that the update had no other effects.'
-			);
+			// Said once.
 			expect(
-				within( impact() ).queryByRole( 'list', { name: 'Findings' } )
-			).not.toBeInTheDocument();
+				impact().textContent?.match( /Nothing flagged for review/g )
+			).toHaveLength( 1 );
+			expect( groups() ).toHaveLength( 0 );
 			expect( notAssessed() ).toBeNull();
-			expect( summary().textContent ).not.toMatch( FORBIDDEN );
-			// Statuses and limitations wait in "What was checked".
-			expect( impact().querySelector( 'details' )!.open ).toBe( false );
-			expect( impact().querySelector( 'details' ) ).toHaveTextContent(
+			// Statuses and limitations wait behind "View review rules".
+			expect( rulesButton() ).toHaveAttribute( 'aria-expanded', 'false' );
+			expect( rules() ).toHaveTextContent(
 				'No match does not show that the update had no other effects.'
 			);
 			expect( impact().textContent ).not.toMatch( FORBIDDEN );
@@ -914,8 +922,8 @@ describe( 'Potential Impact', () => {
 		it( 'partial: a failed provider stays visible with its reason', async () => {
 			await renderReport( MALFORMED_CRON );
 
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				'No findings in the completed observations; some configuration sources were not assessed.'
+			expect( resultPanel() ).toHaveTextContent(
+				'No concerning patterns matched the completed observations, but not everything could be assessed.'
 			);
 			// Kept apart from the priorities, with its reason.
 			expect( notAssessed() ).toHaveTextContent(
@@ -959,31 +967,29 @@ describe( 'Potential Impact', () => {
 			expect( checkTexts()[ 2 ] ).toBe(
 				'Not checked (unavailable) · This report cannot confirm that Action Scheduler was absent throughout the update.'
 			);
-			expect( impact() ).not.toHaveTextContent( 'Not applicable' );
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				/^Findings1 needs review/
-			);
+			expect( priorityGroups() ).toEqual( [ 'Needs review, 1' ] );
+			expect( rules() ).not.toHaveTextContent( 'Not applicable' );
 		} );
 
 		it( 'with every signal: evaluated, zero findings', async () => {
 			await renderReport( WOOCOMMERCE );
 
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				'No findings matched the completed observations.'
+			expect( resultPanel() ).toHaveTextContent(
+				'Nothing flagged for review'
 			);
 			expect( checkTexts() ).toEqual( [
 				'Checked · no findings',
 				'Checked · no findings',
 				'Checked · no findings',
 				// Recorded before site checks: one quiet row, not a warning.
-				'Not recorded · This update was observed before UpdateLens recorded site checks.',
+				'Not recorded · This update was observed before UpdateLens recorded website checks.',
 			] );
 		} );
 
 		it( 'awaiting the settled observation', async () => {
 			await renderReport( AWAITING );
 
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+			expect( resultPanel() ).toHaveTextContent(
 				'Waiting for the Net result'
 			);
 			expect( impact() ).toHaveTextContent( 'Refresh the report later' );
@@ -998,9 +1004,10 @@ describe( 'Potential Impact', () => {
 		} );
 
 		it( 'expired observation', async () => {
+			const user = userEvent.setup();
 			await renderReport( EXPIRED );
 
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
+			expect( resultPanel() ).toHaveTextContent(
 				'Not assessed in this partial report'
 			);
 			// Why is said once, at the top; this section only refers to it.
@@ -1010,22 +1017,23 @@ describe( 'Potential Impact', () => {
 			expect( checkTexts()[ 0 ] ).toBe(
 				'Not checked (observation expired)'
 			);
-			// It opens on During update; the missing Net result is not assessed.
-			expect( tab( /^During update/ ) ).toHaveAttribute(
+			// What expired is named once, by the status above the tabs.
+			expect( notAssessed() ).toBeNull();
+			// Configuration changes opens on the Net result, not available.
+			await user.click( reportTab( 'Configuration changes' ) );
+			expect( tab( /^Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
 			);
-			expect( notAssessed() ).toHaveTextContent(
-				/^Not assessedObservation expired: Options & autoload and WP-Cron$/
-			);
 		} );
 
-		it( 'is left out when no phase is available (failed update)', async () => {
+		it( 'is not available when no phase is (failed update)', async () => {
 			await renderReport( FAILED );
 
-			expect(
-				screen.queryByRole( 'region', { name: 'Findings' } )
-			).not.toBeInTheDocument();
+			expect( groups() ).toHaveLength( 0 );
+			expect( resultPanel() ).toHaveTextContent(
+				/^Not available for this report/
+			);
 		} );
 	} );
 
@@ -1034,9 +1042,9 @@ describe( 'Potential Impact', () => {
 			const user = userEvent.setup();
 			await renderReport( manyFindings( 1200, 300 ) );
 
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				`${ formatCount( 1500 ) } need review`
-			);
+			expect( priorityGroups() ).toEqual( [
+				`Needs review, ${ formatCount( 1500 ) }`,
+			] );
 			const [ options, cron ] = groups();
 			expect(
 				screen.getByRole( 'button', {
@@ -1230,7 +1238,7 @@ describe( 'Potential Impact', () => {
 		const user = userEvent.setup();
 		await renderReport( IMPACT );
 		await expandAll( user );
-		await user.click( within( impact() ).getByText( 'What was checked' ) );
+		await user.click( rulesButton() );
 
 		const text = impact().textContent ?? '';
 		for ( const code of [

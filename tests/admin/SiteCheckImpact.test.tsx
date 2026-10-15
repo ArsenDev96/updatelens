@@ -13,17 +13,18 @@ import type {
 import cases from '../fixtures/site-check-impact-cases.json';
 import { COMPLETED, withSiteCheckCase } from './fixtures';
 import { IMPACT } from './impact-fixtures';
-import { openReport, tab } from './report-view';
+import { openReport, reportPanel, reportTab, tab } from './report-view';
 
 vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
 
 /*
- * Site checks in Potential Impact, rendered from real API output: every
+ * Website checks in Update results, rendered from real API output: every
  * case in tests/fixtures/site-check-impact-cases.json is what PHP returns
  * for stored results (SiteCheckImpactCasesTest keeps the file in sync).
- * Findings, guidance and coverage stay here; the requests before and after
- * are in "Site response checks" (SiteResponseChecks.test.tsx), one link away.
+ * Findings, guidance and coverage stay in Update results; the requests
+ * before and after are in the Website checks tab (SiteResponseChecks.test.tsx),
+ * one link away.
  */
 
 type CaseName = keyof typeof cases.cases;
@@ -57,24 +58,46 @@ async function renderReport(
 	options: { phase?: PhaseKey } = {}
 ) {
 	apiFetchMock.mockResolvedValue( report );
-	openReport( report.id, options );
+	openReport( report.id, { ...options, tab: 'results' } );
 	await screen.findByRole( 'heading', { level: 2 } );
 }
 
-/** The Potential Impact section. */
-const impact = () => screen.getByRole( 'region', { name: 'Findings' } );
+/** The Update results tab's content. */
+const impact = () => reportPanel();
 
-/** The site response checks section. */
-const siteSection = () => screen.getByRole( 'region', { name: 'Site checks' } );
+/** The website checks section (Website checks tab). */
+const siteSection = () =>
+	screen.getByRole( 'region', { name: 'Website checks' } );
 
-/** Rows of the findings list (site check findings and finding groups). */
+/** The findings lists (by priority), or none. */
+const findingLists = () =>
+	impact().querySelectorAll( 'section[data-priority]' );
+
+/** Rows of the findings lists (site check findings and finding groups). */
 const rows = () =>
-	within( within( impact() ).getByRole( 'list', { name: 'Findings' } ) )
-		.getAllByRole( 'listitem' )
-		.filter(
-			( item ) =>
-				item.parentElement?.getAttribute( 'aria-label' ) === 'Findings'
-		);
+	Array.from(
+		impact().querySelectorAll< HTMLElement >(
+			'section[data-priority] > ul > li'
+		)
+	);
+
+/** Priority groups as their headings' accessible names, in order. */
+const priorityGroups = () =>
+	Array.from( findingLists() ).map(
+		( group ) =>
+			within( group as HTMLElement ).getByRole( 'heading', { level: 3 } )
+				.textContent
+	);
+
+/** The panel shown without findings. */
+const resultPanel = () =>
+	document.querySelector< HTMLElement >(
+		'[aria-labelledby="updatelens-result-title"]'
+	);
+
+/** "Not assessed", or null. */
+const notAssessed = () =>
+	screen.queryByRole( 'region', { name: 'Not assessed' } );
 
 /** The expand/collapse button of a row. */
 const rowButton = ( row: HTMLElement ) =>
@@ -86,31 +109,19 @@ const rowTitles = () =>
 		( row ) => row.querySelector( 'h4 button' )!.firstChild!.textContent
 	);
 
-/** The report summary. */
-const summary = () => screen.getByRole( 'region', { name: 'Report summary' } );
-
-/**
- * One row of the summary, or null.
- *
- * @param label Row label.
- */
-const summaryRow = ( label: string ) =>
-	within( summary() )
-		.queryAllByRole( 'term' )
-		.find( ( term ) => term.textContent === label )?.parentElement ?? null;
-
-/** What the summary says about the site checks: always visible. */
-const siteSummary = () =>
-	summaryRow( 'Site checks' )!.querySelector( 'dd' )!.textContent;
+/** The review rules' content (after "View review rules"), or null. */
+const rules = () => document.getElementById( 'updatelens-review-rules' )!;
 
 /** "What was checked" rows: label → text. */
 async function checkedRows( user: ReturnType< typeof userEvent.setup > ) {
-	const details = impact().querySelector( 'details' )!;
-	if ( ! details.open ) {
-		await user.click( within( impact() ).getByText( 'What was checked' ) );
+	const button = screen.getByRole( 'button', {
+		name: /review rules$/,
+	} );
+	if ( button.getAttribute( 'aria-expanded' ) !== 'true' ) {
+		await user.click( button );
 	}
 	return Object.fromEntries(
-		within( details.querySelector( 'dl' )! )
+		within( rules().querySelector( 'dl' )! )
 			.getAllByRole( 'term' )
 			.map( ( term ) => [
 				term.textContent,
@@ -119,11 +130,33 @@ async function checkedRows( user: ReturnType< typeof userEvent.setup > ) {
 	);
 }
 
+/**
+ * Each check's result in the Website checks tab (opens it).
+ *
+ * @param user User.
+ */
+async function siteResults( user: ReturnType< typeof userEvent.setup > ) {
+	await user.click( reportTab( 'Website checks' ) );
+	return Object.fromEntries(
+		within( siteSection() )
+			.getAllByRole( 'listitem' )
+			.map( ( item ) => [
+				item.querySelector( 'h4 button' )!.textContent,
+				item.firstElementChild!.querySelectorAll( 'dl dd' )[ 2 ]
+					.textContent,
+			] )
+	);
+}
+
 /** Wording that must never appear: no verdicts, causes or invented destinations. */
 const FORBIDDEN =
 	/\bsafe\b|no issues|no conflicts?|risk-free|healthy|caused by|definitely|PHP fatal|site (is|went) down|was down\b(?!\.)|https?:\/\/|confirmed conflict/i;
 
-describe( 'Site checks in Potential Impact', () => {
+const NOTHING_FLAGGED = 'Nothing flagged for review';
+const NOT_EVERYTHING =
+	'No concerning patterns matched the completed observations, but not everything could be assessed.';
+
+describe( 'Website checks in Update results', () => {
 	beforeEach( () => {
 		apiFetchMock.mockReset();
 	} );
@@ -131,17 +164,15 @@ describe( 'Site checks in Potential Impact', () => {
 	it( 'homepage newly failing, REST passed: one compact row, first', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'home_newly_failing' ) );
 
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			/^Findings1 high priority/
-		);
+		expect( priorityGroups() ).toEqual( [ 'High priority, 1' ] );
 		expect(
 			within( impact() ).getByText(
-				'Based on Net result and site checks'
+				'Based on Net result and website checks'
 			)
 		).toBeInTheDocument();
 		const [ row ] = rows();
 		expect( rowTitles() ).toEqual( [ 'Homepage check newly failing' ] );
-		expect( row ).toHaveTextContent( 'Site checks · Homepage' );
+		expect( row ).toHaveTextContent( 'Website checks · Homepage' );
 		expect( rowButton( row ) ).toHaveAccessibleName(
 			'Homepage check newly failing, 1 finding, High priority'
 		);
@@ -151,7 +182,7 @@ describe( 'Site checks in Potential Impact', () => {
 		expect( rowButton( row ) ).toHaveAttribute( 'aria-expanded', 'false' );
 		// Collapsed: no evidence in the DOM.
 		expect( row ).not.toHaveTextContent( 'What changed' );
-		expect( summaryRow( 'Not assessed' ) ).toBeNull();
+		expect( notAssessed() ).toBeNull();
 	} );
 
 	it( 'expands to what changed and the guidance, and links to the requests', async () => {
@@ -193,7 +224,7 @@ describe( 'Site checks in Potential Impact', () => {
 				within( row ).queryByRole( 'link' )
 			).not.toBeInTheDocument();
 
-			// The link opens the check in "Site response checks" and moves focus there.
+			// The link opens the check in Website checks and moves focus there.
 			await user.click(
 				within( row ).getByRole( 'button', {
 					name: 'Show the homepage requests',
@@ -205,17 +236,28 @@ describe( 'Site checks in Potential Impact', () => {
 			} );
 			expect( home ).toHaveAttribute( 'aria-expanded', 'true' );
 			expect( home ).toHaveFocus();
+			expect( reportTab( 'Website checks' ) ).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
 			expect( siteSection() ).toHaveTextContent(
 				/Request 1HTTP 500 · 0[.,]2 secondsSource: Verified as WordPress, also for this error/
 			);
 
-			rowButton( row ).focus();
+			// Back in Update results, the finding is still expanded.
+			await user.click( reportTab( 'Update results' ) );
+			const again = rows()[ 0 ];
+			expect( rowButton( again ) ).toHaveAttribute(
+				'aria-expanded',
+				'true'
+			);
+			rowButton( again ).focus();
 			await user.keyboard( ' ' );
-			expect( rowButton( row ) ).toHaveAttribute(
+			expect( rowButton( again ) ).toHaveAttribute(
 				'aria-expanded',
 				'false'
 			);
-			expect( row ).not.toHaveTextContent( 'What changed' );
+			expect( again ).not.toHaveTextContent( 'What changed' );
 		} finally {
 			vi.useRealTimers();
 		}
@@ -250,9 +292,7 @@ describe( 'Site checks in Potential Impact', () => {
 	it( 'both newly failing: two rows, homepage first', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'both_newly_failing' ) );
 
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			/^Findings2 high priority/
-		);
+		expect( priorityGroups() ).toEqual( [ 'High priority, 2' ] );
 		expect( rowTitles() ).toEqual( [
 			'Homepage check newly failing',
 			'REST API check newly failing',
@@ -287,12 +327,9 @@ describe( 'Site checks in Potential Impact', () => {
 			withSiteChecks( COMPLETED, 'redirect_disappeared' )
 		);
 
-		expect(
-			within( impact() ).queryByRole( 'list', { name: 'Findings' } )
-		).not.toBeInTheDocument();
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			'No findings matched the completed observations.'
-		);
+		expect( findingLists() ).toHaveLength( 0 );
+		expect( resultPanel() ).toHaveTextContent( NOTHING_FLAGGED );
+		expect( resultPanel() ).toHaveAttribute( 'data-tone', 'positive' );
 		expect( ( await checkedRows( user ) )[ 'Homepage check' ] ).toBe(
 			'Changed'
 		);
@@ -304,9 +341,7 @@ describe( 'Site checks in Potential Impact', () => {
 			withSiteChecks( COMPLETED, 'redirect_then_failure' )
 		);
 
-		expect(
-			within( impact() ).queryByRole( 'list', { name: 'Findings' } )
-		).not.toBeInTheDocument();
+		expect( findingLists() ).toHaveLength( 0 );
 		expect( ( await checkedRows( user ) )[ 'Homepage check' ] ).toBe(
 			'Changed'
 		);
@@ -341,12 +376,13 @@ describe( 'Site checks in Potential Impact', () => {
 	it( 'a page too large to inspect both times is not a broken page', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'home_not_inspected' ) );
 
-		expect(
-			within( impact() ).queryByRole( 'list', { name: 'Findings' } )
-		).not.toBeInTheDocument();
-		expect( siteSummary() ).toBe(
-			'1 of 2 comparedHomepage: not compared · REST API: passed before and after'
-		);
+		expect( findingLists() ).toHaveLength( 0 );
+		expect( resultPanel() ).toHaveTextContent( NOT_EVERYTHING );
+		const user = userEvent.setup();
+		expect( await siteResults( user ) ).toEqual( {
+			Homepage: 'Not compared',
+			'WordPress REST API': 'Passed before and after',
+		} );
 	} );
 
 	it( 'an unverified HTTP 500 is reported as observed, without attribution', async () => {
@@ -372,28 +408,22 @@ describe( 'Site checks in Potential Impact', () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
 
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			'No findings matched the completed observations.'
-		);
-		expect(
-			within( impact() ).getByText(
-				'Based on Net result and site checks'
-			)
-		).toBeInTheDocument();
+		expect( resultPanel() ).toHaveTextContent( NOTHING_FLAGGED );
+		expect( resultPanel() ).toHaveAttribute( 'data-tone', 'positive' );
 		const checked = await checkedRows( user );
-		// The timing and evidence are in "Site response checks".
+		// The timing and evidence are in Website checks.
 		expect( checked[ 'Homepage check' ] ).toBe(
 			'Passed at both observation points'
 		);
 		expect( checked[ 'REST API check' ] ).toBe(
 			'Passed at both observation points'
 		);
-		const details = impact().querySelector( 'details' )!;
+		const details = rules();
 		expect( details ).toHaveTextContent(
 			'A passing check shows that one page or request responded as expected at that moment, not that every page or feature works.'
 		);
 		expect( details ).toHaveTextContent(
-			'Site checks: a homepage or REST API check that passed before the update'
+			'Website checks: a homepage or REST API check that passed before the update'
 		);
 		// The Net result limitation names the signals it covers.
 		expect( details ).toHaveTextContent(
@@ -406,10 +436,10 @@ describe( 'Site checks in Potential Impact', () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'failing_both' ) );
 
-		expect(
-			within( impact() ).queryByRole( 'list', { name: 'Findings' } )
-		).not.toBeInTheDocument();
-		expect( summaryRow( 'Not assessed' ) ).toBeNull();
+		expect( findingLists() ).toHaveLength( 0 );
+		expect( notAssessed() ).toBeNull();
+		// Not a pass: the panel is not green.
+		expect( resultPanel() ).toHaveAttribute( 'data-tone', 'neutral' );
 		expect( ( await checkedRows( user ) )[ 'Homepage check' ] ).toBe(
 			'Already failing before the update'
 		);
@@ -419,9 +449,7 @@ describe( 'Site checks in Potential Impact', () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'recovered' ) );
 
-		expect(
-			within( impact() ).queryByRole( 'list', { name: 'Findings' } )
-		).not.toBeInTheDocument();
+		expect( findingLists() ).toHaveLength( 0 );
 		expect( ( await checkedRows( user ) )[ 'Homepage check' ] ).toBe(
 			'Recovered'
 		);
@@ -431,17 +459,16 @@ describe( 'Site checks in Potential Impact', () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'unconfirmed' ) );
 
-		expect(
-			within( impact() ).queryByRole( 'list', { name: 'Findings' } )
-		).not.toBeInTheDocument();
-		expect( siteSummary() ).toBe(
-			'1 of 2 comparedHomepage: not compared · REST API: passed before and after'
-		);
+		expect( findingLists() ).toHaveLength( 0 );
 		const checked = await checkedRows( user );
 		expect( checked[ 'Homepage check' ] ).toBe( 'Could not be compared' );
 		expect(
 			impact().querySelector( 'dd[data-category="unavailable"]' )
 		).toHaveClass( 'text-amber-900' );
+		expect( await siteResults( user ) ).toEqual( {
+			Homepage: 'Not compared',
+			'WordPress REST API': 'Passed before and after',
+		} );
 	} );
 
 	it.each( [
@@ -454,19 +481,21 @@ describe( 'Site checks in Potential Impact', () => {
 			const user = userEvent.setup();
 			await renderReport( withSiteChecks( COMPLETED, name ) );
 
-			expect( siteSummary() ).toBe( 'Not compared' );
-			// Not compared is never "no findings" for site checks.
-			expect(
-				within( impact() ).getByText( 'Based on Net result' )
-			).toBeInTheDocument();
-			expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-				'No findings in the completed observations; not all site checks were compared.'
+			// Not compared is never "no findings" for website checks.
+			expect( resultPanel() ).toHaveTextContent( NOT_EVERYTHING );
+			expect( resultPanel() ).toHaveAttribute( 'data-tone', 'neutral' );
+			expect( notAssessed() ).toHaveTextContent(
+				/Website checks not compared: Homepage and REST API/
 			);
 			const checked = await checkedRows( user );
 			expect( checked[ 'Homepage check' ] ).toBe(
 				'Could not be compared'
 			);
 			expect( impact().textContent ).not.toMatch( /Passed at both/ );
+			expect( await siteResults( user ) ).toEqual( {
+				Homepage: 'Not compared',
+				'WordPress REST API': 'Not compared',
+			} );
 		}
 	);
 
@@ -475,36 +504,22 @@ describe( 'Site checks in Potential Impact', () => {
 		await renderReport( withSiteChecks( COMPLETED, 'disabled' ) );
 
 		// Off for this update: the result is complete, nothing is pending.
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			'No findings matched the completed observations.'
-		);
-		expect( summaryRow( 'Not assessed' ) ).toBeNull();
+		expect( resultPanel() ).toHaveAttribute( 'data-tone', 'positive' );
+		expect( notAssessed() ).toBeNull();
 		const checked = await checkedRows( user );
-		expect( checked[ 'Site checks' ] ).toBe(
-			'Not used · Site checks were disabled for this update.'
+		expect( checked[ 'Website checks' ] ).toBe(
+			'Not used · Website checks were disabled for this update.'
 		);
 		expect( checked[ 'Homepage check' ] ).toBeUndefined();
-		expect( impact().querySelector( 'details' ) ).not.toHaveTextContent(
-			'Site checks: a homepage'
-		);
-		expect(
-			within( impact() ).getByText( 'Based on Net result' )
-		).toBeInTheDocument();
+		expect( rules() ).not.toHaveTextContent( 'Website checks: a homepage' );
 	} );
 
 	it( 'homepage on another origin: not supported, quiet, never passed; REST still compared', async () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'home_cross_origin' ) );
 
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			'No findings matched the completed observations.'
-		);
-		expect( summaryRow( 'Not assessed' ) ).toBeNull();
-		expect(
-			within( impact() ).getByText(
-				'Based on Net result and site checks'
-			)
-		).toBeInTheDocument();
+		expect( resultPanel() ).toHaveTextContent( NOTHING_FLAGGED );
+		expect( notAssessed() ).toBeNull();
 		const checked = await checkedRows( user );
 		expect( checked[ 'Homepage check' ] ).toBe(
 			'Not supported on this site'
@@ -518,31 +533,26 @@ describe( 'Site checks in Potential Impact', () => {
 		expect( impact().textContent ).not.toMatch( FORBIDDEN );
 	} );
 
-	it( 'both on another origin: one quiet row, no warning, no site check patterns', async () => {
+	it( 'both on another origin: one quiet row, no warning, no website check patterns', async () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'both_cross_origin' ) );
 
-		expect( summaryRow( 'Not assessed' ) ).toBeNull();
-		expect(
-			within( impact() ).getByText( 'Based on Net result' )
-		).toBeInTheDocument();
+		expect( notAssessed() ).toBeNull();
 		const checked = await checkedRows( user );
-		expect( checked[ 'Site checks' ] ).toBe(
+		expect( checked[ 'Website checks' ] ).toBe(
 			'Not supported on this site · The homepage and the REST API are on a different address than wp-admin (another scheme, host or port), so the browser cannot check them from the update screens. They were not checked and are not counted as passed.'
 		);
 		expect( checked[ 'Homepage check' ] ).toBeUndefined();
-		expect( impact().querySelector( 'details' ) ).not.toHaveTextContent(
-			'Site checks: a homepage'
-		);
+		expect( rules() ).not.toHaveTextContent( 'Website checks: a homepage' );
 	} );
 
-	it( 'historical report without site check data: quiet, not a failure', async () => {
+	it( 'historical report without website check data: quiet, not a failure', async () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'historical' ) );
 
-		expect( summaryRow( 'Not assessed' ) ).toBeNull();
-		expect( ( await checkedRows( user ) )[ 'Site checks' ] ).toBe(
-			'Not recorded · This update was observed before UpdateLens recorded site checks.'
+		expect( notAssessed() ).toBeNull();
+		expect( ( await checkedRows( user ) )[ 'Website checks' ] ).toBe(
+			'Not recorded · This update was observed before UpdateLens recorded website checks.'
 		);
 		expect(
 			impact().querySelector( 'dd[data-category="not_applicable"]' )
@@ -553,39 +563,32 @@ describe( 'Site checks in Potential Impact', () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'one_unavailable' ) );
 
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			'No findings in the completed observations; not all site checks were compared.'
-		);
-		expect( siteSummary() ).toBe(
-			'1 of 2 comparedHomepage: passed before and after · REST API: not compared'
-		);
-		expect(
-			within( impact() ).getByText(
-				'Based on Net result and site checks'
-			)
-		).toBeInTheDocument();
+		expect( resultPanel() ).toHaveTextContent( NOT_EVERYTHING );
 		const checked = await checkedRows( user );
 		expect( checked[ 'Homepage check' ] ).toBe(
 			'Passed at both observation points'
 		);
 		expect( checked[ 'REST API check' ] ).toBe( 'Could not be compared' );
+		expect( await siteResults( user ) ).toEqual( {
+			Homepage: 'Passed before and after',
+			'WordPress REST API': 'Not compared',
+		} );
 	} );
 
-	it( 'pending AFTER results: still pending, never passed; refreshing is in the site checks section', async () => {
+	it( 'pending AFTER results: still pending, never passed; refreshing is in Website checks', async () => {
+		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'pending' ) );
 
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			'No findings yet — site checks are still pending.'
-		);
-		expect( siteSummary() ).toBe( 'Waiting for results' );
-		expect(
-			within( impact() ).getByText( 'Based on Net result' )
-		).toBeInTheDocument();
+		expect( resultPanel() ).toHaveTextContent( 'Nothing flagged so far' );
 		expect(
 			within( impact() ).queryByRole( 'button', {
 				name: 'Refresh results',
 			} )
 		).not.toBeInTheDocument();
+		expect( await siteResults( user ) ).toEqual( {
+			Homepage: 'Waiting',
+			'WordPress REST API': 'Waiting',
+		} );
 		expect(
 			within( siteSection() ).getByRole( 'button', {
 				name: 'Refresh results',
@@ -602,14 +605,20 @@ describe( 'Site checks in Potential Impact', () => {
 		expect( rowButton( rows()[ 0 ] ) ).toHaveAccessibleDescription(
 			'The REST API returned other output before its JSON twice after the update. Check whether the block editor works.'
 		);
-		expect( siteSummary() ).toBe(
-			'Newly failing: REST APIHomepage: waiting for results · REST API: newly failing'
-		);
 		expect(
 			within( impact() ).getByText(
-				'Based on Net result and site checks'
+				'Based on Net result and website checks'
 			)
 		).toBeInTheDocument();
+		// The other check is still on its way: said, never passed.
+		expect( impact() ).toHaveTextContent(
+			'The website checks after the update have not arrived yet'
+		);
+		const user = userEvent.setup();
+		expect( await siteResults( user ) ).toEqual( {
+			Homepage: 'Waiting',
+			'WordPress REST API': 'Newly failing',
+		} );
 	} );
 
 	it( 'stays the same in every phase and is not described as the Net result', async () => {
@@ -618,13 +627,15 @@ describe( 'Site checks in Potential Impact', () => {
 			phase: 'during_update',
 		} );
 
-		// Outside the phase tabs: no phase to explain away.
+		// No phase tabs here: no phase to explain away.
 		expect( within( impact() ).queryByRole( 'tabpanel' ) ).toBeNull();
 		await user.click( rowButton( rows()[ 0 ] ) );
 		const titles = rowTitles();
 
 		for ( const name of [ /^After update/, /^Net result/ ] ) {
+			await user.click( reportTab( 'Configuration changes' ) );
 			await user.click( tab( name ) );
+			await user.click( reportTab( 'Update results' ) );
 			expect( rowTitles() ).toEqual( titles );
 			// The expanded row stays expanded.
 			expect( rowButton( rows()[ 0 ] ) ).toHaveAttribute(
@@ -636,17 +647,15 @@ describe( 'Site checks in Potential Impact', () => {
 		expect( rows()[ 0 ].textContent ).not.toMatch( /Net result/ );
 	} );
 
-	it( 'puts site checks before Net result findings and keeps their links', async () => {
+	it( 'puts website checks before Net result findings and keeps their links', async () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( IMPACT, 'home_newly_failing' ) );
 
 		// Highest priority first: the confirmed failure, then the rules to review.
-		expect( summaryRow( 'Findings' ) ).toHaveTextContent(
-			/^Findings1 high priority5 need review/
-		);
-		expect( impact() ).toHaveTextContent(
-			'Site check results and changes in the Net result that are worth a closer look.'
-		);
+		expect( priorityGroups() ).toEqual( [
+			'High priority, 1',
+			'Needs review, 5',
+		] );
 		expect( rowTitles() ).toEqual( [
 			'Homepage check newly failing',
 			'Large autoloaded options',

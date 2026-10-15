@@ -18,9 +18,9 @@ When you update a single plugin from wp-admin, UpdateLens records the state befo
 * After update: from the end of the update to the follow-up. Other site activity can appear here.
 * Net result: before the update compared with the end of the observation.
 
-The UpdateLens menu lists analyzed updates in an Update History, with a count of new reports. Each report opens with an overview and has a detail page per signal.
+The UpdateLens menu lists analyzed updates in an Update History, with a count of new reports. Each report has three tabs: Update results (findings and anything that could not be assessed), Website checks and Configuration changes (Net result first, each source with its own detail page).
 
-Each report's Findings flag a few Net result patterns that need review: autoloaded options larger than 150,000 bytes that were added, became autoloaded or grew past that size, recurring WP-Cron events no longer observed and changed recurring schedules. Changes that match none of them are counted as informational. Findings are observations to review, not proof of a problem or conflict.
+Each report's Update results flag a few Net result patterns that need review: autoloaded options larger than 150,000 bytes that were added, became autoloaded or grew past that size, recurring WP-Cron events no longer observed and changed recurring schedules. Changes that match none of them are counted as informational. Findings are observations to review, not proof of a problem or conflict.
 
 Reports show observed changes, not proof of what the plugin caused. UpdateLens observes updates from the moment it is activated; earlier updates are never reconstructed.
 
@@ -32,31 +32,31 @@ Not analyzed: bulk updates of several plugins, automatic/background updates, WP-
 
 Known limitations: only options, WP-Cron and Action Scheduler are compared. WP-Cron and Action Scheduler arguments are hidden, so events or actions with the same hook can look alike. A one-time WP-Cron event that is no longer scheduled may have run or been unscheduled. Action Scheduler is compared as active state, not execution history: an action that is no longer active may have run or been canceled, and a short-lived action queued and completed between observations may not appear. Hook and group names do not prove which plugin caused an action.
 
-= Optional site checks =
+= Optional website checks =
 
-Site checks are off by default. To use them, open UpdateLens → Settings, select “Check site responses around plugin updates” and click Save settings. Clear it and save again to turn them off.
+Website checks are off by default. To use them, open UpdateLens → Settings, select “Check website responses around plugin updates” and click Save settings. Clear it and save again to turn them off.
 
 When they are on, your browser requests two addresses of your own site: the homepage as an anonymous visitor (without cookies) and the REST API endpoint `/wp/v2/users/me` as the signed-in administrator. A request that does not pass is repeated once. A check runs only when its address uses the same scheme, host and port as wp-admin.
 
-* Checks before an update run in the background on the Plugins and Updates screens while plugin updates are available. Turning site checks on does not test your site right away. On Installed Plugins, a short status next to the screen title says when they are ready to compare ("Ready to compare site responses"); ready means a comparison is possible, not that the checks will pass.
+* Checks before an update run in the background on the Plugins and Updates screens while plugin updates are available. Turning website checks on does not test your site right away. On Installed Plugins, a short status next to the screen title says when they are ready to compare ("Ready to compare website responses"); ready means a comparison is possible, not that the checks will pass.
 * Checks after an update run only after a successful Update now on Installed Plugins, in the same tab, and only for checks with a result from the last 10 minutes before the update. Keep that tab open for a few seconds after "Updated!". Other analyzed updates (for example from Dashboard → Updates, which says so) get no check after the update; their report says the checks could not be compared.
 
-Plugin updates never wait for a site check. Each report starts with a short summary of its findings, configuration changes, site checks and anything that could not be assessed, and shows the results in its own Site checks section: for the homepage and the REST API, whether they passed before and after the update, what changed, or why they could not be compared. A check that passed before the update and failed afterwards is a high-priority finding; a homepage that started to redirect needs review. Missing, inconclusive and unsupported checks are never counted as passed. Results are observations, not proof that the plugin caused a problem. Page caches, firewalls, login restrictions and maintenance mode can prevent a comparison. Site checks are not uptime monitoring.
+Plugin updates never wait for a website check. Each report shows the results in its Website checks tab: for the homepage and the REST API, the result before and after the update, what changed, or why they could not be compared. A check that passed before the update and failed afterwards is a high-priority finding; a homepage that started to redirect needs review. Missing, inconclusive and unsupported checks are never counted as passed. Results are observations, not proof that the plugin caused a problem. Page caches, firewalls, login restrictions and maintenance mode can prevent a comparison. Website checks are not uptime monitoring.
 
-Hosts can keep site checks off with `add_filter( 'updatelens_site_checks_enabled', '__return_false' );`. The filter cannot turn them on.
+Hosts can keep website checks off with `add_filter( 'updatelens_site_checks_enabled', '__return_false' );`. The filter cannot turn them on.
 
 = Privacy and stored data =
 
 UpdateLens keeps its data in your WordPress database. It has no telemetry and does not send monitoring data to UpdateLens or anyone else; the plugin itself makes no requests to other servers.
 
-Site check requests go from the administrator's browser to your own site. Your hosting, security, CDN or analytics tools may log them like any other visit, including the browser's IP address and user agent.
+Website check requests go from the administrator's browser to your own site. Your hosting, security, CDN or analytics tools may log them like any other visit, including the browser's IP address and user agent.
 
 What UpdateLens stores:
 
 * Update history (table `{prefix}updatelens_analyses`): per analyzed update the plugin's name, file and versions, times and status, the observed changes and the user ID of the administrator who ran it. Raw option values and WP-Cron or Action Scheduler arguments are never stored. They are compared through keyed fingerprints (HMAC-SHA256, keyed from your site's salts), which are kept only while an analysis is open. History is kept until you delete the plugin; there is no automatic expiry.
-* Site check results, in the history and as each administrator's latest earlier check (options `updatelens_site_check_baseline_…`): HTTP status, timing and verification facts, the administrator's user ID and keyed fingerprints of the checked address and of their login session. Never response bodies, cookies, headers, URLs or session tokens. Each is replaced by the next one; outdated ones are removed when new checks are saved, any others when the plugin is deleted.
-* Short-lived site check records: sessions (transients, 2 minutes), single-use claim records (`updatelens_site_check_claim_…`, about 10 minutes) and recent start times per administrator (user meta `updatelens_site_check_starts`).
-* An update activity record (`updatelens_update_activity`): a counter that every update run through WordPress's updater on a single site increases (plus a random token and start time while an update runs), including updates UpdateLens does not analyze and while site checks are off. It contains no user, plugin or package information.
+* Website check results, in the history and as each administrator's latest earlier check (options `updatelens_site_check_baseline_…`): HTTP status, timing and verification facts, the administrator's user ID and keyed fingerprints of the checked address and of their login session. Never response bodies, cookies, headers, URLs or session tokens. Each is replaced by the next one; outdated ones are removed when new checks are saved, any others when the plugin is deleted.
+* Short-lived website check records: sessions (transients, 2 minutes), single-use claim records (`updatelens_site_check_claim_…`, about 10 minutes) and recent start times per administrator (user meta `updatelens_site_check_starts`).
+* An update activity record (`updatelens_update_activity`): a counter that every update run through WordPress's updater on a single site increases (plus a random token and start time while an update runs), including updates UpdateLens does not analyze and while website checks are off. It contains no user, plugin or package information.
 * Settings and bookkeeping: `updatelens_site_checks`, `updatelens_db_version` (and `updatelens_db_upgrade_retry_at` while a database update keeps failing), `updatelens_monitoring_baseline` (when monitoring started and each plugin's name, file, version and active state then), `updatelens_unread_origin_id` and per administrator the user meta `updatelens_last_seen_analysis_id` (for the count of new reports).
 
 Deleting a WordPress user does not remove their user ID from UpdateLens's history.
@@ -72,7 +72,7 @@ The admin screen is a React app written in TypeScript. Its source ships in `src/
 1. In WordPress admin, go to Plugins → Add New and search for “UpdateLens”.
 2. Install and activate UpdateLens, then open UpdateLens from the admin menu.
 3. Update supported plugins one at a time and review the resulting reports.
-4. Optional: turn on site checks under UpdateLens → Settings.
+4. Optional: turn on website checks under UpdateLens → Settings.
 
 To install manually, go to Plugins → Add New → Upload Plugin, choose the UpdateLens ZIP file, then click Install Now and Activate.
 
@@ -92,6 +92,6 @@ No. They are compared through keyed fingerprints that are deleted when an analys
 * First public release.
 * Analyzes manual single-plugin updates from wp-admin before the update, right after it and once the updated code has run (During update, After update, Net result).
 * Compares options and autoload data, WP-Cron events and Action Scheduler actions.
-* Findings for a few Net result patterns and site check results, marked high priority or needs review; other changes are informational.
-* Optional homepage and REST API site checks around an Update now on the Plugins screen (off by default; UpdateLens → Settings).
-* Update History with a count of new reports, a report overview and a detail page per signal.
+* Findings for a few Net result patterns and website check results, marked high priority or needs review; other changes are informational.
+* Optional homepage and REST API website checks around an Update now on the Plugins screen (off by default; UpdateLens → Settings).
+* Update History with a count of new reports; reports with Update results, Website checks and Configuration changes tabs, and a detail page per signal.

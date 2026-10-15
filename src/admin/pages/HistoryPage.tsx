@@ -228,7 +228,7 @@ function HistoryRow( {
 						<PhaseChanges item={ item } />
 					</dd>
 					<dt className="mt-2 font-medium text-slate-600 sm:mt-0">
-						{ __( 'Site checks', 'updatelens' ) }
+						{ __( 'Website checks', 'updatelens' ) }
 					</dt>
 					<dd className="min-w-0">
 						<SiteChecksLine item={ item } />

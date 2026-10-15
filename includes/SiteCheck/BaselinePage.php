@@ -154,13 +154,13 @@ final class BaselinePage {
 	public static function status_labels() {
 		return array(
 			'prefix'         => __( 'UpdateLens:', 'updatelens' ),
-			'preparing'      => __( 'Preparing site checks…', 'updatelens' ),
-			'preparing_next' => __( 'Preparing site checks for another update…', 'updatelens' ),
-			'ready'          => __( 'Ready to compare site responses', 'updatelens' ),
+			'preparing'      => __( 'Preparing website checks…', 'updatelens' ),
+			'preparing_next' => __( 'Preparing website checks for another update…', 'updatelens' ),
+			'ready'          => __( 'Ready to compare website responses', 'updatelens' ),
 			'ready_home'     => __( 'Ready to compare the homepage only', 'updatelens' ),
 			'ready_rest'     => __( 'Ready to compare the REST API only', 'updatelens' ),
-			'unavailable'    => __( 'Site checks unavailable for now', 'updatelens' ),
-			'other_screen'   => __( 'Site responses are compared only for updates started with “Update now” on Installed Plugins, not from this screen.', 'updatelens' ),
+			'unavailable'    => __( 'Website checks unavailable for now', 'updatelens' ),
+			'other_screen'   => __( 'Website responses are compared only for updates started with “Update now” on Installed Plugins, not from this screen.', 'updatelens' ),
 			'plugins_link'   => __( 'Go to Installed Plugins', 'updatelens' ),
 		);
 	}

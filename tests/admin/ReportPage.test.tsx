@@ -33,7 +33,7 @@ vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
 
 /**
- * Opens a report's overview, or one signal's details.
+ * Opens a report's Configuration changes, or one signal's details.
  *
  * @param report Report served by the API (null: set up by the test).
  * @param signal Signal whose details are open.
@@ -42,7 +42,10 @@ function renderReport( report: AnalysisReport | null, signal?: Provider ) {
 	if ( report ) {
 		apiFetchMock.mockResolvedValue( report );
 	}
-	openReport( report?.id ?? 1, { signal } );
+	openReport(
+		report?.id ?? 1,
+		signal ? { signal } : { tab: 'configuration' }
+	);
 }
 
 const panel = phasePanel;
@@ -110,19 +113,19 @@ describe( 'ReportPage', () => {
 				'aria-selected',
 				'true'
 			);
-			// The phase tabs are the only tabs; they name the changes.
+			// The phase tabs name the changes; besides them only the
+			// report's own tabs.
 			expect( tabTexts() ).toEqual( [
+				'Net result, 11 changes',
 				'During update, 2 changes',
 				'After update, 11 changes',
-				'Net result, 11 changes',
 			] );
-			expect( screen.getAllByRole( 'tablist' ) ).toHaveLength( 1 );
-			expect( screen.getAllByRole( 'tabpanel' ) ).toHaveLength( 1 );
-
-			// Headline (the tab's total) and a plain summary.
 			expect(
-				within( panel() ).getByText( '11 observed changes' )
-			).toBeVisible();
+				screen
+					.getAllByRole( 'tablist' )
+					.map( ( list ) => list.getAttribute( 'aria-label' ) )
+			).toEqual( [ 'Report', 'Observation phases' ] );
+			expect( screen.getAllByRole( 'tabpanel' ) ).toHaveLength( 2 );
 			// The selected tab names the phase; its description is technical
 			// detail, not a second block in the summary.
 			expect( panel() ).not.toHaveTextContent( 'Observation period' );
@@ -131,27 +134,25 @@ describe( 'ReportPage', () => {
 				'Selected phaseNet result: Net difference between the state before the update and the end of the observation window.'
 			);
 
-			// One card per signal, in order, as links to their details.
+			// One row per signal, in order: a count badge, the counts, and
+			// a button that shows the changes in place.
 			expect( cardTexts() ).toEqual( [
-				'Options & autoload6 changes · Added 2 · Removed 1 · Changed 3',
-				'WP-Cron5 changes · Added 2 · No longer present 1 · Rescheduled 2',
+				'Options & autoload66 changes · Added 2 · Removed 1 · Changed 3',
+				'WP-Cron55 changes · Added 2 · No longer present 1 · Rescheduled 2',
 				'Action SchedulerNot available · Action Scheduler not detected',
 			] );
-			const options = screen.getByRole( 'link', {
+			const options = screen.getByRole( 'button', {
 				name: 'Options & autoload',
 			} );
-			expect( options ).toHaveAttribute(
-				'href',
-				'/wp-admin/admin.php?page=updatelens&analysis=1&signal=options'
-			);
+			expect( options ).toHaveAttribute( 'aria-expanded', 'false' );
 			expect( options ).toHaveAccessibleDescription(
 				'6 changes · Added 2 · Removed 1 · Changed 3'
 			);
 			expect(
-				screen.getByRole( 'heading', { level: 4, name: 'WP-Cron' } )
+				screen.getByRole( 'heading', { level: 4, name: /^WP-Cron/ } )
 			).toBeInTheDocument();
 
-			// No change rows, lists or site totals on the overview.
+			// No change rows, lists or site totals until a row is opened.
 			expect( document.body ).not.toHaveTextContent(
 				'recently_activated'
 			);
@@ -187,19 +188,12 @@ describe( 'ReportPage', () => {
 			expect( technicalDetails() ).toHaveTextContent(
 				'During update: Changes observed while WordPress was performing this plugin update.'
 			);
-			expect( panel() ).toHaveTextContent( '2 observed changes' );
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
 				'1 change · Added 1'
 			);
-			// The phase is in the URL (replacing the entry) and in the card links.
+			// The phase is in the URL (replacing the entry).
 			expect( window.location.search ).toBe(
-				'?page=updatelens&analysis=1&phase=during_update'
-			);
-			expect(
-				screen.getByRole( 'link', { name: 'WP-Cron' } )
-			).toHaveAttribute(
-				'href',
-				'/wp-admin/admin.php?page=updatelens&analysis=1&signal=cron&phase=during_update'
+				'?page=updatelens&analysis=1&phase=during_update&tab=configuration'
 			);
 
 			await user.keyboard( '{ArrowRight}' );
@@ -212,17 +206,23 @@ describe( 'ReportPage', () => {
 				'Other site activity may also contribute.'
 			);
 
+			// The order is Net result, During update, After update.
 			await user.keyboard( '{End}' );
-			expect( tab( /Net result/ ) ).toHaveAttribute(
+			expect( tab( /After update/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
 			);
 			await user.keyboard( '{ArrowRight}' );
-			expect( tab( /During update/ ) ).toHaveAttribute(
+			expect( tab( /Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
 			);
 			await user.keyboard( '{ArrowLeft}' );
+			expect( tab( /After update/ ) ).toHaveAttribute(
+				'aria-selected',
+				'true'
+			);
+			await user.keyboard( '{Home}' );
 			expect( tab( /Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
@@ -243,7 +243,7 @@ describe( 'ReportPage', () => {
 			expect( tab( /After update/ ) ).toHaveFocus();
 		} );
 
-		it( 'renders an expired report with During update selected', async () => {
+		it( 'renders an expired report with the Net result selected, not available', async () => {
 			renderReport( EXPIRED );
 			const user = userEvent.setup();
 
@@ -252,7 +252,8 @@ describe( 'ReportPage', () => {
 					'Partial report: the observation after the update expired'
 				)
 			).toBeInTheDocument();
-			expect( tab( /During update/ ) ).toHaveAttribute(
+			// Never switched to another phase by itself.
+			expect( tab( /Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
 			);
@@ -307,7 +308,7 @@ describe( 'ReportPage', () => {
 				1
 			);
 			expect(
-				screen.getByRole( 'region', { name: 'Site checks' } )
+				document.getElementById( 'updatelens-report-panel' )
 			).not.toHaveTextContent( /none arrived/ );
 
 			expect( explanation ).not.toBeVisible();
@@ -371,7 +372,9 @@ describe( 'ReportPage', () => {
 				screen.getByText( 'The plugin update failed.' )
 			).toBeInTheDocument();
 			expect( screen.getByText( 'Failed' ) ).toBeInTheDocument();
-			expect( screen.queryByRole( 'tablist' ) ).toBeNull();
+			expect(
+				screen.queryByRole( 'tablist', { name: 'Observation phases' } )
+			).toBeNull();
 			expect(
 				screen.queryByRole( 'list', { name: 'Signals' } )
 			).toBeNull();
@@ -405,7 +408,7 @@ describe( 'ReportPage', () => {
 				)
 			).toBeInTheDocument();
 			expect( screen.getByText( 'Incompatible' ) ).toBeInTheDocument();
-			expect( tab( /During update/ ) ).toHaveAttribute(
+			expect( tab( /Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
 			);
@@ -453,7 +456,7 @@ describe( 'ReportPage', () => {
 				await screen.findByText( 'Observing post-update activity…' )
 			).toBeInTheDocument();
 			expect( screen.getByText( 'Observing' ) ).toBeInTheDocument();
-			expect( tab( /During update/ ) ).toHaveAttribute(
+			expect( tab( /Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
 			);
@@ -523,9 +526,9 @@ describe( 'ReportPage', () => {
 
 			// Tabs count this signal only.
 			expect( tabTexts() ).toEqual( [
+				'Net result, 6 changes',
 				'During update, 1 change',
 				'After update, 7 changes',
-				'Net result, 6 changes',
 			] );
 			expect( panel() ).toHaveTextContent( '6 observed option changes' );
 

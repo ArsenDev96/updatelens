@@ -158,25 +158,37 @@ export function siteChecksGlance( report: AnalysisReport ): GlanceItem & {
  *                   (why is said once, in the status at the top);
  * - `not_recorded`: "Not recorded for this report: WP-Cron and Action Scheduler";
  * - `unavailable`:  each source with its reason's title;
- * - `not_compared`: "Site checks not compared: Homepage and REST API (no check
+ * - `not_compared`: "Website checks not compared: Homepage and REST API (no check
  *                   after the update)", the reasons themselves are in the
  *                   Site checks section.
  *
- * Site checks the summary's Site checks row already names as not compared
- * (siteChecksGlance(): its value or each check's state) are left out, so the
- * summary says it once; the API's entries are unchanged.
+ * Unless `siteChecks` is set, site checks a summary row already names as not
+ * compared (siteChecksGlance(): its value or each check's state) are left
+ * out, so it is said once; the API's entries are unchanged.
  *
  * Empty when everything applicable was assessed or is still being observed.
  *
- * @param report Report.
+ * @param report             Report.
+ * @param options            Options.
+ * @param options.siteChecks Whether every site check entry is listed (no
+ *                           other row names them).
+ * @param options.expired    Whether the expired line is listed (false where
+ *                           the report's status already explains it).
  */
-export function notAssessedLines( report: AnalysisReport ): string[] {
+export function notAssessedLines(
+	report: AnalysisReport,
+	{
+		siteChecks = false,
+		expired: listExpired = true,
+	}: { siteChecks?: boolean; expired?: boolean } = {}
+): string[] {
 	const evaluation =
 		report.site_checks === undefined
 			? undefined
 			: report.potential_impact.site_checks;
 	const entries = report.potential_impact.assessment.not_assessed.filter(
 		( entry ) =>
+			siteChecks ||
 			entry.type !== 'site_check' ||
 			evaluation === undefined ||
 			evaluation.status === 'not_applicable' ||
@@ -190,7 +202,7 @@ export function notAssessedLines( report: AnalysisReport ): string[] {
 		entries.filter( ( entry ) => entry.category === category );
 	const lines: string[] = [];
 
-	const expired = of( 'expired' );
+	const expired = listExpired ? of( 'expired' ) : [];
 	if ( expired.length > 0 ) {
 		// Configuration sources and site checks are listed apart (listText()
 		// takes at most three names).
@@ -272,7 +284,7 @@ export function notAssessedLines( report: AnalysisReport ): string[] {
 		lines.push(
 			sprintf(
 				/* translators: 1: checks, e.g. "Homepage and REST API". 2: why, e.g. "no check after the update". */
-				__( 'Site checks not compared: %1$s (%2$s)', 'updatelens' ),
+				__( 'Website checks not compared: %1$s (%2$s)', 'updatelens' ),
 				listText( checks ),
 				gap
 			)

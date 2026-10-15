@@ -1,4 +1,4 @@
-import { _n, __, sprintf } from '@wordpress/i18n';
+import { __, sprintf } from '@wordpress/i18n';
 import {
 	useCallback,
 	useEffect,
@@ -28,14 +28,17 @@ import { LoadError } from '../components/LoadError';
 import { PhaseTabs } from '../components/PhaseTabs';
 import {
 	DEFAULT_VISIBLE_FINDINGS,
-	PotentialImpact,
+	UpdateResults,
 } from '../components/PotentialImpact';
-import { ConfigurationChanges } from '../components/ReportOverview';
-import { ReportSummary } from '../components/ReportSummary';
-import { SiteResponseChecks } from '../components/SiteResponseChecks';
+import { ConfigurationChanges, RulesLine } from '../components/ReportOverview';
+import {
+	SiteCheckArrival,
+	SiteResponseChecks,
+} from '../components/SiteResponseChecks';
 import { SignalDetail } from '../components/SignalDetail';
 import { SummaryExtraProvider } from '../components/SignalParts';
 import { StatusBadge } from '../components/StatusBadge';
+import { Tabs } from '../components/Tabs';
 import { Versions } from '../components/Versions';
 import { Icon, type IconName } from '../components/Icon';
 import {
@@ -69,7 +72,13 @@ import {
 	type Tone,
 } from '../utils/labels';
 import { pluginName } from '../utils/plugin';
-import type { ReportRoute, Route, RouteItem } from '../utils/route';
+import {
+	reportTab,
+	type ReportRoute,
+	type ReportTab,
+	type Route,
+	type RouteItem,
+} from '../utils/route';
 import {
 	siteCheckButtonId,
 	siteCheckFindingButtonId,
@@ -235,15 +244,11 @@ function Report( {
 		() => reportChangeCounts( report.phases ),
 		[ report.phases ]
 	);
-	// The default phase is the report's, so overview and details agree. It
-	// is kept once shown: a background update never switches the phase.
+	// The default phase is the report's (the Net result), so overview and
+	// details agree and a background update never switches it. A phase the
+	// user chose is in the URL.
 	const initial = defaultPhase( report.phases, counts );
-	const [ shown, setShown ] = useState( initial );
-	if ( shown === null && initial !== null ) {
-		setShown( initial );
-	}
-	const selected =
-		initial === null ? null : ( route.phase ?? shown ?? initial );
+	const selected = initial === null ? null : ( route.phase ?? initial );
 	const { signal } = route;
 
 	// A located item (from a Potential Impact link) applies to the Net result
@@ -251,14 +256,31 @@ function Report( {
 	const item =
 		signal !== null && selected === 'final' ? ( route.item ?? null ) : null;
 
-	// Expanded Potential Impact groups survive a visit to a signal page.
+	// Expanded findings, website checks and configuration sources survive a
+	// visit to a signal page and a change of tab.
 	const [ impactView, setImpactView ] = useState( COLLAPSED_IMPACT_VIEW );
-	// The finding last opened from the overview (its index): back on the
-	// overview, focus returns to its link instead of the title.
-	const returnTo = useRef< number | null >( null );
-	// Site response checks and their Potential Impact findings link to each
-	// other: the target is expanded and receives focus.
-	const expand = ( key: string, visible: number, focus: string ) => {
+	// The link last opened from the overview (a finding's or a source's, as
+	// a selector): back on the overview, focus returns to it instead of the
+	// title.
+	const returnTo = useRef< string | null >( null );
+	const tab = reportTab( route );
+	const selectTab = ( next: ReportTab ) =>
+		onNavigate( at( { tab: next } ), true );
+	// Opens another tab and moves focus to its title.
+	const showTab = ( next: ReportTab ) => {
+		selectTab( next );
+		focusSoon( TAB_TITLES[ next ] );
+	};
+	// Website checks and their findings in Update results link to each
+	// other: the target's tab opens, the target is expanded and receives
+	// focus.
+	const expand = (
+		target: ReportTab,
+		key: string,
+		visible: number,
+		focus: string
+	) => {
+		selectTab( target );
 		if ( impactView.open[ key ] === undefined ) {
 			setImpactView( {
 				...impactView,
@@ -268,9 +290,15 @@ function Report( {
 		focusSoon( focus );
 	};
 	const showSiteCheck = ( check: SiteCheckId ) =>
-		expand( siteCheckViewKey( check ), 1, siteCheckButtonId( check ) );
+		expand(
+			'checks',
+			siteCheckViewKey( check ),
+			1,
+			siteCheckButtonId( check )
+		);
 	const showSiteFinding = ( check: SiteCheckId ) =>
 		expand(
+			'results',
 			`site_check:${ check }`,
 			DEFAULT_VISIBLE_FINDINGS,
 			siteCheckFindingButtonId( check )
@@ -283,9 +311,7 @@ function Report( {
 		if ( signal === null && returnTo.current !== null ) {
 			const link = heading.current
 				?.closest( 'article' )
-				?.querySelector< HTMLElement >(
-					`[data-updatelens-finding="${ returnTo.current }"]`
-				);
+				?.querySelector< HTMLElement >( returnTo.current );
 			returnTo.current = null;
 			if ( link ) {
 				link.focus( { preventScroll: true } );
@@ -314,6 +340,9 @@ function Report( {
 		at( {
 			signal: finding.signal,
 			phase: 'final',
+			// Deep links stay free of the tab; the signal page's breadcrumb
+			// returns to Update results.
+			tab: null,
 			item: {
 				name: findingSubject( finding ),
 				group:
@@ -328,6 +357,11 @@ function Report( {
 			},
 		} );
 
+	// A source's signal page from Configuration changes: the selected phase
+	// (as in the URL), and back to that tab.
+	const signalRoute = ( provider: Provider ): ReportRoute =>
+		at( { signal: provider, item: null, tab: 'configuration' } );
+
 	if ( signal !== null ) {
 		return (
 			<RefinedSignalView
@@ -338,7 +372,13 @@ function Report( {
 				heading={ heading }
 				item={ item }
 				historyRoute={ { view: 'history', page: route.page } }
-				overviewRoute={ at( { signal: null, item: null } ) }
+				// Back to the tab it was opened from: Configuration changes
+				// for its source links, Update results for finding links.
+				overviewRoute={ at( {
+					signal: null,
+					item: null,
+					tab: route.tab ?? 'results',
+				} ) }
 				href={ href }
 				onNavigate={ onNavigate }
 				onSelectPhase={ selectPhase }
@@ -353,9 +393,10 @@ function Report( {
 	return (
 		<article
 			aria-labelledby="updatelens-report-title"
-			className="space-y-6"
+			className="space-y-5"
 		>
 			<ReportHeader report={ report } heading={ heading } />
+			{ /* The analysis status applies to every tab: above them, only while open or not fully completed. */ }
 			{ showStatus && (
 				<StatusLine
 					notice={ notice }
@@ -363,57 +404,65 @@ function Report( {
 					onFocus={ onStatusFocus }
 				/>
 			) }
-			<ReportSummary
-				report={ report }
-				counts={ counts }
-				onShowFindings={ () => focusSoon( 'updatelens-impact-title' ) }
-				onShowConfiguration={ () =>
-					focusSoon( 'updatelens-configuration-title' )
-				}
-				onShowSiteChecks={ () =>
-					focusSoon( 'updatelens-site-checks-title' )
-				}
-			/>
-			{ /* Findings: the Net result and the site checks, whatever phase is selected below; none without any phase (a failed update). */ }
-			{ selected && (
-				<PotentialImpact
-					impact={ report.potential_impact }
-					siteChecks={ report.site_checks }
-					onShowSiteCheck={ showSiteCheck }
-					windowSeconds={ report.observation_window_seconds }
-					findingHref={ ( finding ) =>
-						href( findingRoute( finding ) )
-					}
-					onOpenFinding={ ( finding ) => {
-						returnTo.current =
-							report.potential_impact.findings.indexOf( finding );
-						onNavigate( findingRoute( finding ) );
-					} }
-					view={ impactView }
-					onViewChange={ setImpactView }
-				/>
-			) }
-			{ /* Its own evidence, the same whatever phase is selected below. */ }
-			<SiteResponseChecks
-				siteChecks={ report.site_checks }
-				impact={ report.potential_impact.site_checks }
-				pendingRefresh={ pendingRefresh }
-				view={ impactView }
-				onViewChange={ setImpactView }
-				onShowFinding={ showSiteFinding }
-			/>
-			<ConfigurationChanges
-				report={ report }
-				counts={ counts }
-				selected={ selected }
-				onSelectPhase={ selectPhase }
-				signalHref={ ( provider: Provider ) =>
-					href( at( { signal: provider } ) )
-				}
-				onOpenSignal={ ( provider: Provider ) =>
-					onNavigate( at( { signal: provider } ) )
-				}
-			/>
+			<div className="rounded-xl border bg-card shadow-surface">
+				<Tabs
+					variant="primary"
+					items={ reportTabItems() }
+					selected={ tab }
+					onSelect={ selectTab }
+					label={ __( 'Report', 'updatelens' ) }
+					idPrefix="updatelens-report-tab"
+					panelId="updatelens-report-panel"
+					panelClassName="px-4 py-5 sm:p-6"
+				>
+					{ tab === 'results' && (
+						<UpdateResults
+							report={ report }
+							findingHref={ ( finding ) =>
+								href( findingRoute( finding ) )
+							}
+							onOpenFinding={ ( finding ) => {
+								returnTo.current = `[data-updatelens-finding="${ report.potential_impact.findings.indexOf(
+									finding
+								) }"]`;
+								onNavigate( findingRoute( finding ) );
+							} }
+							view={ impactView }
+							onViewChange={ setImpactView }
+							onShowSiteCheck={ showSiteCheck }
+							onShowTab={ showTab }
+						/>
+					) }
+					{ tab === 'checks' && (
+						<SiteResponseChecks
+							siteChecks={ report.site_checks }
+							impact={ report.potential_impact.site_checks }
+							pendingRefresh={ pendingRefresh }
+							view={ impactView }
+							onViewChange={ setImpactView }
+							onShowFinding={ showSiteFinding }
+						/>
+					) }
+					{ tab === 'configuration' && (
+						<ConfigurationChanges
+							report={ report }
+							counts={ counts }
+							selected={ selected }
+							onSelectPhase={ selectPhase }
+							view={ impactView }
+							onViewChange={ setImpactView }
+							signalHref={ ( provider ) =>
+								href( signalRoute( provider ) )
+							}
+							onOpenSignal={ ( provider ) => {
+								returnTo.current = `[data-updatelens-signal-link="${ provider }"]`;
+								onNavigate( signalRoute( provider ) );
+							} }
+						/>
+					) }
+				</Tabs>
+			</div>
+			<SiteCheckArrival siteChecks={ report.site_checks } />
 			<TechnicalDetails
 				report={ report }
 				signal={ null }
@@ -619,88 +668,6 @@ function RefinedSignalView( {
 				/>
 			</article>
 		</div>
-	);
-}
-
-/**
- * Whether review rules matched this signal's changes, in one quiet line
- * above them (only with changes). On the Net result the numbers are the
- * API's (`assessment.net_result`): the records findings cover, which are
- * marked on their rows, and the rest, which are informational. Other phases
- * are never checked by the rules. Never "safe": no rule matching does not
- * show that a change had no effect.
- *
- * @param props        Props.
- * @param props.report Report.
- * @param props.signal Signal of the page.
- * @param props.phase  Selected phase.
- * @param props.count  Changes of the signal in the phase, null if unavailable.
- */
-function RulesLine( {
-	report,
-	signal,
-	phase,
-	count,
-}: {
-	report: AnalysisReport;
-	signal: Provider;
-	phase: PhaseKey;
-	count: number | null;
-} ) {
-	if ( count === null || count === 0 ) {
-		return null;
-	}
-	const records = report.potential_impact.assessment.net_result[ signal ];
-	let text: string;
-	if ( phase !== 'final' ) {
-		text = __(
-			'Review rules are checked on the Net result only, not on this phase.',
-			'updatelens'
-		);
-	} else if ( records === null ) {
-		text = __(
-			'Review rules could not be checked for these changes.',
-			'updatelens'
-		);
-	} else if ( records.matched > 0 ) {
-		const marked = records.matched;
-		const others = records.informational;
-		text = sprintf(
-			/* translators: %s: number of changes a review rule matched. */
-			_n(
-				'Review rules matched %s change; it is marked below.',
-				'Review rules matched %s changes; they are marked below.',
-				marked,
-				'updatelens'
-			),
-			formatCount( marked )
-		);
-		if ( others > 0 ) {
-			text += ` ${ sprintf(
-				/* translators: %s: number of changes no review rule matched. */
-				_n(
-					'%s other change matched no rule (informational).',
-					'%s other changes matched no rule (informational).',
-					others,
-					'updatelens'
-				),
-				formatCount( others )
-			) }`;
-		}
-	} else {
-		text = __(
-			'No review rule matched these changes (informational). That does not show they had no effect.',
-			'updatelens'
-		);
-	}
-	return (
-		<p className="flex gap-2 text-[13px] leading-5 text-slate-600">
-			<Icon
-				name="info"
-				className="mt-0.5 size-4 shrink-0 text-slate-500"
-			/>
-			<span>{ text }</span>
-		</p>
 	);
 }
 
@@ -968,6 +935,40 @@ function focusSoon( id: string ) {
 	}, 0 );
 }
 
+/**
+ * The report's tabs, in order.
+ */
+function reportTabItems(): Array< {
+	key: ReportTab;
+	label: string;
+	icon: IconName;
+} > {
+	return [
+		{
+			key: 'results',
+			label: __( 'Update results', 'updatelens' ),
+			icon: 'results',
+		},
+		{
+			key: 'checks',
+			label: __( 'Website checks', 'updatelens' ),
+			icon: 'globe',
+		},
+		{
+			key: 'configuration',
+			label: __( 'Configuration changes', 'updatelens' ),
+			icon: 'sliders',
+		},
+	];
+}
+
+/** Where focus moves when a link opens a tab: its title, or the tab. */
+const TAB_TITLES: Record< ReportTab, string > = {
+	results: 'updatelens-report-tab-results',
+	checks: 'updatelens-site-checks-title',
+	configuration: 'updatelens-configuration-title',
+};
+
 const TONE_ICON_NAME: Record< Tone, IconName > = {
 	neutral: 'info',
 	positive: 'check',
@@ -1150,13 +1151,9 @@ function ReportSkeleton() {
 			</span>
 			<Skeleton className="h-8 w-64" />
 			<Skeleton className="h-4 w-40" />
-			<Skeleton className="h-11 w-full max-w-md rounded-xl" />
+			<Skeleton className="h-12 w-full rounded-xl" />
 			<Skeleton className="h-44 w-full rounded-xl" />
-			<div className="grid gap-4 md:grid-cols-3">
-				{ [ 0, 1, 2 ].map( ( n ) => (
-					<Skeleton key={ n } className="h-44 rounded-xl" />
-				) ) }
-			</div>
+			<Skeleton className="h-24 w-full rounded-xl" />
 		</div>
 	);
 }

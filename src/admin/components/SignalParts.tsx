@@ -3,6 +3,7 @@ import { createContext, Fragment, useContext, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
+import { useEmbedded } from '../utils/embedded';
 import { locatedPrecision, useLocated, useMatched } from '../utils/highlight';
 import { findingTitle, priorityLabel } from '../utils/impact';
 import { Icon, type IconName } from './Icon';
@@ -319,6 +320,16 @@ export function SignalSummary( {
 	note?: string;
 } ) {
 	const extra = useContext( SummaryExtra );
+	const embedded = useEmbedded();
+	if ( embedded ) {
+		// The row above names the signal and its counts.
+		return extra || note ? (
+			<div className="space-y-2">
+				{ extra }
+				{ note && <SignalNote>{ note }</SignalNote> }
+			</div>
+		) : null;
+	}
 	return (
 		<section
 			aria-labelledby={ id }
@@ -389,14 +400,15 @@ export function SignalTotals( {
 	label: string;
 	items: Array< [ string, string, string, string ] >;
 } ) {
+	const Heading = useEmbedded() ? 'h5' : 'h3';
 	return (
 		<section
 			aria-labelledby={ id }
 			className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t pt-3 text-[13px] leading-5 text-muted-foreground"
 		>
-			<h3 id={ id } className="font-medium text-slate-600">
+			<Heading id={ id } className="font-medium text-slate-600">
 				{ __( 'Site totals', 'updatelens' ) }
-			</h3>
+			</Heading>
 			<dl aria-label={ label } className="flex flex-wrap gap-x-4 gap-y-1">
 				{ items.map( ( [ name, before, after, delta ] ) => (
 					<div key={ name } className="flex gap-1.5">

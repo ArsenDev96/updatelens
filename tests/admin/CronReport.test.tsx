@@ -32,14 +32,14 @@ const apiFetchMock = vi.mocked( apiFetch );
  * Opens a report on the WP-Cron page (or another view).
  *
  * @param report Report served by the API.
- * @param signal Signal page; null for the overview.
+ * @param signal Signal page; null for the overview's Configuration changes.
  */
 function renderReport(
 	report: AnalysisReport,
 	signal: Provider | null = 'cron'
 ) {
 	apiFetchMock.mockResolvedValue( report );
-	openReport( report.id, { signal: signal ?? undefined } );
+	openReport( report.id, signal ? { signal } : { tab: 'configuration' } );
 }
 
 /** The selected phase of the WP-Cron page. */
@@ -59,34 +59,33 @@ describe( 'WP-Cron in reports', () => {
 		apiFetchMock.mockReset();
 	} );
 
-	it( 'gives every signal its own page instead of signal tabs', async () => {
+	it( 'gives every signal its own row instead of signal tabs', async () => {
 		renderReport( COMPLETED, null );
 		const user = userEvent.setup();
 
 		await screen.findAllByRole( 'tablist' );
-		// The phase selector is the only tab list.
+		// The report's tabs and the phases; no signal tabs.
 		expect(
 			screen
 				.getAllByRole( 'tablist' )
 				.map( ( list ) => list.getAttribute( 'aria-label' ) )
-		).toEqual( [ 'Observation phases' ] );
+		).toEqual( [ 'Report', 'Observation phases' ] );
 		expect( screen.queryByRole( 'tab', { name: /^WP-Cron/ } ) ).toBeNull();
 
-		// One card per signal, in order, each linking to its page.
-		const links = within(
-			screen.getByRole( 'list', { name: 'Signals' } )
-		).getAllByRole( 'link' );
+		// One row per signal, in order; those with changes open in place.
 		expect(
-			links.map( ( link ) =>
-				new URLSearchParams(
-					link.getAttribute( 'href' )!.split( '?' )[ 1 ]
-				).get( 'signal' )
-			)
-		).toEqual( [ 'options', 'cron', 'action_scheduler' ] );
-		expect( cardTexts()[ 1 ] ).toBe(
-			'WP-Cron5 changes · Added 2 · No longer present 1 · Rescheduled 2'
+			within( screen.getByRole( 'list', { name: 'Signals' } ) )
+				.getAllByRole( 'button' )
+				.map( ( button ) => button.textContent )
+		).toEqual( [ 'Options & autoload', 'WP-Cron' ] );
+		// A source without changes has nothing to open.
+		expect( signalCard( 'Action Scheduler' ) ).not.toContainElement(
+			within( signalCard( 'Action Scheduler' ) ).queryByRole( 'button' )
 		);
-		// No rows of any signal on the overview.
+		expect( cardTexts()[ 1 ] ).toBe(
+			'WP-Cron55 changes · Added 2 · No longer present 1 · Rescheduled 2'
+		);
+		// No rows of any signal until one is opened.
 		expect( document.body ).not.toHaveTextContent(
 			'ul_fixture_task_1.5.0'
 		);
@@ -100,14 +99,17 @@ describe( 'WP-Cron in reports', () => {
 		);
 		expect( tab( /After update/ ) ).toHaveFocus();
 
-		// The WP-Cron page shows WP-Cron only.
-		await user.click( screen.getByRole( 'link', { name: 'WP-Cron' } ) );
-		// …in the phase chosen on the overview.
+		// WP-Cron opens in place, in the chosen phase, and shows WP-Cron only.
+		const cron = screen.getByRole( 'button', { name: 'WP-Cron' } );
+		await user.click( cron );
+		expect( cron ).toHaveAttribute( 'aria-expanded', 'true' );
 		expect( tab( /After update/ ) ).toHaveAttribute(
 			'aria-selected',
 			'true'
 		);
-		expect( signalPanel() ).toHaveTextContent( 'ul_fixture_task_1.5.0' );
+		expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
+			'ul_fixture_task_1.5.0'
+		);
 		expect( document.body ).not.toHaveTextContent( 'Total option data' );
 	} );
 

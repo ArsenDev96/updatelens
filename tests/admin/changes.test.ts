@@ -117,26 +117,25 @@ describe( 'default phase', () => {
 		expect( defaultPhase( WORDFENCE.phases ) ).toBe( 'final' );
 	} );
 
-	it( 'does not open an empty Net result when another phase has changes', () => {
+	it( 'opens an empty Net result even when another phase has changes', () => {
 		// Changes during and after the update cancel out in Net result.
-		expect( defaultPhase( CANCELLED.phases ) ).toBe( 'post_update' );
+		expect( defaultPhase( CANCELLED.phases ) ).toBe( 'final' );
 		const duringOnly = {
 			...RANK_MATH.phases,
 			during_update: CANCELLED.phases.during_update,
 		};
-		expect( defaultPhase( duringOnly ) ).toBe( 'during_update' );
+		expect( defaultPhase( duringOnly ) ).toBe( 'final' );
 	} );
 
-	it( 'falls back to available phases when nothing changed', () => {
+	it( 'opens the Net result when it is not available, unless no phase is', () => {
 		expect( defaultPhase( RANK_MATH.phases ) ).toBe( 'final' );
-		// Net and After unavailable: During update, even without changes.
 		expect(
 			defaultPhase( {
 				during_update: RANK_MATH.phases.during_update,
 				post_update: EXPIRED.phases.post_update,
 				final: EXPIRED.phases.final,
 			} )
-		).toBe( 'during_update' );
+		).toBe( 'final' );
 		expect( defaultPhase( FAILED.phases ) ).toBeNull();
 	} );
 } );

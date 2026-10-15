@@ -40,14 +40,14 @@ vi.mock( '@wordpress/api-fetch', () => ( { default: vi.fn() } ) );
 const apiFetchMock = vi.mocked( apiFetch );
 
 /**
- * Opens a report's overview, or one signal's details.
+ * Opens a report's Configuration changes, or one signal's details.
  *
  * @param report Report served by the API.
  * @param signal Signal whose details are open.
  */
 function renderReport( report: AnalysisReport, signal?: Provider ) {
 	apiFetchMock.mockResolvedValue( report );
-	openReport( report.id, { signal } );
+	openReport( report.id, signal ? { signal } : { tab: 'configuration' } );
 	return screen.findAllByRole( 'tablist' );
 }
 
@@ -59,11 +59,14 @@ const tabNames = ( list: string ) =>
 const signalPanel = phasePanel;
 const section = ( name: string | RegExp ) =>
 	within( signalPanel() ).getByRole( 'region', { name } );
-/** The state line of each overview card, in signal order. */
+/** The state of each source row, in signal order. */
 const cardStates = () =>
 	within( screen.getByRole( 'list', { name: 'Signals' } ) )
 		.getAllByRole( 'listitem' )
-		.map( ( card ) => card.querySelector( 'p > span' )!.textContent );
+		.filter( ( card ) => card.hasAttribute( 'data-signal' ) )
+		.map( ( card ) =>
+			card.querySelector( 'p > span' )!.textContent!.replace( / ·$/, '' )
+		);
 
 /**
  * A report whose Net result Options phase has `n` changed options.
@@ -96,15 +99,14 @@ describe( 'report clarity', () => {
 			await renderReport( COMPLETED );
 
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'Net result, 11 changes',
 				'During update, 2 changes',
 				'After update, 11 changes',
-				'Net result, 11 changes',
 			] );
 			// Phase indicators name the changes; the phase total is the sum of the signals.
 			expect( tab( /^Net result/ ) ).toHaveTextContent(
 				/^Net result, 11 changes$/
 			);
-			expect( phasePanel() ).toHaveTextContent( '11 observed changes' );
 			expect( cardStates() ).toEqual( [
 				'6 changes',
 				'5 changes',
@@ -116,9 +118,9 @@ describe( 'report clarity', () => {
 			await renderReport( ELEMENTOR );
 
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'Net result, 5 changes',
 				'During update, 0 changes',
 				'After update, 5 changes',
-				'Net result, 5 changes',
 			] );
 			expect( cardStates() ).toEqual( [
 				'5 changes',
@@ -130,7 +132,7 @@ describe( 'report clarity', () => {
 			);
 		} );
 
-		it( 'shows WP-Cron-only changes and opens them on the WP-Cron page', async () => {
+		it( 'shows WP-Cron-only changes and opens them in place', async () => {
 			await renderReport( CRON_CHANGES_ONLY );
 			const user = userEvent.setup();
 
@@ -141,17 +143,21 @@ describe( 'report clarity', () => {
 			] );
 			expect( phasePanel() ).not.toHaveTextContent( 'cron_only_once' );
 
-			await user.click( screen.getByRole( 'link', { name: 'WP-Cron' } ) );
-			expect( signalPanel() ).toHaveTextContent( 'cron_only_once' );
+			await user.click(
+				screen.getByRole( 'button', { name: 'WP-Cron' } )
+			);
+			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
+				'cron_only_once'
+			);
 		} );
 
 		it( 'shows zero changes everywhere (Rank Math style)', async () => {
 			await renderReport( RANK_MATH );
 
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'Net result, 0 changes',
 				'During update, 0 changes',
 				'After update, 0 changes',
-				'Net result, 0 changes',
 			] );
 		} );
 
@@ -179,9 +185,9 @@ describe( 'report clarity', () => {
 			await renderReport( EXPIRED );
 
 			expect( tabNames( 'Observation phases' ) ).toEqual( [
+				'Net result, Not available',
 				'During update, 2 changes',
 				'After update, Not available',
-				'Net result, Not available',
 			] );
 		} );
 	} );
@@ -198,19 +204,24 @@ describe( 'report clarity', () => {
 			}
 		} );
 
-		it( 'opens the phase with changes instead of an empty Net result', async () => {
+		it( 'opens the Net result even when it is empty; the other phases count on their tabs', async () => {
 			await renderReport( CANCELLED );
 
-			expect( tab( /^After update/ ) ).toHaveAttribute(
+			expect( tab( /^Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
+			);
+			expect( tab( /^After update/ ) ).not.toHaveTextContent(
+				/^After updates*0 changes$/
 			);
 			cleanup();
+			const user = userEvent.setup();
 			await renderReport( CANCELLED, 'options' );
-			expect( tab( /^After update/ ) ).toHaveAttribute(
+			expect( tab( /^Net result/ ) ).toHaveAttribute(
 				'aria-selected',
 				'true'
 			);
+			await user.click( tab( /^After update/ ) );
 			expect( signalPanel() ).toHaveTextContent(
 				'jetpack_waf_needs_update'
 			);
@@ -221,9 +232,8 @@ describe( 'report clarity', () => {
 		it( 'is compact for a report without any change', async () => {
 			await renderReport( RANK_MATH );
 
-			expect( phasePanel() ).toHaveTextContent(
-				'No tracked changes observed during this phase.'
-			);
+			// Each row says it once; no total repeats it.
+			expect( phasePanel() ).not.toHaveTextContent( /observed changes?/ );
 			expect( cardStates() ).toEqual( [
 				'No changes',
 				'No changes',
@@ -231,7 +241,7 @@ describe( 'report clarity', () => {
 			] );
 			// No breakdowns on cards without changes.
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
-				/^Options & autoloadNo changes$/
+				/^Options & autoloadNo changesOpen page$/
 			);
 		} );
 
@@ -279,7 +289,7 @@ describe( 'report clarity', () => {
 				'No tracked changes observed'
 			);
 			expect( signalCard( 'WP-Cron' ) ).toHaveTextContent(
-				/^WP-CronNo changes$/
+				/^WP-CronNo changesOpen page$/
 			);
 			expect( signalCard( 'Options & autoload' ) ).toHaveTextContent(
 				'5 changes'

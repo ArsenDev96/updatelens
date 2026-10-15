@@ -53,7 +53,7 @@ export function SettingsPage() {
 				</h2>
 				<p className="text-sm text-muted-foreground">
 					{ __(
-						'Update analysis needs no setup. Site checks are optional.',
+						'Update analysis needs no setup. Website checks are optional.',
 						'updatelens'
 					) }
 				</p>
@@ -155,7 +155,7 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 						id={ `${ id }-title` }
 						className="text-base font-semibold"
 					>
-						{ __( 'Site checks', 'updatelens' ) }
+						{ __( 'Website checks', 'updatelens' ) }
 					</h3>
 					<StateBadge settings={ saved } />
 				</div>
@@ -185,7 +185,7 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 							className="block text-sm font-medium leading-5"
 						>
 							{ __(
-								'Check site responses around plugin updates',
+								'Check website responses around plugin updates',
 								'updatelens'
 							) }
 						</label>
@@ -194,7 +194,7 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 							className="text-[13px] leading-5 text-slate-600"
 						>
 							{ __(
-								'Compare your homepage and WordPress REST API responses before and after a plugin update. Each report shows the results in its “Site response checks” section.',
+								'Compare your homepage and WordPress REST API responses before and after a plugin update. Each report shows the results in its “Website checks” tab.',
 								'updatelens'
 							) }
 						</p>
@@ -210,7 +210,7 @@ function SiteChecksSection( { initial }: { initial: SiteCheckSettings } ) {
 						>
 							<li>
 								{ __(
-									'Open Installed Plugins and wait until UpdateLens shows “Ready to compare site responses”.',
+									'Open Installed Plugins and wait until UpdateLens shows “Ready to compare website responses”.',
 									'updatelens'
 								) }
 							</li>
@@ -341,7 +341,7 @@ function RestrictionNote( { enabled }: { enabled: boolean } ) {
 				<Icon name="info" className="mt-px size-4 text-slate-500" />
 				<p className="min-w-0">
 					{ __(
-						"This site's configuration also keeps site checks off, so turning them on here would have no effect until that changes.",
+						"This site's configuration also keeps website checks off, so turning them on here would have no effect until that changes.",
 						'updatelens'
 					) }{ ' ' }
 					{ __( 'Set by the filter:', 'updatelens' ) } { filter }
@@ -356,7 +356,7 @@ function RestrictionNote( { enabled }: { enabled: boolean } ) {
 			<div className="min-w-0 space-y-1">
 				<p>
 					{ __(
-						"Your saved setting is on, but this site's configuration keeps site checks off, so none run. The saved setting applies if that configuration changes.",
+						"Your saved setting is on, but this site's configuration keeps website checks off, so none run. The saved setting applies if that configuration changes.",
 						'updatelens'
 					) }
 				</p>
@@ -376,17 +376,17 @@ function RestrictionNote( { enabled }: { enabled: boolean } ) {
  */
 function SavedMessage( { settings }: { settings: SiteCheckSettings } ) {
 	let text: string = __(
-		'Settings saved. Site checks are off. Existing reports keep their site check results.',
+		'Settings saved. Website checks are off. Existing reports keep their website check results.',
 		'updatelens'
 	);
 	if ( settings.enabled && settings.restriction !== null ) {
 		text = __(
-			"Settings saved. Site checks stay off because of this site's configuration.",
+			"Settings saved. Website checks stay off because of this site's configuration.",
 			'updatelens'
 		);
 	} else if ( settings.effective ) {
 		text = __(
-			'Settings saved. Site checks are on. They start the next time Plugins or Updates is opened while plugin updates are available.',
+			'Settings saved. Website checks are on. They start the next time Plugins or Updates is opened while plugin updates are available.',
 			'updatelens'
 		);
 	}
@@ -459,7 +459,7 @@ function HowItWorks( {
 					name="chevron-down"
 					className="size-4 -rotate-90 text-slate-500 transition-transform group-open:rotate-0"
 				/>
-				{ __( 'How site checks work', 'updatelens' ) }
+				{ __( 'How website checks work', 'updatelens' ) }
 			</summary>
 			<div className="mt-3 grid gap-5 pb-2 text-[13px] leading-5 text-slate-700 md:grid-cols-3 md:gap-6">
 				<HowGroup title={ __( 'What is checked', 'updatelens' ) }>
@@ -491,7 +491,7 @@ function HowItWorks( {
 				<HowGroup title={ __( 'When checks run', 'updatelens' ) }>
 					<li>
 						{ __(
-							'Before an update: in the background while an administrator who can update plugins has Installed Plugins or Dashboard → Updates open and plugin updates are available. Turning site checks on does not test your site right away.',
+							'Before an update: in the background while an administrator who can update plugins has Installed Plugins or Dashboard → Updates open and plugin updates are available. Turning website checks on does not test your site right away.',
 							'updatelens'
 						) }
 					</li>
@@ -509,7 +509,7 @@ function HowItWorks( {
 					</li>
 					<li>
 						{ __(
-							'“Ready to compare” means a comparison is possible, not that the checks will pass. Plugin updates never wait for a site check.',
+							'“Ready to compare” means a comparison is possible, not that the checks will pass. Plugin updates never wait for a website check.',
 							'updatelens'
 						) }
 					</li>
@@ -547,7 +547,7 @@ function HowItWorks( {
 					</li>
 					<li>
 						{ __(
-							"Site checks don't test your whole site and are not uptime monitoring.",
+							"Website checks don't test your whole site and are not uptime monitoring.",
 							'updatelens'
 						) }
 					</li>

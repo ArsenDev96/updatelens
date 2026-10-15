@@ -233,7 +233,7 @@ describe( 'HistoryPage', () => {
 		[ 'both_cross_origin', 'unsupported', 'Not supported on this site' ],
 		[ 'historical', 'not_recorded', 'Not recorded for this update' ],
 	] as Array< [ keyof typeof cases.cases, string, string ] > )(
-		'%s: site checks have their own line, apart from the status badge',
+		'%s: website checks have their own line, apart from the status badge',
 		async ( name, kind, text ) => {
 			const evaluation = cases.cases[ name ]
 				.potential_impact_site_checks as SiteCheckImpact;
@@ -254,7 +254,7 @@ describe( 'HistoryPage', () => {
 			expect( line ).toHaveAttribute( 'data-outcome', kind );
 			expect( line.textContent ).toBe( text );
 			// Labelled apart from the configuration phases.
-			const label = within( link ).getByText( 'Site checks' );
+			const label = within( link ).getByText( 'Website checks' );
 			expect( label.tagName ).toBe( 'DT' );
 			expect( label.nextElementSibling ).toContainElement(
 				line as HTMLElement
@@ -296,7 +296,7 @@ describe( 'HistoryPage', () => {
 		);
 	} );
 
-	it( 'an older API without site checks reads as not recorded', async () => {
+	it( 'an older API without website checks reads as not recorded', async () => {
 		const { site_checks: omitted, ...older } = historyItem( COMPLETED );
 		void omitted;
 		apiFetchMock.mockResolvedValue( listResponse( [ older ] ) );

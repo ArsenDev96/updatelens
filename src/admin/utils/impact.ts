@@ -720,7 +720,7 @@ export function impactDescription(
 			}
 		case 'waiting':
 			return __(
-				'Potential Impact checks the Net result, which is available once the post-update observation has been captured. Refresh the report later to see it.',
+				'Review rules check the Net result, which is available once the post-update observation has been captured. Refresh the report later to see it.',
 				'updatelens'
 			);
 		case 'expired':
@@ -732,7 +732,7 @@ export function impactDescription(
 		case 'unavailable':
 			return sprintf(
 				/* translators: %s: why the Net result is unavailable, e.g. "Not available because the plugin update failed." */
-				__( 'Potential Impact needs the Net result. %s', 'updatelens' ),
+				__( 'Review rules need the Net result. %s', 'updatelens' ),
 				impactSignalReason(
 					'options',
 					impact.signals.options.reason,

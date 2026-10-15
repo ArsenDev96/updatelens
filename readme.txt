@@ -20,7 +20,7 @@ When you update a single plugin from wp-admin, UpdateLens records the state befo
 
 The UpdateLens menu lists analyzed updates in an Update History, with a count of new reports. Each report opens with an overview and has a detail page per signal.
 
-Potential Impact flags a few Net result patterns worth a look: autoloaded options larger than 150,000 bytes that were added, became autoloaded or grew past that size, recurring WP-Cron events no longer observed and changed recurring schedules. Findings are observations to review, not proof of a problem or conflict.
+Each report's Findings flag a few Net result patterns that need review: autoloaded options larger than 150,000 bytes that were added, became autoloaded or grew past that size, recurring WP-Cron events no longer observed and changed recurring schedules. Changes that match none of them are counted as informational. Findings are observations to review, not proof of a problem or conflict.
 
 Reports show observed changes, not proof of what the plugin caused. UpdateLens observes updates from the moment it is activated; earlier updates are never reconstructed.
 
@@ -41,7 +41,7 @@ When they are on, your browser requests two addresses of your own site: the home
 * Checks before an update run in the background on the Plugins and Updates screens while plugin updates are available. Turning site checks on does not test your site right away. On Installed Plugins, a short status next to the screen title says when they are ready to compare ("Ready to compare site responses"); ready means a comparison is possible, not that the checks will pass.
 * Checks after an update run only after a successful Update now on Installed Plugins, in the same tab, and only for checks with a result from the last 10 minutes before the update. Keep that tab open for a few seconds after "Updated!". Other analyzed updates (for example from Dashboard → Updates, which says so) get no check after the update; their report says the checks could not be compared.
 
-Plugin updates never wait for a site check. Each report starts with a short summary of configuration changes, site response checks and observation coverage, and shows the results in its own Site response checks section: for the homepage and the REST API, whether they passed before and after the update, what changed, or why they could not be compared. Potential Impact lists a check that passed before the update and failed or started to redirect afterwards. Missing, inconclusive and unsupported checks are never counted as passed. Results are observations, not proof that the plugin caused a problem. Page caches, firewalls, login restrictions and maintenance mode can prevent a comparison. Site checks are not uptime monitoring.
+Plugin updates never wait for a site check. Each report starts with a short summary of its findings, configuration changes, site checks and anything that could not be assessed, and shows the results in its own Site checks section: for the homepage and the REST API, whether they passed before and after the update, what changed, or why they could not be compared. A check that passed before the update and failed afterwards is a high-priority finding; a homepage that started to redirect needs review. Missing, inconclusive and unsupported checks are never counted as passed. Results are observations, not proof that the plugin caused a problem. Page caches, firewalls, login restrictions and maintenance mode can prevent a comparison. Site checks are not uptime monitoring.
 
 Hosts can keep site checks off with `add_filter( 'updatelens_site_checks_enabled', '__return_false' );`. The filter cannot turn them on.
 
@@ -92,6 +92,6 @@ No. They are compared through keyed fingerprints that are deleted when an analys
 * First public release.
 * Analyzes manual single-plugin updates from wp-admin before the update, right after it and once the updated code has run (During update, After update, Net result).
 * Compares options and autoload data, WP-Cron events and Action Scheduler actions.
-* Potential Impact findings for a few Net result patterns.
+* Findings for a few Net result patterns and site check results, marked high priority or needs review; other changes are informational.
 * Optional homepage and REST API site checks around an Update now on the Plugins screen (off by default; UpdateLens → Settings).
 * Update History with a count of new reports, a report overview and a detail page per signal.

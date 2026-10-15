@@ -1,8 +1,8 @@
 # WIP checkpoint: Site Checks investigation and report UX
 
-Branch `wip/site-checks-report-ux`, based on `main` at `9ef346d` (UpdateLens 0.3.0, schema 7). Work in progress: **not reviewed, not approved, not for release.** UpdateLens 0.3.0 is not approved for WordPress.org submission.
+Branch `wip/site-checks-report-ux`, based on `main` at `9ef346d` (UpdateLens 0.3.0, schema 7). **Approved on 2026-10-15 after the final visual review and merged into `main`** (merge `2140d70`). UpdateLens 0.3.0 still needs the owner's approval of the rebuilt release ZIP before WordPress.org submission.
 
-Constraints that still apply: no version bump, no schema change (still 7), no release tag, no submission, the validated release ZIP (`release/updatelens-0.3.0.zip`, SHA-256 `18b19d34…936a`, built from `9ef346d`) is untouched and does **not** contain this work.
+The release ZIP validated before this work (built from `9ef346d`, SHA-256 `18b19d34…936a`) is kept as a backup outside the repository. It does **not** contain this work; the 0.3.0 ZIP is rebuilt from `main`. Still no version bump, schema change (7), release tag or submission.
 
 ## 1. Missing AFTER site checks: root cause
 

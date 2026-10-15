@@ -417,7 +417,7 @@ describe( 'Potential Impact', () => {
 			'true'
 		);
 		const located = screen.getByRole( 'region', {
-			name: 'Located from Potential Impact',
+			name: 'Located from Findings',
 		} );
 		expect( located ).toHaveTextContent(
 			'Showing the Net result with the entry of this finding highlighted: acme_sync_feeds'
@@ -496,7 +496,7 @@ describe( 'Potential Impact', () => {
 		expect( rows[ 0 ] ).not.toHaveTextContent( 'From Findings' );
 		expect(
 			screen.getByRole( 'region', {
-				name: 'Located from Potential Impact',
+				name: 'Located from Findings',
 			} )
 		).toHaveTextContent(
 			'This link no longer matches a finding of the report'
@@ -586,7 +586,7 @@ describe( 'Potential Impact', () => {
 			} ) );
 		const notice = () =>
 			screen.getByRole( 'region', {
-				name: 'Located from Potential Impact',
+				name: 'Located from Findings',
 			} );
 
 		it( 'highlights only the changed entry the finding describes', async () => {

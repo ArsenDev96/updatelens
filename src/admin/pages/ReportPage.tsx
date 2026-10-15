@@ -763,7 +763,7 @@ function LocatedItem( {
 
 	return (
 		<section
-			aria-label={ __( 'Located from Potential Impact', 'updatelens' ) }
+			aria-label={ __( 'Located from Findings', 'updatelens' ) }
 			data-precision={ precision }
 			className={ cn(
 				'flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-3 text-sm',

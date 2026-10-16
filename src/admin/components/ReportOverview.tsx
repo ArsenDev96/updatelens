@@ -90,11 +90,11 @@ export function ConfigurationChanges( {
 			<h3
 				id="updatelens-configuration-title"
 				tabIndex={ -1 }
-				className="text-lg font-semibold text-slate-900 focus:outline-none"
+				className="text-xl font-semibold tracking-tight text-slate-950 focus:outline-none"
 			>
 				{ __( 'Configuration changes', 'updatelens' ) }
 			</h3>
-			<p className="mt-0.5 max-w-2xl text-sm leading-6 text-muted-foreground">
+			<p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
 				{ __(
 					'Changes observed around the update, by source. Observed changes are not proof that the updated plugin made them.',
 					'updatelens'
@@ -156,7 +156,7 @@ function NoPhases( {
 } ) {
 	const coverage = coverageLine( report, counts );
 	return (
-		<p className="flex gap-2 text-[13px] leading-5 text-slate-600">
+		<p className="flex gap-2 text-[13px] leading-5 text-slate-700">
 			<Icon
 				name={ coverage.icon }
 				className={ cn(
@@ -222,7 +222,7 @@ function PhaseSources( {
 			) }
 			<ul
 				aria-label={ __( 'Signals', 'updatelens' ) }
-				className="space-y-2"
+				className="space-y-3"
 			>
 				{ PROVIDERS.map( ( provider ) => (
 					<SourceRow
@@ -310,29 +310,29 @@ function SourceRow( {
 		<li
 			data-signal={ provider }
 			className={ cn(
-				'overflow-hidden rounded-lg border bg-card transition-colors',
-				hasChanges && ! open && 'hover:border-slate-300',
-				open && 'border-slate-300'
+				'overflow-hidden rounded-lg border bg-card shadow-surface transition-colors',
+				hasChanges && ! open && 'hover:border-slate-400',
+				open && 'border-slate-400'
 			) }
 		>
 			<div
 				className={ cn(
 					'relative flex items-center gap-3 px-3 py-3 sm:gap-4 sm:px-4',
-					hasChanges && ! open && 'hover:bg-slate-50/60'
+					hasChanges && ! open && 'hover:bg-slate-50'
 				) }
 			>
 				<span
 					className={ cn(
 						'grid size-10 shrink-0 place-items-center rounded-lg',
 						hasChanges
-							? 'bg-tint text-primary'
-							: 'bg-slate-100 text-slate-500'
+							? 'bg-tint-strong text-primary'
+							: 'bg-slate-100 text-slate-600'
 					) }
 				>
 					<Icon name={ provider } />
 				</span>
 				<div className="min-w-0 flex-1">
-					<h4 className="flex flex-wrap items-center gap-x-2 text-sm font-semibold leading-6 text-slate-900">
+					<h4 className="flex flex-wrap items-center gap-x-2 text-[15px] font-semibold leading-6 text-slate-950">
 						{ hasChanges ? (
 							<button
 								type="button"
@@ -358,13 +358,13 @@ function SourceRow( {
 					</h4>
 					<p
 						id={ statusId }
-						className="text-[13px] leading-5 text-slate-600"
+						className="text-[13px] leading-5 text-slate-700"
 					>
 						<span
 							className={ cn(
 								hasChanges
 									? 'sr-only'
-									: 'tabular-nums text-slate-700'
+									: 'tabular-nums text-slate-800'
 							) }
 						>
 							{ signalStatusText( count ) }
@@ -376,7 +376,7 @@ function SourceRow( {
 							<Fragment key={ label }>
 								{ index > 0 && ' · ' }
 								{ label }{ ' ' }
-								<span className="tabular-nums text-slate-800">
+								<span className="font-semibold tabular-nums text-slate-900">
 									{ formatCount( value ) }
 								</span>
 							</Fragment>
@@ -411,7 +411,7 @@ function SourceRow( {
 					<Icon
 						name="chevron-down"
 						className={ cn(
-							'size-4 text-slate-500 transition-transform',
+							'size-4 text-slate-600 transition-transform',
 							open && 'rotate-180'
 						) }
 					/>
@@ -420,7 +420,7 @@ function SourceRow( {
 			{ hasChanges && (
 				<div id={ panelId } hidden={ ! open }>
 					{ open && (
-						<div className="border-t bg-slate-50/40 px-3 py-4 sm:px-4">
+						<div className="border-t bg-slate-50 px-3 py-4 sm:px-4">
 							<SourceChanges
 								report={ report }
 								provider={ provider }
@@ -559,10 +559,10 @@ export function RulesLine( {
 		);
 	}
 	return (
-		<p className="flex gap-2 text-[13px] leading-5 text-slate-600">
+		<p className="flex gap-2 text-[13px] leading-5 text-slate-700">
 			<Icon
 				name="info"
-				className="mt-0.5 size-4 shrink-0 text-slate-500"
+				className="mt-0.5 size-4 shrink-0 text-slate-600"
 			/>
 			<span>{ text }</span>
 		</p>

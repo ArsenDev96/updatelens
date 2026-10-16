@@ -164,13 +164,13 @@ export function SiteResponseChecks( {
 					id="updatelens-site-checks-title"
 					ref={ title }
 					tabIndex={ -1 }
-					className="text-lg font-semibold text-slate-900 focus:outline-none"
+					className="text-xl font-semibold tracking-tight text-slate-950 focus:outline-none"
 				>
 					{ __( 'Website checks', 'updatelens' ) }
 				</h3>
 				{ /* Only for checks that ran: not for turned off, unsupported or unrecorded ones. */ }
 				{ ! unused && (
-					<p className="mt-0.5 text-sm leading-6 text-muted-foreground">
+					<p className="mt-1 text-sm leading-6 text-muted-foreground">
 						{ __(
 							'Compare your homepage and WordPress REST API responses around this update. Results are shown only for checks that actually ran. They do not test every page or feature.',
 							'updatelens'
@@ -179,10 +179,10 @@ export function SiteResponseChecks( {
 				) }
 			</div>
 			{ unused ? (
-				<p className="flex max-w-3xl gap-2 text-sm leading-relaxed text-slate-600">
+				<p className="flex max-w-3xl gap-2 text-sm leading-relaxed text-slate-700">
 					<Icon
 						name="info"
-						className="mt-0.5 size-4 text-slate-500"
+						className="mt-0.5 size-4 text-slate-600"
 					/>
 					<span>
 						{ unused.text }
@@ -238,7 +238,7 @@ export function SiteResponseChecks( {
 						) }
 					<ul
 						aria-label={ __( 'Checks', 'updatelens' ) }
-						className="space-y-2"
+						className="space-y-3"
 					>
 						{ checks.map( ( { check, comparison, text } ) => (
 							<CheckRow
@@ -277,10 +277,10 @@ export function SiteResponseChecks( {
 						) ) }
 					</ul>
 					{ ! shared && nextTime.length > 0 && (
-						<div className="flex max-w-3xl gap-2 text-[13px] leading-5 text-slate-700">
+						<div className="flex max-w-3xl gap-2 text-[13px] leading-5 text-slate-800">
 							<Icon
 								name="info"
-								className="mt-0.5 size-4 shrink-0 text-slate-500"
+								className="mt-0.5 size-4 shrink-0 text-slate-600"
 							/>
 							<div className="space-y-1">
 								{ nextTime.map( ( sentence ) => (
@@ -323,7 +323,7 @@ export function SiteCheckArrival( {
 
 /** Classes of a callout per tone. */
 const CALLOUT: Partial< Record< Tone, string > > = {
-	caution: 'border-amber-200 bg-amber-50/80',
+	caution: 'border-amber-300 bg-amber-50',
 	progress: 'border-tint-border bg-tint',
 };
 
@@ -348,14 +348,14 @@ function Callout( {
 		<div
 			className={ cn(
 				'flex gap-3 rounded-lg border px-4 py-3',
-				CALLOUT[ tone ] ?? 'border-slate-200 bg-slate-50'
+				CALLOUT[ tone ] ?? 'border-slate-300 bg-slate-50'
 			) }
 		>
 			<Icon
 				name={ tone === 'progress' ? 'progress' : 'caution' }
 				className={ cn( 'mt-0.5', TONE_ICON[ tone ] ) }
 			/>
-			<div className="min-w-0 space-y-1 text-[13px] leading-5 text-slate-700">
+			<div className="min-w-0 space-y-1 text-[13px] leading-5 text-slate-800">
 				<p className="text-sm font-semibold text-slate-900">
 					{ title }
 				</p>
@@ -386,7 +386,7 @@ function PendingRefreshLine( {
 	return (
 		<p
 			onFocus={ onFocus }
-			className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-5 text-slate-600"
+			className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] leading-5 text-slate-700"
 		>
 			{ /* Polite: a failed read or a stopped run is said when it happens. */ }
 			<span aria-live="polite">
@@ -501,29 +501,29 @@ function CheckRow( {
 	const id = useId();
 	const statusId = `${ id }-status`;
 	const panelId = `${ id }-panel`;
-	const label = 'text-muted-foreground md:text-xs md:leading-5';
+	const label = 'font-medium text-muted-foreground md:text-xs md:leading-5';
 
 	return (
 		<li
 			data-check={ check }
 			data-state={ comparison.state }
 			className={ cn(
-				'overflow-hidden rounded-lg border bg-card transition-colors',
-				expanded ? 'border-slate-300' : 'hover:border-slate-300'
+				'overflow-hidden rounded-lg border bg-card shadow-surface transition-colors',
+				expanded ? 'border-slate-400' : 'hover:border-slate-400'
 			) }
 		>
 			<div
 				className={ cn(
 					'relative grid grid-cols-[minmax(0,1fr)_1.25rem] items-center gap-x-4 gap-y-3 px-3 py-3 sm:px-4 md:grid-cols-[minmax(11rem,1fr)_minmax(0,2.6fr)_1.25rem]',
-					! expanded && 'hover:bg-slate-50/60'
+					! expanded && 'hover:bg-slate-50'
 				) }
 			>
 				<div className="flex min-w-0 items-center gap-3">
-					<span className="grid size-10 shrink-0 place-items-center rounded-lg bg-tint text-primary">
+					<span className="grid size-10 shrink-0 place-items-center rounded-lg bg-tint-strong text-primary">
 						<Icon name={ CHECK_ICON[ check ] } />
 					</span>
 					<div className="min-w-0">
-						<h4 className="text-sm font-semibold leading-5 text-slate-900">
+						<h4 className="text-[15px] font-semibold leading-5 text-slate-950">
 							<button
 								type="button"
 								id={ siteCheckButtonId( check ) }
@@ -543,7 +543,7 @@ function CheckRow( {
 				</div>
 				<span
 					aria-hidden="true"
-					className="col-start-2 row-start-1 text-slate-500 md:col-start-3"
+					className="col-start-2 row-start-1 text-slate-600 md:col-start-3"
 				>
 					<Icon
 						name="chevron-down"
@@ -569,7 +569,7 @@ function CheckRow( {
 							/>
 							<Icon
 								name="arrow-right"
-								className="ml-auto hidden size-4 text-slate-400 md:block"
+								className="ml-auto hidden size-4 text-slate-500 md:block"
 							/>
 						</dd>
 					</div>
@@ -602,7 +602,7 @@ function CheckRow( {
 				{ ( text.detail || nextStep ) && (
 					<div className="col-span-2 space-y-1 text-[13px] leading-5 md:col-span-1 md:col-start-2">
 						{ text.detail && (
-							<p className="text-slate-600">{ text.detail }</p>
+							<p className="text-slate-700">{ text.detail }</p>
 						) }
 						{ nextStep && (
 							// Above the row's stretched toggle, so it can be clicked.
@@ -625,7 +625,7 @@ function CheckRow( {
 			</div>
 			<div id={ panelId } hidden={ ! expanded }>
 				{ expanded && (
-					<div className="border-t bg-slate-50/50 p-3 sm:p-4">
+					<div className="border-t bg-slate-50 p-3 sm:p-4">
 						{ /* The status only when it says more than the result above. */ }
 						{ text.status !== result && (
 							<p className="mb-2 text-[13px] font-medium leading-5 text-slate-800">
@@ -648,7 +648,7 @@ function CheckRow( {
 								reason={ reason }
 							/>
 						</div>
-						<p className="mt-3 max-w-3xl text-[13px] leading-5 text-slate-600">
+						<p className="mt-3 max-w-3xl text-[13px] leading-5 text-slate-700">
 							{ siteCheckReadingNote( check ) }
 						</p>
 					</div>
@@ -660,12 +660,12 @@ function CheckRow( {
 
 /** Pill classes per verdict, and for a side without a result. */
 const PILL = {
-	pass: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
-	fail: 'bg-rose-50 text-rose-800 ring-rose-200',
-	redirect: 'bg-amber-50 text-amber-900 ring-amber-200',
-	inconclusive: 'bg-slate-100 text-slate-700 ring-slate-200',
+	pass: 'bg-emerald-50 text-emerald-800 ring-emerald-300',
+	fail: 'bg-rose-50 text-rose-800 ring-rose-300',
+	redirect: 'bg-amber-50 text-amber-900 ring-amber-300',
+	inconclusive: 'bg-slate-100 text-slate-800 ring-slate-300',
 	waiting: 'bg-tint text-tint-foreground ring-tint-border',
-	missing: 'bg-slate-100 text-slate-600 ring-slate-200',
+	missing: 'bg-slate-100 text-slate-700 ring-slate-300',
 };
 
 /**
@@ -697,7 +697,7 @@ function SideCell( {
 					{ verdict }
 				</span>{ ' ' }
 				{ detail && (
-					<span className="tabular-nums text-slate-600">
+					<span className="tabular-nums text-slate-700">
 						{ detail }
 					</span>
 				) }
@@ -788,7 +788,7 @@ function SideView( {
 	}
 
 	return (
-		<div className="min-w-0 rounded-lg bg-card px-3 py-2.5 ring-1 ring-inset ring-slate-200/70">
+		<div className="min-w-0 rounded-lg bg-card px-3 py-2.5 ring-1 ring-inset ring-slate-300">
 			<h5 className="text-[13px] font-semibold leading-5 text-slate-900">
 				{ purpose === 'before'
 					? __( 'Before update', 'updatelens' )

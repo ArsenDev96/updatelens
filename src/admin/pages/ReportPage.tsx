@@ -404,7 +404,7 @@ function Report( {
 					onFocus={ onStatusFocus }
 				/>
 			) }
-			<div className="rounded-xl border bg-card shadow-surface">
+			<div className="rounded-xl border border-slate-300 bg-card shadow-surface">
 				<Tabs
 					variant="primary"
 					items={ reportTabItems() }
@@ -836,7 +836,7 @@ function StatusLine( {
 		<section
 			aria-label={ __( 'Analysis status', 'updatelens' ) }
 			onFocus={ onFocus }
-			className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border bg-card/70 px-4 py-3"
+			className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border bg-card px-4 py-3 shadow-surface"
 		>
 			<div className="flex min-w-0 flex-1 basis-64 gap-3">
 				<Icon
@@ -847,7 +847,7 @@ function StatusLine( {
 					<p className="font-semibold text-slate-900">
 						{ notice.title }
 					</p>
-					<p className="leading-relaxed text-muted-foreground">
+					<p className="leading-relaxed text-slate-700">
 						<span>{ notice.description }</span>
 						{ notice.details.map( ( detail ) => (
 							<span key={ detail }> { detail }</span>
@@ -1080,11 +1080,11 @@ function TechnicalDetails( {
 	}
 
 	return (
-		<details className="group rounded-xl border bg-card/70 text-sm">
-			<summary className="flex cursor-pointer select-none list-none items-center gap-2 rounded-xl px-4 py-3 font-medium text-slate-600 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+		<details className="group rounded-xl border bg-card text-sm shadow-surface">
+			<summary className="flex cursor-pointer select-none list-none items-center gap-2 rounded-xl px-4 py-3 font-semibold text-slate-700 transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
 				<Icon
 					name="chevron-down"
-					className="size-4 -rotate-90 text-slate-400 transition-transform duration-150 group-open:rotate-0"
+					className="size-4 -rotate-90 text-slate-500 transition-transform duration-150 group-open:rotate-0"
 				/>
 				{ __( 'Technical details', 'updatelens' ) }
 			</summary>
@@ -1124,7 +1124,7 @@ function TechnicalRows( {
 			{ plain.map( ( [ label, text ] ) => (
 				<div key={ label } className="contents">
 					<dt className="text-muted-foreground">{ label }</dt>
-					<dd className="leading-5 text-slate-700">{ text }</dd>
+					<dd className="leading-5 text-slate-800">{ text }</dd>
 				</div>
 			) ) }
 			{ rows.map( ( [ label, value, iso ] ) => (

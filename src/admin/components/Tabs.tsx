@@ -41,23 +41,27 @@ interface TabsProps< K extends string > {
 }
 
 /*
- * Segmented: the selected tab is a white segment with dark text on a light
- * track; labels and counts stack on phones. Primary: an underlined tab bar
- * with an icon per tab; the selected tab is blue with a blue rule. On phones
- * the three tabs share the width, icons above their labels.
+ * Segmented: the selected tab is a raised white segment with dark text on a
+ * gray track; labels and counts stack on phones. Primary: a tab bar on a
+ * light strip with an icon per tab; the selected tab is white, blue, with a
+ * thick blue rule, so it reads as the open page. On phones the three tabs
+ * share the width, icons above their labels. Every label is semibold, so
+ * selecting a tab never changes the widths.
  */
 const TAB = {
 	segmented: {
-		list: 'grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1 ring-1 ring-inset ring-slate-200 sm:inline-grid sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none',
-		tab: 'flex min-h-10 flex-col items-center justify-center gap-1 rounded-md px-2 py-1.5 text-center text-sm font-medium leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 sm:flex-row sm:gap-2 sm:px-4',
-		selected: 'bg-card text-slate-900 shadow-sm ring-1 ring-slate-200',
-		idle: 'text-slate-600 hover:bg-white/60 hover:text-foreground',
+		list: 'grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1 ring-1 ring-inset ring-slate-300/80 sm:inline-grid sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none',
+		tab: 'flex min-h-10 flex-col items-center justify-center gap-1 rounded-md px-2 py-1.5 text-center text-sm font-semibold leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 sm:flex-row sm:gap-2 sm:px-4',
+		selected:
+			'bg-card text-slate-950 shadow-[0_1px_3px_0_rgb(15_23_42/0.16)] ring-1 ring-slate-300',
+		idle: 'text-slate-700 hover:bg-white/70 hover:text-slate-950',
 	},
 	primary: {
-		list: 'grid grid-cols-3 border-b px-1 sm:flex sm:gap-1 sm:px-3',
-		tab: '-mb-px flex min-h-12 flex-col items-center justify-center gap-1 rounded-t-md border-b-2 px-1.5 py-2 text-center text-[13px] font-medium leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:flex-row sm:gap-2 sm:px-4 sm:py-3 sm:text-sm',
-		selected: 'border-primary text-primary',
-		idle: 'border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900',
+		list: 'grid grid-cols-3 rounded-t-[calc(0.75rem-1px)] border-b bg-slate-50 px-1 pt-1 sm:flex sm:gap-1 sm:px-3 sm:pt-1.5',
+		tab: '-mb-px flex min-h-12 flex-col items-center justify-center gap-1 rounded-t-md border-b-[3px] px-1.5 py-2 text-center text-[13px] font-semibold leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:flex-row sm:gap-2 sm:px-4 sm:py-3 sm:text-sm',
+		selected:
+			'border-primary bg-card text-primary shadow-[0_-1px_0_0_hsl(var(--border)),1px_0_0_0_hsl(var(--border)),-1px_0_0_0_hsl(var(--border))]',
+		idle: 'border-transparent text-slate-700 hover:border-slate-400 hover:bg-white/70 hover:text-slate-950',
 	},
 };
 
@@ -77,11 +81,11 @@ function indicatorClassName(
 		isSelected &&
 			( tone === 'changes'
 				? 'bg-tint-strong font-semibold text-tint-foreground'
-				: 'font-normal text-slate-600' ),
+				: 'font-medium text-slate-700' ),
 		! isSelected &&
 			( tone === 'changes'
 				? 'bg-tint-strong font-semibold text-tint-foreground'
-				: 'font-normal text-muted-foreground' )
+				: 'font-medium text-muted-foreground' )
 	);
 }
 
@@ -168,7 +172,7 @@ export function Tabs< K extends string >( {
 									'size-[1.125rem]',
 									isSelected
 										? 'text-primary'
-										: 'text-slate-500'
+										: 'text-slate-600'
 								) }
 							/>
 						) }

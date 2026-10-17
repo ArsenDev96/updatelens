@@ -252,6 +252,74 @@ describe( 'Report tabs', () => {
 		).toHaveAttribute( 'aria-expanded', 'true' );
 		expect( links()[ 1 ] ).toHaveFocus();
 	} );
+
+	it( 'Configuration changes: expanded sources give their regions distinct names', async () => {
+		const user = userEvent.setup();
+		apiFetchMock.mockResolvedValue( IMPACT );
+		openReport( IMPACT.id, { tab: 'configuration' } );
+		await screen.findByRole( 'heading', { level: 2 } );
+		const sources = within(
+			screen.getByRole( 'list', { name: 'Signals' } )
+		).getAllByRole( 'button', { expanded: false } );
+		expect( sources ).toHaveLength( 3 );
+		for ( const source of sources ) {
+			await user.click( source );
+		}
+
+		// Landmarks need distinct names (axe landmark-unique): with every source
+		// open, "Changed (1)" and "Site totals" would otherwise repeat. Lists are
+		// named with their source; totals by their source-specific label, under
+		// the same visible "Site totals" heading.
+		const regions = within( reportPanel() )
+			.getAllByRole( 'region' )
+			.map(
+				( region ) =>
+					region.getAttribute( 'aria-label' ) ??
+					( region.getAttribute( 'aria-labelledby' ) ?? '' )
+						.split( ' ' )
+						.map(
+							( id ) => document.getElementById( id )?.textContent
+						)
+						.join( ' ' )
+			);
+		expect( regions ).toEqual( [
+			'Configuration changes',
+			'Options & autoload Added (1)',
+			'Options & autoload Changed (2)',
+			'Option totals',
+			'WP-Cron Removed (1)',
+			'WP-Cron Changed (1)',
+			'WP-Cron Rescheduled (1)',
+			'WP-Cron totals',
+			'Action Scheduler Changed (1)',
+			'Action Scheduler totals',
+		] );
+		expect( new Set( regions ).size ).toBe( regions.length );
+		// The same names as computed by the accessibility tree.
+		for ( const name of regions ) {
+			expect(
+				within( reportPanel() ).getAllByRole( 'region', { name } )
+			).toHaveLength( 1 );
+		}
+		expect(
+			within( reportPanel() )
+				.getAllByRole( 'heading', { name: 'Site totals' } )
+				.map( ( heading ) => heading.tagName )
+		).toEqual( [ 'H5', 'H5', 'H5' ] );
+		// The lists inside carry no second label.
+		for ( const name of [
+			'Option totals',
+			'WP-Cron totals',
+			'Action Scheduler totals',
+		] ) {
+			const region = within( reportPanel() ).getByRole( 'region', {
+				name,
+			} );
+			expect( region.querySelector( 'dl' ) ).not.toHaveAttribute(
+				'aria-label'
+			);
+		}
+	} );
 } );
 
 describe( 'Update results', () => {

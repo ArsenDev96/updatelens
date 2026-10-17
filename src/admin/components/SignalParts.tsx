@@ -384,11 +384,14 @@ export function SignalSummary( {
 }
 
 /**
- * Site-wide totals before → after: quiet statistics after the changes.
+ * Site-wide totals before → after: quiet statistics after the changes. The
+ * region is named per source ("Option totals", …), not by its "Site totals"
+ * heading: Configuration changes can show all three sources at once, and
+ * landmarks need distinct names.
  *
  * @param props           Props.
  * @param props.id        Heading ID.
- * @param props.label     Accessible name of the list.
+ * @param props.label     Accessible name of the region, per source.
  * @param props.items     Label, before, after and delta per total.
  */
 export function SignalTotals( {
@@ -403,13 +406,13 @@ export function SignalTotals( {
 	const Heading = useEmbedded() ? 'h5' : 'h3';
 	return (
 		<section
-			aria-labelledby={ id }
+			aria-label={ label }
 			className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t pt-3 text-[13px] leading-5 text-muted-foreground"
 		>
 			<Heading id={ id } className="font-medium text-slate-600">
 				{ __( 'Site totals', 'updatelens' ) }
 			</Heading>
-			<dl aria-label={ label } className="flex flex-wrap gap-x-4 gap-y-1">
+			<dl className="flex flex-wrap gap-x-4 gap-y-1">
 				{ items.map( ( [ name, before, after, delta ] ) => (
 					<div key={ name } className="flex gap-1.5">
 						<dt>{ name }</dt>

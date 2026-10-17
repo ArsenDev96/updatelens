@@ -309,27 +309,35 @@ export function UpdateResults( {
 	);
 }
 
-/** Classes of the result panel and its badge, per tone. */
-const PANEL: Record< Tone, { panel: string; badge: string } > = {
+/**
+ * Classes of the result panel (with its left accent rule, like the finding
+ * rows), its badge and its title, per tone.
+ */
+const PANEL: Record< Tone, { panel: string; badge: string; title: string } > = {
 	positive: {
-		panel: 'border-emerald-200 bg-emerald-50/70',
-		badge: 'bg-emerald-600 text-white ring-emerald-100',
+		panel: 'border-emerald-300 border-l-emerald-600 bg-emerald-50',
+		badge: 'bg-emerald-600 text-white ring-emerald-200',
+		title: 'text-emerald-900',
 	},
 	neutral: {
-		panel: 'border-slate-200 bg-slate-50',
-		badge: 'bg-slate-200 text-slate-700 ring-slate-100',
+		panel: 'border-slate-300 border-l-slate-500 bg-slate-50',
+		badge: 'bg-slate-200 text-slate-800 ring-slate-100',
+		title: 'text-slate-900',
 	},
 	progress: {
-		panel: 'border-tint-border bg-tint',
+		panel: 'border-tint-border border-l-primary bg-tint',
 		badge: 'bg-primary text-primary-foreground ring-tint-strong',
+		title: 'text-slate-900',
 	},
 	caution: {
-		panel: 'border-amber-200 bg-amber-50',
+		panel: 'border-amber-300 border-l-amber-500 bg-amber-50',
 		badge: 'bg-amber-500 text-white ring-amber-100',
+		title: 'text-amber-950',
 	},
 	negative: {
-		panel: 'border-rose-200 bg-rose-50',
+		panel: 'border-rose-300 border-l-rose-600 bg-rose-50',
 		badge: 'bg-rose-600 text-white ring-rose-100',
+		title: 'text-rose-900',
 	},
 };
 
@@ -346,7 +354,7 @@ function ResultPanelView( { panel }: { panel: ResultPanel } ) {
 			aria-labelledby="updatelens-result-title"
 			data-tone={ panel.tone }
 			className={ cn(
-				'flex flex-col gap-4 rounded-xl border px-5 py-6 sm:flex-row sm:items-center sm:gap-7 sm:px-8 sm:py-8',
+				'flex flex-col gap-4 rounded-xl border border-l-[6px] px-5 py-6 shadow-surface sm:flex-row sm:items-center sm:gap-7 sm:px-8 sm:py-8',
 				style.panel
 			) }
 		>
@@ -364,15 +372,18 @@ function ResultPanelView( { panel }: { panel: ResultPanel } ) {
 			<div className="min-w-0 space-y-1.5">
 				<h3
 					id="updatelens-result-title"
-					className="text-xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-[1.375rem]"
+					className={ cn(
+						'text-xl font-bold leading-tight tracking-tight sm:text-2xl',
+						style.title
+					) }
 				>
 					{ panel.title }
 				</h3>
-				<p className="max-w-2xl text-[15px] leading-relaxed text-slate-700">
+				<p className="max-w-2xl text-[15px] font-medium leading-relaxed text-slate-800">
 					{ panel.text }
 				</p>
 				{ panel.note && (
-					<p className="max-w-2xl text-sm leading-relaxed text-slate-600">
+					<p className="max-w-2xl text-sm leading-relaxed text-slate-700">
 						{ panel.note }
 					</p>
 				) }
@@ -404,7 +415,7 @@ function PriorityGroup( {
 			<h3
 				id={ id }
 				className={ cn(
-					'flex items-center gap-2 text-base font-semibold',
+					'flex items-center gap-2 text-lg font-semibold tracking-tight',
 					priority === 'high' ? 'text-rose-800' : 'text-amber-900'
 				) }
 			>
@@ -425,7 +436,7 @@ function PriorityGroup( {
 					{ formatCount( count ) }
 				</span>
 			</h3>
-			<ul className="mt-2.5 space-y-2">{ children }</ul>
+			<ul className="mt-3 space-y-3">{ children }</ul>
 		</section>
 	);
 }
@@ -449,16 +460,16 @@ function NotAssessed( {
 	return (
 		<section
 			aria-labelledby={ id }
-			className="rounded-xl border bg-card px-4 py-3 sm:px-5"
+			className="rounded-xl border bg-card px-4 py-3 shadow-surface sm:px-5"
 		>
 			<h3
 				id={ id }
 				className="flex items-center gap-2 text-sm font-semibold text-slate-900"
 			>
-				<Icon name="info" className="size-4 text-slate-500" />
+				<Icon name="info" className="size-4 text-slate-600" />
 				{ __( 'Not assessed', 'updatelens' ) }
 			</h3>
-			<ul className="mt-1 space-y-0.5 pl-6 text-[13px] leading-5 text-slate-700">
+			<ul className="mt-1 space-y-0.5 pl-6 text-[13px] leading-5 text-slate-800">
 				{ lines.map( ( line ) => (
 					<li key={ line }>{ line }</li>
 				) ) }
@@ -492,12 +503,12 @@ function Remark( {
 	children: ReactNode;
 } ) {
 	return (
-		<p className="flex gap-2 px-1 text-[13px] leading-5 text-slate-600">
+		<p className="flex gap-2 px-1 text-[13px] leading-5 text-slate-700">
 			<Icon
 				name={ icon }
 				className={ cn(
 					'mt-0.5 size-4',
-					tone === 'progress' ? 'text-primary' : 'text-slate-500'
+					tone === 'progress' ? 'text-primary' : 'text-slate-600'
 				) }
 			/>
 			<span>{ children }</span>
@@ -559,7 +570,7 @@ function ReviewRules( {
 	return (
 		<section
 			aria-labelledby="updatelens-rules-title"
-			className="rounded-xl border bg-card"
+			className="rounded-xl border bg-card shadow-surface"
 		>
 			<div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
 				<span className="hidden size-10 shrink-0 place-items-center rounded-lg bg-tint text-primary sm:grid">
@@ -572,7 +583,7 @@ function ReviewRules( {
 					>
 						{ __( 'What UpdateLens checks', 'updatelens' ) }
 					</h3>
-					<p className="mt-0.5 max-w-3xl text-[13px] leading-5 text-slate-600">
+					<p className="mt-0.5 max-w-3xl text-[13px] leading-5 text-slate-700">
 						{ __(
 							'UpdateLens reviews the Net result for selected changes to options, WP-Cron events and Action Scheduler actions, and compares homepage and REST API responses when website checks ran.',
 							'updatelens'
@@ -1011,19 +1022,19 @@ function CompactRow( {
 			aria-labelledby={ titleId }
 			data-priority={ priority }
 			className={ cn(
-				'overflow-hidden rounded-lg border border-l-4 bg-card transition-colors',
+				'overflow-hidden rounded-lg border border-l-4 bg-card shadow-surface transition-colors',
 				priority === 'high'
-					? 'border-l-rose-500'
-					: 'border-l-amber-400',
+					? 'border-l-rose-600'
+					: 'border-l-amber-500',
 				expanded
-					? 'border-y-slate-300 border-r-slate-300'
-					: 'hover:border-y-slate-300 hover:border-r-slate-300'
+					? 'border-y-slate-400 border-r-slate-400'
+					: 'hover:border-y-slate-400 hover:border-r-slate-400'
 			) }
 		>
 			<div
 				className={ cn(
 					'relative flex items-start gap-3 px-4 py-3 sm:px-5',
-					! expanded && 'hover:bg-slate-50/60'
+					! expanded && 'hover:bg-slate-50'
 				) }
 			>
 				{ /* The signal is named in the row; on phones its icon would only narrow the text. */ }
@@ -1076,7 +1087,7 @@ function CompactRow( {
 					</p>
 					<p
 						id={ summaryId }
-						className="mt-1 text-sm leading-6 text-slate-700"
+						className="mt-1 text-sm leading-6 text-slate-800"
 					>
 						{ summary }
 					</p>
@@ -1120,7 +1131,7 @@ function Guidance( { why, next }: { why: string[]; next: string[] } ) {
 				<DetailHeading>
 					{ __( 'Why it might matter', 'updatelens' ) }
 				</DetailHeading>
-				<div className="mt-1.5 space-y-1.5 text-sm leading-relaxed text-slate-700">
+				<div className="mt-1.5 space-y-1.5 text-sm leading-relaxed text-slate-800">
 					{ why.map( ( sentence ) => (
 						<p key={ sentence }>{ sentence }</p>
 					) ) }
@@ -1130,7 +1141,7 @@ function Guidance( { why, next }: { why: string[]; next: string[] } ) {
 				<DetailHeading>
 					{ __( 'What to check next', 'updatelens' ) }
 				</DetailHeading>
-				<ul className="mt-1.5 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-700 marker:text-slate-400">
+				<ul className="mt-1.5 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-slate-800 marker:text-slate-500">
 					{ next.map( ( step ) => (
 						<li key={ step }>{ step }</li>
 					) ) }
@@ -1148,7 +1159,7 @@ function Guidance( { why, next }: { why: string[]; next: string[] } ) {
  */
 function DetailHeading( { children }: { children: ReactNode } ) {
 	return (
-		<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-500">
+		<h5 className="text-xs font-semibold uppercase tracking-[0.06em] text-slate-600">
 			{ children }
 		</h5>
 	);

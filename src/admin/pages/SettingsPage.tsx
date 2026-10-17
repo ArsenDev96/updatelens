@@ -47,11 +47,11 @@ export function SettingsPage() {
 			<div className="space-y-1">
 				<h2
 					id="updatelens-settings-title"
-					className="text-lg font-semibold"
+					className="text-section-title font-semibold"
 				>
 					{ __( 'Settings', 'updatelens' ) }
 				</h2>
-				<p className="text-sm text-muted-foreground">
+				<p className="text-section-description text-muted-foreground">
 					{ __(
 						'Update analysis needs no setup. Website checks are optional.',
 						'updatelens'

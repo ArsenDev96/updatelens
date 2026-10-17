@@ -1,6 +1,7 @@
 /*
  * Every selector below is prefixed with #updatelens-root at build time
  * (see postcss.config.cjs); :root/html/body map to #updatelens-root itself.
+ * The one exception is the page title, outside the root (UNSCOPED there).
  */
 @tailwind base;
 @tailwind components;
@@ -41,4 +42,15 @@
 	* {
 		@apply border-border;
 	}
+}
+
+/*
+ * The page title ("UpdateLens", AdminPage::render_shell()), above the
+ * subtitle (14px) and the section headings (19px). Overrides wp-admin's
+ * `.wrap h1` (23px, regular) on UpdateLens's screens only.
+ */
+.wrap > h1.updatelens-page-title {
+	font-size: 26px;
+	font-weight: 600;
+	line-height: 1.25;
 }

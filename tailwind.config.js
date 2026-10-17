@@ -51,6 +51,16 @@ export default {
 					foreground: 'hsl(var(--tint-foreground))',
 				},
 			},
+			fontSize: {
+				// Heading hierarchy below the page title (26px, index.css):
+				// section headings ("Update History", "Settings", report tabs)
+				// and the one-line description under them.
+				'section-title': [ '1.1875rem', { lineHeight: '1.625rem' } ],
+				'section-description': [
+					'0.8125rem',
+					{ lineHeight: '1.25rem' },
+				],
+			},
 			boxShadow: {
 				// Restrained elevation of report surfaces, and on hover.
 				surface:

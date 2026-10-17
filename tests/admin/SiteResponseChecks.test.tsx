@@ -6,13 +6,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
 	AnalysisReport,
 	PhaseKey,
+	SiteCheckId,
 	SiteCheckImpact,
 	SiteChecks,
 } from '@/admin/types/api';
 
 import cases from '../fixtures/site-check-impact-cases.json';
 import { COMPLETED, withSiteCheckCase } from './fixtures';
+import { MINUS } from '@/admin/utils/format';
 import type { ReportTab } from '@/admin/utils/route';
+import { siteCheckRequestTimes } from '@/admin/utils/siteChecks';
 
 import { openReport, reportTab, tab } from './report-view';
 
@@ -69,8 +72,10 @@ function checkRows() {
 			.map( ( item ) => {
 				const button = item.querySelector( 'h4 button' )!;
 				const values = rowOf( item ).querySelectorAll( 'dl dd' );
+				// The row's sentence (the request time line, between them,
+				// has no paragraph).
 				const detail = rowOf( item ).querySelector(
-					'dl + div > p:not(.relative)'
+					'dl ~ div > p:not(.relative)'
 				)?.textContent;
 				return [
 					button.textContent,
@@ -502,6 +507,278 @@ describe( 'Website checks tab', () => {
 			expect( text ).not.toMatch( FORBIDDEN );
 			expect( text ).not.toMatch(
 				/newly_failing|not_comparable|after_inconclusive|baseline_missing|not_reported|server_error|end_marker|\bnull\b|undefined|\[object/
+			);
+		}
+	);
+} );
+
+/*
+ * Request times: each side's first request, only when it measured a complete
+ * response (from the recorded `duration_ms`), and the signed difference only
+ * for equivalent measurements. Never a finding, warning, score or threshold.
+ */
+describe( 'Request times', () => {
+	const times = ( name: CaseName, check: SiteCheckId ) => {
+		const view = siteCheckRequestTimes(
+			( cases.cases[ name ].site_checks as SiteChecks ).checks[ check ],
+			'en'
+		);
+		return view === null
+			? null
+			: [
+					view.before.text,
+					view.after.text,
+					view.difference?.text ?? null,
+				];
+	};
+
+	it.each( [
+		// Compared, same response, same displayed duration: never "0.00 s".
+		[
+			'both_passed',
+			'home',
+			[ '0.28 s', '0.28 s', 'No measured difference' ],
+		],
+		[
+			'both_passed',
+			'rest',
+			[ '0.18 s', '0.18 s', 'No measured difference' ],
+		],
+		[
+			'failing_both',
+			'home',
+			[ '0.22 s', '0.22 s', 'No measured difference' ],
+		],
+		[
+			'rest_newly_failing',
+			'home',
+			[ '0.28 s', '0.28 s', 'No measured difference' ],
+		],
+		// Compared, but not the same response: no difference.
+		[
+			'home_newly_failing',
+			'home',
+			[ '0.28 s', '0.22 s', 'Not shown: different responses' ],
+		],
+		[
+			'recovered',
+			'home',
+			[ '0.22 s', '0.28 s', 'Not shown: different responses' ],
+		],
+		// HTTP 200 both times, but the later page was incomplete (failed).
+		[
+			'home_incomplete',
+			'home',
+			[ '0.28 s', '0.91 s', 'Not shown: different responses' ],
+		],
+		[
+			'rest_newly_failing',
+			'rest',
+			[ '0.18 s', '0.24 s', 'Not shown: different responses' ],
+		],
+		// Measured both, but the API did not compare the check.
+		[
+			'overlapping_update',
+			'rest',
+			[ '0.18 s', '0.18 s', 'Not shown: check not compared' ],
+		],
+		[
+			'unconfirmed',
+			'home',
+			[ '0.28 s', '0.22 s', 'Not shown: check not compared' ],
+		],
+		// No complete response on one side: no time, never a difference.
+		[ 'home_timeouts', 'home', [ '0.28 s', 'Not measured', null ] ],
+		[ 'home_redirect', 'home', [ '0.28 s', 'Not measured', null ] ],
+		[ 'redirect_disappeared', 'home', [ 'Not measured', '0.28 s', null ] ],
+		[ 'pending', 'home', [ '0.28 s', 'Waiting', null ] ],
+		[ 'after_not_reported', 'rest', [ '0.18 s', 'Not available', null ] ],
+	] as Array< [ CaseName, SiteCheckId, Array< string | null > ] > )(
+		'%s %s: %j',
+		( name, check, expected ) => {
+			expect( times( name, check ) ).toEqual( expected );
+		}
+	);
+
+	it.each( [
+		[ 'home_not_inspected', 'home' ],
+		[ 'no_baseline', 'home' ],
+		[ 'disabled', 'rest' ],
+		[ 'both_cross_origin', 'home' ],
+		[ 'home_cross_origin', 'home' ],
+		[ 'historical', 'rest' ],
+		[ 'one_unavailable', 'rest' ],
+	] as Array< [ CaseName, SiteCheckId ] > )(
+		'%s %s: nothing measured, no line (no time is made up)',
+		( name, check ) => {
+			expect( times( name, check ) ).toBeNull();
+		}
+	);
+
+	it( 'reads the first request of each side, as recorded', () => {
+		const base = ( cases.cases.both_passed.site_checks as SiteChecks )
+			.checks.home;
+		const withDuration = ( ms: number ) => ( {
+			...base.after,
+			result: {
+				...base.after.result!,
+				attempts: [
+					{ ...base.after.result!.attempts[ 0 ], duration_ms: ms },
+					{ ...base.after.result!.attempts[ 0 ], duration_ms: 9999 },
+				],
+			},
+		} );
+		expect(
+			siteCheckRequestTimes(
+				{
+					...base,
+					before: withDuration( 1600 ),
+					after: withDuration( 1500 ),
+				},
+				'en'
+			)
+		).toEqual( {
+			before: { text: '1.6 s', measured: true },
+			after: { text: '1.5 s', measured: true },
+			difference: { text: `${ MINUS }0.1 s`, kind: 'value' },
+		} );
+		// 1.50 s and 1.549 s both display as 1.5 s: no measured difference.
+		expect(
+			siteCheckRequestTimes(
+				{
+					...base,
+					before: withDuration( 1500 ),
+					after: withDuration( 1549 ),
+				},
+				'en'
+			)?.difference
+		).toEqual( { text: 'No measured difference', kind: 'same' } );
+	} );
+
+	/**
+	 * The request time line of a check's row as "label: value", or null. The
+	 * decimal separator follows the browser locale (here read as a point).
+	 */
+	const timeLine = ( name: 'Homepage' | 'WordPress REST API' ) => {
+		const row = rowOf(
+			checkButton( name ).closest( 'li' )!
+		) as HTMLElement;
+		const line = within( row ).queryByLabelText( 'Request time' );
+		return line
+			? Array.from( line.querySelectorAll( ':scope > div' ) ).map(
+					( item ) =>
+						`${ item.querySelector( 'dt' )!.textContent }: ${ item
+							.querySelector( 'dd' )!
+							.textContent!.replace( /(\d),(\d)/g, '$1.$2' ) }`
+				)
+			: null;
+	};
+
+	it( 'shows the times in each row, neutral, with the explanation once', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'home_newly_failing' ) );
+		expect( timeLine( 'Homepage' ) ).toEqual( [
+			'Before: 0.28 s',
+			'After: 0.22 s',
+			'Difference: Not shown: different responses',
+		] );
+		expect( timeLine( 'WordPress REST API' ) ).toEqual( [
+			'Before: 0.18 s',
+			'After: 0.18 s',
+			'Difference: No measured difference',
+		] );
+		expect( section() ).not.toHaveTextContent( '0.00 s' );
+		expect(
+			within( section() ).getAllByText(
+				'Request times are individual observations, not a performance benchmark.'
+			)
+		).toHaveLength( 1 );
+		// Neutral: no tone colors on the times; the status is unchanged.
+		const line = within(
+			rowOf( checkButton( 'Homepage' ).closest( 'li' )! ) as HTMLElement
+		).getByLabelText( 'Request time' );
+		expect( line.innerHTML ).not.toMatch( /rose|amber|emerald|red-|green/ );
+		expect( checkRows() ).toEqual( {
+			Homepage: 'Newly failing',
+			'WordPress REST API': 'Passed before and after',
+		} );
+		expect( sides( 'Homepage' ) ).toEqual( [
+			'Passed HTTP 200',
+			'Failed in both requests · HTTP 500',
+		] );
+	} );
+
+	it( 'durations stand out from their labels; sentences stay quiet', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'home_newly_failing' ) );
+		const field = (
+			name: 'Homepage' | 'WordPress REST API',
+			label: string
+		) =>
+			Array.from(
+				within(
+					rowOf( checkButton( name ).closest( 'li' )! ) as HTMLElement
+				)
+					.getByLabelText( 'Request time' )
+					.querySelectorAll( ':scope > div' )
+			).find(
+				( item ) => item.querySelector( 'dt' )!.textContent === label
+			)!;
+		const value = ( item: Element ) => item.querySelector( 'dd' )!;
+		// A duration: semibold, tabular figures; its label quieter.
+		expect( value( field( 'Homepage', 'Before' ) ) ).toHaveClass(
+			'font-semibold',
+			'tabular-nums',
+			'text-slate-900'
+		);
+		expect(
+			field( 'Homepage', 'Before' ).querySelector( 'dt' )
+		).toHaveClass( 'text-xs', 'text-slate-600' );
+		// Equal durations and non-equivalent responses are plain text.
+		expect(
+			value( field( 'WordPress REST API', 'Difference' ) )
+		).not.toHaveClass( 'font-semibold' );
+		expect( value( field( 'Homepage', 'Difference' ) ) ).not.toHaveClass(
+			'font-semibold'
+		);
+		// The reason takes the whole width on phones, a column from md.
+		expect( field( 'Homepage', 'Difference' ) ).toHaveClass(
+			'col-span-3',
+			'md:col-span-1'
+		);
+		expect( field( 'WordPress REST API', 'Difference' ) ).not.toHaveClass(
+			'col-span-3'
+		);
+	} );
+
+	it( 'keeps every request and its timing in the details', async () => {
+		const user = userEvent.setup();
+		await renderReport( withSiteChecks( COMPLETED, 'home_newly_failing' ) );
+		expect( section() ).not.toHaveTextContent( 'Request 2' );
+		await user.click( checkButton( 'Homepage' ) );
+		expect( section() ).toHaveTextContent( 'Request 1' );
+		expect( section() ).toHaveTextContent( 'Request 2' );
+		expect( section() ).toHaveTextContent( /HTTP 500 · 0[.,]2 seconds/ );
+	} );
+
+	it( 'pending: the earlier time, the later one waiting, no difference', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'pending' ) );
+		expect( timeLine( 'Homepage' ) ).toEqual( [
+			'Before: 0.28 s',
+			'After: Waiting',
+		] );
+	} );
+
+	it.each( [
+		'disabled',
+		'historical',
+		'both_cross_origin',
+		'no_baseline',
+	] as CaseName[] )(
+		'%s: no request times and no explanation',
+		async ( name ) => {
+			await renderReport( withSiteChecks( COMPLETED, name ) );
+			expect( section() ).not.toHaveTextContent( 'Request time' );
+			expect( section() ).not.toHaveTextContent(
+				'performance benchmark'
 			);
 		}
 	);

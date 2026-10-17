@@ -9,6 +9,7 @@ import {
 	formatDateTime,
 	formatDuration,
 	formatDurationDelta,
+	formatRequestTimes,
 	formatShift,
 	formatUnixDateTime,
 	formatUnixRangeEnd,
@@ -564,6 +565,67 @@ describe( 'routes', () => {
 				`${ base }&analysis=42&paged=2`
 			)
 		).toBe( '/wp-admin/admin.php?page=updatelens' );
+	} );
+} );
+
+describe( 'request times', () => {
+	it.each( [
+		// Hundredths while either time is under a second, as displayed.
+		[ 307, 293, '0.31 s', '0.29 s', `${ MINUS }0.02 s` ],
+		[ 250, 248, '0.25 s', '0.25 s', '0.00 s' ],
+		[ 40, 60, '0.04 s', '0.06 s', '+0.02 s' ],
+		[ 850, 1234, '0.85 s', '1.23 s', '+0.38 s' ],
+		// Tenths from a second on: the example of the review.
+		[ 1600, 1500, '1.6 s', '1.5 s', `${ MINUS }0.1 s` ],
+		[ 800, 1100, '0.80 s', '1.10 s', '+0.30 s' ],
+		[ 1234, 2600, '1.2 s', '2.6 s', '+1.4 s' ],
+		// 995 ms is displayed as a whole second.
+		[ 995, 1049, '1.0 s', '1.0 s', '0.0 s' ],
+		[ 10000, 9000, '10.0 s', '9.0 s', `${ MINUS }1.0 s` ],
+	] )(
+		'%d ms → %d ms: %s, %s, %s',
+		( before, after, beforeText, afterText, difference ) => {
+			expect( formatRequestTimes( before, after, 'en' ) ).toEqual( {
+				before: beforeText,
+				after: afterText,
+				difference,
+			} );
+		}
+	);
+
+	it( 'the difference is that of the displayed values, so the line adds up', () => {
+		// 1.625 s and 1.664 s: exactly 39 ms apart, displayed 1.6 s and 1.7 s.
+		expect( formatRequestTimes( 1625, 1664, 'en' ) ).toEqual( {
+			before: '1.6 s',
+			after: '1.7 s',
+			difference: '+0.1 s',
+		} );
+	} );
+
+	it( 'one side alone: its time, never a difference', () => {
+		expect( formatRequestTimes( 282, null, 'en' ) ).toEqual( {
+			before: '0.28 s',
+			after: null,
+			difference: null,
+		} );
+		expect( formatRequestTimes( null, 1500, 'en' ) ).toEqual( {
+			before: null,
+			after: '1.5 s',
+			difference: null,
+		} );
+		expect( formatRequestTimes( null, null, 'en' ) ).toEqual( {
+			before: null,
+			after: null,
+			difference: null,
+		} );
+	} );
+
+	it( 'numbers follow the locale, the unit is a translation', () => {
+		expect( formatRequestTimes( 307, 1293, 'de-DE' ) ).toEqual( {
+			before: '0,31 s',
+			after: '1,29 s',
+			difference: '+0,98 s',
+		} );
 	} );
 } );
 

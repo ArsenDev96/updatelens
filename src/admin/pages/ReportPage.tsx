@@ -590,7 +590,7 @@ function RefinedSignalView( {
 							id="updatelens-signal-title"
 							ref={ heading }
 							tabIndex={ -1 }
-							className="text-[1.75rem] font-semibold leading-tight tracking-tight text-slate-900 outline-none"
+							className="text-[1.375rem] font-semibold leading-tight tracking-tight text-slate-900 outline-none"
 						>
 							{ providerLabel( signal ) }
 						</h2>
@@ -783,7 +783,7 @@ function ReportHeader( {
 						id="updatelens-report-title"
 						ref={ heading }
 						tabIndex={ -1 }
-						className="break-words text-[1.75rem] font-semibold leading-tight tracking-tight text-slate-900 outline-none"
+						className="break-words text-[1.375rem] font-semibold leading-tight tracking-tight text-slate-900 outline-none"
 					>
 						{ pluginName( report.plugin ) }
 					</h2>

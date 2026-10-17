@@ -2,13 +2,16 @@ import { __, sprintf } from '@wordpress/i18n';
 
 import type { IconName } from '../components/Icon';
 import type {
+	SiteCheckAttempt,
 	SiteCheckComparison,
+	SiteCheckState,
 	SiteCheckId,
 	SiteCheckImpact,
 	SiteCheckImpactCheck,
 	SiteChecks,
 	SiteCheckSide,
 } from '../types/api';
+import { formatRequestTimes } from './format';
 import type { Tone } from './labels';
 import {
 	afterReasonText,
@@ -226,6 +229,147 @@ export function siteCheckSideCell(
 	return purpose === 'after' && comparison.state === 'pending'
 		? __( 'Waiting', 'updatelens' )
 		: __( 'Not run', 'updatelens' );
+}
+
+/** One side of the request time line: its time, or why it has none. */
+export interface RequestTimeSide {
+	/** "0.31 s", or "Not measured" / "Waiting" / "Not available". */
+	text: string;
+	measured: boolean;
+}
+
+/** A check's request time line (see siteCheckRequestTimes()). */
+export interface RequestTimesView {
+	before: RequestTimeSide;
+	after: RequestTimeSide;
+	/** The difference, or why there is none; null unless both were measured. */
+	difference: RequestTimeDifference | null;
+}
+
+/**
+ * `value`: signed ("+0.04 s"); `same`: both durations display alike ("No
+ * measured difference", never "0.00 s"); `not_shown`: not equivalent
+ * measurements ("Not shown: …").
+ */
+export interface RequestTimeDifference {
+	text: string;
+	kind: 'value' | 'same' | 'not_shown';
+}
+
+/** States in which the API compared the two sides of a check. */
+const COMPARED: ReadonlySet< SiteCheckState > = new Set< SiteCheckState >( [
+	'passed_both',
+	'newly_failing',
+	'failing_both',
+	'recovered',
+	'changed',
+] );
+
+/**
+ * The first request of a side, when it measured a complete response: a
+ * status arrived and the body was read to its end. Timeouts and network
+ * errors (the time until the browser gave up), redirects (the time until the
+ * redirect, not a page) and bodies not read completely are not response
+ * times.
+ *
+ * @param side Side.
+ */
+function measuredRequest( side: SiteCheckSide ): SiteCheckAttempt | null {
+	const first = side.available ? side.result?.attempts[ 0 ] : undefined;
+	if (
+		first === undefined ||
+		first.status === null ||
+		first.end_marker === 'not_read' ||
+		first.body === 'not_read'
+	) {
+		return null;
+	}
+	return first;
+}
+
+/**
+ * How long each side's first request took, and their difference: a
+ * presentation of the recorded durations, never a finding, score or
+ * threshold. Null when neither side measured a complete response (missing,
+ * pending, unsupported, timed out, …): no time is ever made up. The signed
+ * difference is shown only for equivalent measurements: a check the API
+ * compared, whose first requests got the same HTTP status and the same
+ * verdict (a failed or unverified page is not the same response as a
+ * verified one); otherwise a short reason replaces it. Every request stays in
+ * the row's details.
+ *
+ * @param comparison The check in the report's `site_checks`.
+ * @param locale     Locale for the numbers.
+ */
+export function siteCheckRequestTimes(
+	comparison: SiteCheckComparison,
+	locale?: string
+): RequestTimesView | null {
+	const before = measuredRequest( comparison.before );
+	const after = measuredRequest( comparison.after );
+	if ( before === null && after === null ) {
+		return null;
+	}
+	const times = formatRequestTimes(
+		before?.duration_ms ?? null,
+		after?.duration_ms ?? null,
+		locale
+	);
+	const side = (
+		attempt: SiteCheckAttempt | null,
+		text: string | null,
+		purpose: 'before' | 'after'
+	): RequestTimeSide => {
+		if ( attempt !== null && text !== null ) {
+			return { text, measured: true };
+		}
+		const current = comparison[ purpose ];
+		if ( current.available && current.result !== null ) {
+			return {
+				text: __( 'Not measured', 'updatelens' ),
+				measured: false,
+			};
+		}
+		return {
+			text:
+				purpose === 'after' && comparison.state === 'pending'
+					? __( 'Waiting', 'updatelens' )
+					: __( 'Not available', 'updatelens' ),
+			measured: false,
+		};
+	};
+
+	let difference: RequestTimesView[ 'difference' ] = null;
+	if ( before !== null && after !== null ) {
+		if ( ! COMPARED.has( comparison.state ) ) {
+			difference = {
+				text: __( 'Not shown: check not compared', 'updatelens' ),
+				kind: 'not_shown',
+			};
+		} else if (
+			before.status !== after.status ||
+			before.verdict !== after.verdict
+		) {
+			difference = {
+				text: __( 'Not shown: different responses', 'updatelens' ),
+				kind: 'not_shown',
+			};
+		} else if ( times.before === times.after ) {
+			// Same displayed duration (one shared precision): not "0.00 s".
+			difference = {
+				text: __( 'No measured difference', 'updatelens' ),
+				kind: 'same',
+			};
+		} else if ( times.difference !== null ) {
+			difference = { text: times.difference, kind: 'value' };
+		}
+	}
+
+	return {
+		before: side( before, times.before, 'before' ),
+		after: side( after, times.after, 'after' ),
+		difference,
+	};
 }
 
 /**

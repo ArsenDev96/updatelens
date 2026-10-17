@@ -415,7 +415,7 @@ function PriorityGroup( {
 			<h3
 				id={ id }
 				className={ cn(
-					'flex items-center gap-2 text-lg font-semibold tracking-tight',
+					'flex items-center gap-2 text-section-title font-semibold tracking-tight',
 					priority === 'high' ? 'text-rose-800' : 'text-amber-900'
 				) }
 			>

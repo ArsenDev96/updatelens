@@ -111,7 +111,7 @@ final class AdminPageTest extends TestCase {
 			$page->$method();
 			$html = (string) ob_get_clean();
 
-			$this->assertStringContainsString( '<h1>UpdateLens</h1>', $html );
+			$this->assertStringContainsString( '<h1 class="updatelens-page-title">UpdateLens</h1>', $html );
 			$this->assertStringContainsString( '<div id="updatelens-root" data-view="' . $view . '" data-plugins-url="">', $html );
 		}
 	}

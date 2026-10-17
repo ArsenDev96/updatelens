@@ -242,6 +242,65 @@ export function formatDurationDelta(
 	return ( seconds > 0 ? '+' : MINUS ) + formatDuration( seconds, locale );
 }
 
+/** Request times of one check (see formatRequestTimes()). */
+export interface RequestTimesText {
+	before: string | null;
+	after: string | null;
+	/** Signed `after - before`; null unless both times are given. */
+	difference: string | null;
+}
+
+/**
+ * Request times of one check, in seconds: "0.31 s", "1.6 s". Both share one
+ * precision, hundredths when either is under a second (as displayed) and
+ * tenths otherwise, and the signed difference ("+0.04 s", "−0.1 s", "0.00 s")
+ * is that of the displayed values, so the three always add up. The unit is
+ * an UpdateLens translation; only the number uses `locale`.
+ *
+ * @param beforeMs Earlier time in milliseconds, or null.
+ * @param afterMs  Later time in milliseconds, or null.
+ * @param locale   Locale for the numbers.
+ */
+export function formatRequestTimes(
+	beforeMs: number | null,
+	afterMs: number | null,
+	locale?: string
+): RequestTimesText {
+	const given = [ beforeMs, afterMs ].filter(
+		( ms ): ms is number => ms !== null
+	);
+	const decimals = given.some( ( ms ) => Math.round( ms / 10 ) < 100 )
+		? 2
+		: 1;
+	const step = decimals === 2 ? 10 : 100;
+	const number = new Intl.NumberFormat( locale, {
+		minimumFractionDigits: decimals,
+		maximumFractionDigits: decimals,
+	} );
+	const text = ( steps: number ) =>
+		sprintf(
+			/* translators: %s: a request time in seconds, e.g. "1.6" or "0.31". "s" is the abbreviation for seconds. */
+			__( '%s s', 'updatelens' ),
+			number.format( ( Math.abs( steps ) * step ) / 1000 )
+		);
+	const steps = ( ms: number | null ) =>
+		ms === null ? null : Math.round( ms / step );
+	const before = steps( beforeMs );
+	const after = steps( afterMs );
+	let difference: string | null = null;
+	if ( before !== null && after !== null ) {
+		const delta = after - before;
+		difference =
+			( delta > 0 ? '+' : delta < 0 ? MINUS : '' ) + text( delta );
+	}
+
+	return {
+		before: before === null ? null : text( before ),
+		after: after === null ? null : text( after ),
+		difference,
+	};
+}
+
 /**
  * How far a scheduled time moved, for a sentence: whole units with the
  * direction ("1 hour later", "2 minutes earlier"), and "about" when the

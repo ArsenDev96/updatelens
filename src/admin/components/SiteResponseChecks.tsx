@@ -25,11 +25,13 @@ import {
 } from '../utils/siteCheckImpact';
 import {
 	missingSideText,
+	type RequestTimesView,
 	sharedReason,
 	siteCheckButtonId,
 	siteCheckGuidanceReason,
 	siteCheckNextStep,
 	siteCheckReadingNote,
+	siteCheckRequestTimes,
 	siteCheckResultLabel,
 	siteCheckRow,
 	siteCheckViewKey,
@@ -47,7 +49,9 @@ import { Icon, type IconName } from './Icon';
  * change.
  *
  * Two compact rows, always shown (also when both passed): the check, what it
- * returned before and after the update, and the API's comparison. A reason
+ * returned before and after the update, and the API's comparison, with how
+ * long each side's first request took when it measured a complete response
+ * (the difference only for equivalent ones; never a finding). A reason
  * both checks share, and how to get a comparison on a future update, are said
  * once, above the rows. Every request, the verification and the timing are
  * behind each row's disclosure, closed by default. A check reads as passed
@@ -112,6 +116,7 @@ export function SiteResponseChecks( {
 					{
 						check,
 						comparison,
+						times: siteCheckRequestTimes( comparison ),
 						text: siteCheckRow(
 							check,
 							comparison,
@@ -164,13 +169,13 @@ export function SiteResponseChecks( {
 					id="updatelens-site-checks-title"
 					ref={ title }
 					tabIndex={ -1 }
-					className="text-xl font-semibold tracking-tight text-slate-950 focus:outline-none"
+					className="text-section-title font-semibold tracking-tight text-slate-950 focus:outline-none"
 				>
 					{ __( 'Website checks', 'updatelens' ) }
 				</h3>
 				{ /* Only for checks that ran: not for turned off, unsupported or unrecorded ones. */ }
 				{ ! unused && (
-					<p className="mt-1 text-sm leading-6 text-muted-foreground">
+					<p className="mt-1 text-section-description text-muted-foreground">
 						{ __(
 							'Compare your homepage and WordPress REST API responses around this update. Results are shown only for checks that actually ran. They do not test every page or feature.',
 							'updatelens'
@@ -240,42 +245,62 @@ export function SiteResponseChecks( {
 						aria-label={ __( 'Checks', 'updatelens' ) }
 						className="space-y-3"
 					>
-						{ checks.map( ( { check, comparison, text } ) => (
-							<CheckRow
-								key={ check }
-								check={ check }
-								comparison={ comparison }
-								text={
-									// A shared reason is said once above; a newly
-									// failing check's sentence would repeat its After
-									// cell (the requests are in its details).
-									shared ||
-									comparison.state === 'newly_failing'
-										? { ...text, detail: null }
-										: text
-								}
-								result={ siteCheckResultLabel(
-									comparison,
-									impact?.checks[ check ]
-								) }
-								reason={ shared ?? text.detail }
-								nextStep={
-									text.finding
-										? siteCheckNextStep(
-												check,
-												impact?.checks[ check ]
-											)
-										: null
-								}
-								expanded={
-									view.open[ siteCheckViewKey( check ) ] !==
-									undefined
-								}
-								onToggle={ () => toggle( check ) }
-								onShowFinding={ () => onShowFinding( check ) }
-							/>
-						) ) }
+						{ checks.map(
+							( { check, comparison, times, text } ) => (
+								<CheckRow
+									key={ check }
+									check={ check }
+									comparison={ comparison }
+									times={ times }
+									text={
+										// A shared reason is said once above; a newly
+										// failing check's sentence would repeat its After
+										// cell (the requests are in its details).
+										shared ||
+										comparison.state === 'newly_failing'
+											? { ...text, detail: null }
+											: text
+									}
+									result={ siteCheckResultLabel(
+										comparison,
+										impact?.checks[ check ]
+									) }
+									reason={ shared ?? text.detail }
+									nextStep={
+										text.finding
+											? siteCheckNextStep(
+													check,
+													impact?.checks[ check ]
+												)
+											: null
+									}
+									expanded={
+										view.open[
+											siteCheckViewKey( check )
+										] !== undefined
+									}
+									onToggle={ () => toggle( check ) }
+									onShowFinding={ () =>
+										onShowFinding( check )
+									}
+								/>
+							)
+						) }
 					</ul>
+					{ checks.some( ( { times } ) => times !== null ) && (
+						<p className="flex max-w-3xl gap-2 text-[13px] leading-5 text-slate-700">
+							<Icon
+								name="info"
+								className="mt-0.5 size-4 shrink-0 text-slate-600"
+							/>
+							<span>
+								{ __(
+									'Request times are individual observations, not a performance benchmark.',
+									'updatelens'
+								) }
+							</span>
+						</p>
+					) }
 					{ ! shared && nextTime.length > 0 && (
 						<div className="flex max-w-3xl gap-2 text-[13px] leading-5 text-slate-800">
 							<Icon
@@ -462,13 +487,14 @@ const RESULT_TEXT: Record< Tone, string > = {
 
 /**
  * One check as a compact row: its name (the toggle), what it returned before
- * and after the update, and the comparison; one sentence below only when it
- * says more. The earlier and later requests render only while expanded
- * (never hidden DOM).
+ * and after the update, and the comparison; the request times when measured;
+ * one sentence below only when it says more. The earlier and later requests
+ * render only while expanded (never hidden DOM).
  *
  * @param props               Props.
  * @param props.check         Check.
  * @param props.comparison    The check in `site_checks`.
+ * @param props.times         Its request times, or null when none was measured.
  * @param props.text          Its tone, status and sentence.
  * @param props.result        The comparison in a few words.
  * @param props.reason        The reason already shown for it (row or section).
@@ -480,6 +506,7 @@ const RESULT_TEXT: Record< Tone, string > = {
 function CheckRow( {
 	check,
 	comparison,
+	times,
 	text,
 	result,
 	reason,
@@ -490,6 +517,7 @@ function CheckRow( {
 }: {
 	check: SiteCheckId;
 	comparison: SiteCheckComparison;
+	times: RequestTimesView | null;
 	text: SiteCheckRowText;
 	result: string;
 	reason: string | null;
@@ -599,6 +627,7 @@ function CheckRow( {
 						</dd>
 					</div>
 				</dl>
+				{ times && <RequestTimes times={ times } /> }
 				{ ( text.detail || nextStep ) && (
 					<div className="col-span-2 space-y-1 text-[13px] leading-5 md:col-span-1 md:col-start-2">
 						{ text.detail && (
@@ -655,6 +684,91 @@ function CheckRow( {
 				) }
 			</div>
 		</li>
+	);
+}
+
+/** One request time field: its label, value, and how the value reads. */
+interface TimeField {
+	label: string;
+	value: string;
+	/** A duration: prominent, tabular figures. */
+	number: boolean;
+	/** A sentence ("Not shown: …"): the whole width on phones. */
+	wide: boolean;
+}
+
+/**
+ * How long each side's first request took, and the difference, as three
+ * aligned fields (Before, After, Difference) under the row's status: on
+ * phones below it, apart by a hairline; from `md` in the status columns,
+ * under Before update / After update / Result, with the caption in the name
+ * column. Durations stand out from their labels; colors stay neutral (faster
+ * or slower says nothing about the update). No Difference field without both
+ * durations.
+ *
+ * @param props       Props.
+ * @param props.times The check's request times.
+ */
+function RequestTimes( { times }: { times: RequestTimesView } ) {
+	const labelId = useId();
+	const fields: TimeField[] = [
+		{
+			label: __( 'Before', 'updatelens' ),
+			value: times.before.text,
+			number: times.before.measured,
+			wide: false,
+		},
+		{
+			label: __( 'After', 'updatelens' ),
+			value: times.after.text,
+			number: times.after.measured,
+			wide: false,
+		},
+	];
+	if ( times.difference ) {
+		fields.push( {
+			label: __( 'Difference', 'updatelens' ),
+			value: times.difference.text,
+			number: times.difference.kind === 'value',
+			wide: times.difference.kind === 'not_shown',
+		} );
+	}
+	return (
+		<div className="col-span-2 border-t border-slate-200 pt-2.5 md:contents">
+			<div
+				id={ labelId }
+				className="text-xs font-medium leading-5 text-slate-600 md:col-start-1 md:self-start md:pl-[3.25rem]"
+			>
+				{ __( 'Request time', 'updatelens' ) }
+			</div>
+			<dl
+				aria-labelledby={ labelId }
+				className="mt-1 grid grid-cols-3 gap-x-3 gap-y-2 md:col-start-2 md:mt-0 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.85fr)] md:gap-x-4"
+			>
+				{ fields.map( ( field ) => (
+					<div
+						key={ field.label }
+						className={ cn(
+							'min-w-0',
+							field.wide && 'col-span-3 md:col-span-1'
+						) }
+					>
+						<dt className="text-xs font-medium leading-5 text-slate-600">
+							{ field.label }
+						</dt>
+						<dd
+							className={
+								field.number
+									? 'whitespace-nowrap text-[15px] font-semibold tabular-nums leading-6 text-slate-900'
+									: 'text-[13px] leading-6 text-slate-700'
+							}
+						>
+							{ field.value }
+						</dd>
+					</div>
+				) ) }
+			</dl>
+		</div>
 	);
 }
 

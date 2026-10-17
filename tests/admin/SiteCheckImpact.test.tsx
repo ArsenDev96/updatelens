@@ -153,8 +153,10 @@ const FORBIDDEN =
 	/\bsafe\b|no issues|no conflicts?|risk-free|healthy|caused by|definitely|PHP fatal|site (is|went) down|was down\b(?!\.)|https?:\/\/|confirmed conflict/i;
 
 const NOTHING_FLAGGED = 'Nothing flagged for review';
-const NOT_EVERYTHING =
-	'No concerning patterns matched the completed observations, but not everything could be assessed.';
+const NOT_FULLY = 'Not fully assessed';
+/** A finding's requests after the update, as one observation at its time. */
+const OBSERVED_ONCE =
+	/These requests ran at .+, right after the update; UpdateLens did not check again\./;
 
 describe( 'Website checks in Update results', () => {
 	beforeEach( () => {
@@ -204,10 +206,11 @@ describe( 'Website checks in Update results', () => {
 			);
 			expect( rowButton( row ) ).toHaveFocus();
 			expect( row ).toHaveTextContent(
-				'The homepage responded successfully before the update. Both requests after the update returned HTTP 500.'
+				'The homepage responded successfully before the update. Both requests after the update returned HTTP 500. These requests ran at'
 			);
+			expect( row ).toHaveTextContent( OBSERVED_ONCE );
 			expect( row ).toHaveTextContent(
-				'Visitors may see an error instead of the homepage.'
+				'Visitors may have seen an error instead of the homepage at that time.'
 			);
 			expect( row ).toHaveTextContent(
 				'The check does not establish what caused the change.'
@@ -263,17 +266,22 @@ describe( 'Website checks in Update results', () => {
 		}
 	} );
 
-	it( 'REST newly failing, homepage passed: block editor next step', async () => {
+	it( 'REST newly failing, homepage passed: the checked route, not the whole REST API', async () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'rest_newly_failing' ) );
 
 		expect( rowTitles() ).toEqual( [ 'REST API check newly failing' ] );
 		expect( rowButton( rows()[ 0 ] ) ).toHaveAccessibleDescription(
-			'The REST API returned invalid JSON twice after the update. Check whether the block editor works.'
+			'The REST API route /wp/v2/users/me returned invalid JSON twice after the update. Check the features that use it, such as the block editor.'
 		);
 		await user.click( rowButton( rows()[ 0 ] ) );
 		expect( rows()[ 0 ] ).toHaveTextContent(
-			'The REST API responded as expected before the update. Both requests after the update returned a response that was not valid JSON.'
+			'The REST API route /wp/v2/users/me responded as expected before the update. Both requests after the update returned a response that was not valid JSON.'
+		);
+		expect( rows()[ 0 ] ).toHaveTextContent( OBSERVED_ONCE );
+		// Never the whole REST API, and never "the block editor works" as a verdict.
+		expect( rows()[ 0 ].textContent ).not.toMatch(
+			/The REST API returned|block editor works/
 		);
 		expect(
 			within( rows()[ 0 ] ).getByRole( 'button', {
@@ -281,7 +289,7 @@ describe( 'Website checks in Update results', () => {
 			} )
 		).toBeInTheDocument();
 		expect( rows()[ 0 ] ).toHaveTextContent(
-			'The block editor and other features that use the REST API may not work as expected.'
+			'Features that request this route, such as the block editor, may not have worked as expected at that time.'
 		);
 		expect( rows()[ 0 ] ).toHaveTextContent(
 			'Open the block editor and try opening or saving a draft.'
@@ -298,8 +306,35 @@ describe( 'Website checks in Update results', () => {
 			'REST API check newly failing',
 		] );
 		expect( rowButton( rows()[ 1 ] ) ).toHaveAccessibleDescription(
-			'The REST API returned HTTP 500 twice after the update. Check whether the block editor works.'
+			'The REST API route /wp/v2/users/me returned HTTP 500 twice after the update. Check the features that use it, such as the block editor.'
 		);
+	} );
+
+	it( 'REST route missing (verified HTTP 404, rest_no_route): WordPress said the route does not exist', async () => {
+		const user = userEvent.setup();
+		await renderReport( withSiteChecks( COMPLETED, 'rest_route_missing' ) );
+
+		expect( priorityGroups() ).toEqual( [ 'High priority, 1' ] );
+		expect( rowTitles() ).toEqual( [ 'REST API check newly failing' ] );
+		expect( rowButton( rows()[ 0 ] ) ).toHaveAccessibleDescription(
+			'In both requests after the update, WordPress reported that the REST API route /wp/v2/users/me does not exist. Check whether a setting now hides it.'
+		);
+		await user.click( rowButton( rows()[ 0 ] ) );
+		const row = rows()[ 0 ];
+		expect( row ).toHaveTextContent(
+			'The REST API route /wp/v2/users/me responded as expected before the update. In both requests after the update, WordPress answered HTTP 404 with the error code rest_no_route: no REST API route matched /wp/v2/users/me.'
+		);
+		expect( row ).toHaveTextContent( OBSERVED_ONCE );
+		expect( row ).toHaveTextContent(
+			'WordPress itself answered, so this route was not registered on the site at that time. Security or REST API settings can hide user routes on purpose.'
+		);
+		expect( row ).toHaveTextContent(
+			'Check whether a security or REST API setting hides user routes; if it does, this may be intended.'
+		);
+		expect( row.textContent ).not.toMatch(
+			/The REST API returned|block editor works|returned HTTP 404 twice/
+		);
+		expect( row.textContent ).not.toMatch( FORBIDDEN );
 	} );
 
 	it( 'a new homepage redirect is a changed response, not a failure', async () => {
@@ -360,6 +395,11 @@ describe( 'Website checks in Update results', () => {
 		expect( row ).toHaveTextContent(
 			'they do not show that the site was down.'
 		);
+		// One observation at its time, worded in the past.
+		expect( row ).toHaveTextContent( OBSERVED_ONCE );
+		expect( row ).toHaveTextContent(
+			'The homepage may have been slow or unreachable for visitors at that time.'
+		);
 		expect( row.textContent ).not.toMatch( FORBIDDEN );
 	} );
 
@@ -377,7 +417,10 @@ describe( 'Website checks in Update results', () => {
 		await renderReport( withSiteChecks( COMPLETED, 'home_not_inspected' ) );
 
 		expect( findingLists() ).toHaveLength( 0 );
-		expect( resultPanel() ).toHaveTextContent( NOT_EVERYTHING );
+		expect( resultPanel() ).toHaveTextContent( NOT_FULLY );
+		expect( resultPanel() ).toHaveTextContent(
+			'UpdateLens cannot tell whether the homepage responded as it did before the update.'
+		);
 		const user = userEvent.setup();
 		expect( await siteResults( user ) ).toEqual( {
 			Homepage: 'Not compared',
@@ -475,6 +518,8 @@ describe( 'Website checks in Update results', () => {
 		'no_baseline',
 		'after_not_reported',
 		'overlapping_update',
+		'not_followed_up',
+		'next_update',
 	] as CaseName[] )(
 		'%s: both checks stay visibly not compared',
 		async ( name ) => {
@@ -482,7 +527,8 @@ describe( 'Website checks in Update results', () => {
 			await renderReport( withSiteChecks( COMPLETED, name ) );
 
 			// Not compared is never "no findings" for website checks.
-			expect( resultPanel() ).toHaveTextContent( NOT_EVERYTHING );
+			expect( resultPanel() ).toHaveTextContent( NOT_FULLY );
+			expect( resultPanel() ).not.toHaveTextContent( NOTHING_FLAGGED );
 			expect( resultPanel() ).toHaveAttribute( 'data-tone', 'neutral' );
 			expect( notAssessed() ).toHaveTextContent(
 				/Website checks not compared: Homepage and REST API/
@@ -563,7 +609,10 @@ describe( 'Website checks in Update results', () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'one_unavailable' ) );
 
-		expect( resultPanel() ).toHaveTextContent( NOT_EVERYTHING );
+		expect( resultPanel() ).toHaveTextContent( NOT_FULLY );
+		expect( resultPanel() ).toHaveTextContent(
+			'UpdateLens cannot tell whether the REST API route /wp/v2/users/me responded as it did before the update.'
+		);
 		const checked = await checkedRows( user );
 		expect( checked[ 'Homepage check' ] ).toBe(
 			'Passed at both observation points'
@@ -603,7 +652,7 @@ describe( 'Website checks in Update results', () => {
 
 		expect( rowTitles() ).toEqual( [ 'REST API check newly failing' ] );
 		expect( rowButton( rows()[ 0 ] ) ).toHaveAccessibleDescription(
-			'The REST API returned other output before its JSON twice after the update. Check whether the block editor works.'
+			'The REST API route /wp/v2/users/me returned other output before its JSON twice after the update. Check the features that use it, such as the block editor.'
 		);
 		expect(
 			within( impact() ).getByText(

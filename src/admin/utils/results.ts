@@ -10,14 +10,133 @@ import {
 	impactState,
 } from './impact';
 import type { Tone } from './labels';
+import { SITE_CHECKS } from './siteCheckImpact';
 
 /*
  * Wording of a report's "Update results" tab when no review rule matched:
  * one panel whose tone and words follow the API's evaluation and how
  * complete it was. Green only when every applicable observation was
  * assessed and no website check failed after the update; never "safe", and
- * never a statement about the whole website.
+ * never a statement about the whole website. When website checks were used
+ * for the update but one was not compared, the panel says the update was not
+ * fully assessed (never "Nothing flagged"): UpdateLens cannot tell how the
+ * site responded afterwards, and it never says why beyond the stored
+ * reasons, which the lines below the panel give.
  */
+
+/**
+ * Applicable website checks that were not compared (`not_evaluated` in the
+ * API's evaluation): `all` when none of them was, else the one that was
+ * not. Null when every applicable check was compared, is still pending, or
+ * website checks were not part of the update (off, not recorded, another
+ * origin).
+ *
+ * @param report Report.
+ */
+export function websiteGap(
+	report: AnalysisReport
+): 'all' | 'home' | 'rest' | null {
+	const site = report.potential_impact.site_checks;
+	if ( ! site || site.status === 'not_applicable' ) {
+		return null;
+	}
+	const checks = SITE_CHECKS.filter(
+		( check ) =>
+			site.checks[ check ] !== undefined &&
+			site.checks[ check ]?.status !== 'not_applicable'
+	);
+	if (
+		checks.some( ( check ) => site.checks[ check ]?.status === 'pending' )
+	) {
+		return null;
+	}
+	const missing = checks.filter(
+		( check ) => site.checks[ check ]?.status === 'not_evaluated'
+	);
+	if ( missing.length === 0 ) {
+		return null;
+	}
+	return missing.length === checks.length && checks.length > 1
+		? 'all'
+		: missing[ 0 ];
+}
+
+/**
+ * What a "Nothing flagged" panel covered, in its closing sentence: which
+ * website checks were compared, that they were off, or that the site's
+ * responses were not checked at all. Never more than the API's states say.
+ *
+ * @param report Report.
+ */
+function scopeNote( report: AnalysisReport ): string {
+	const site = report.potential_impact.site_checks;
+	const compared = SITE_CHECKS.filter(
+		( check ) => site?.checks[ check ]?.status === 'evaluated'
+	);
+	if ( compared.length === 2 ) {
+		return __(
+			'UpdateLens checks selected patterns, and its website checks covered only the homepage and the REST API route /wp/v2/users/me, so this does not guarantee that the update had no other effects.',
+			'updatelens'
+		);
+	}
+	if ( compared.length === 1 ) {
+		return compared[ 0 ] === 'home'
+			? __(
+					'UpdateLens checks selected patterns, and its website checks covered only the homepage, so this does not guarantee that the update had no other effects.',
+					'updatelens'
+				)
+			: __(
+					'UpdateLens checks selected patterns, and its website checks covered only the REST API route /wp/v2/users/me, so this does not guarantee that the update had no other effects.',
+					'updatelens'
+				);
+	}
+	const off =
+		site !== undefined &&
+		SITE_CHECKS.some(
+			( check ) => site.checks[ check ]?.reason === 'disabled'
+		);
+	return off
+		? __(
+				'UpdateLens checks selected patterns only, and website checks were off for this update, so this does not guarantee that the update had no other effects.',
+				'updatelens'
+			)
+		: __(
+				'UpdateLens checks selected patterns only, and the site’s responses were not checked for this update, so this does not guarantee that the update had no other effects.',
+				'updatelens'
+			);
+}
+
+/**
+ * The panel when website checks were used but not all were compared.
+ *
+ * @param gap Which applicable checks were not compared.
+ */
+function notFullyAssessed( gap: 'all' | 'home' | 'rest' ): ResultPanel {
+	const text = {
+		all: __(
+			'No review rule matched the completed observations, but the website checks were not compared before and after the update. UpdateLens cannot tell whether the website responded as it did before the update.',
+			'updatelens'
+		),
+		home: __(
+			'No review rule matched the completed observations, but the homepage check was not compared before and after the update. UpdateLens cannot tell whether the homepage responded as it did before the update.',
+			'updatelens'
+		),
+		rest: __(
+			'No review rule matched the completed observations, but the REST API check was not compared before and after the update. UpdateLens cannot tell whether the REST API route /wp/v2/users/me responded as it did before the update.',
+			'updatelens'
+		),
+	}[ gap ];
+	return {
+		tone: 'neutral',
+		icon: 'info',
+		title: __( 'Not fully assessed', 'updatelens' ),
+		text,
+		note: __(
+			'Open the homepage and WordPress admin yourself to check that the site works.',
+			'updatelens'
+		),
+	};
+}
 
 /** The result panel of the Update results tab. */
 export interface ResultPanel {
@@ -40,10 +159,6 @@ export function resultPanel( report: AnalysisReport ): ResultPanel | null {
 	const impact = report.potential_impact;
 	const state = impactState( impact );
 	const windowSeconds = report.observation_window_seconds;
-	const limit = __(
-		'UpdateLens checks selected patterns only, so this does not guarantee that the update had no other effects.',
-		'updatelens'
-	);
 	switch ( state ) {
 		case 'findings':
 			return null;
@@ -63,6 +178,10 @@ export function resultPanel( report: AnalysisReport ): ResultPanel | null {
 						'updatelens'
 					),
 				};
+			}
+			const gap = websiteGap( report );
+			if ( gap !== null ) {
+				return notFullyAssessed( gap );
 			}
 			// A website check already failing before the update is not a
 			// finding, but the panel must not read as a pass.
@@ -90,7 +209,7 @@ export function resultPanel( report: AnalysisReport ): ResultPanel | null {
 								'No concerning patterns matched the completed observations, but not everything could be assessed.',
 								'updatelens'
 							),
-				note: limit,
+				note: scopeNote( report ),
 			};
 		}
 		case 'waiting':

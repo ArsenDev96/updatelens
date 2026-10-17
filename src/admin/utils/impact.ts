@@ -279,8 +279,8 @@ export function whatToCheck( group: FindingGroup ): string[] {
 					'updatelens'
 				),
 				_n(
-					'Look for a replacement: an event added under another hook name appears in WP-Cron’s added events.',
-					'Look for replacements: events added under other hook names appear in WP-Cron’s added events.',
+					'Look for a replacement: a task can move to another hook name in WP-Cron or to Action Scheduler, and both appear among the added entries in Configuration changes. UpdateLens does not link them to this event.',
+					'Look for replacements: tasks can move to other hook names in WP-Cron or to Action Scheduler, and both appear among the added entries in Configuration changes. UpdateLens does not link them to these events.',
 					count,
 					'updatelens'
 				),

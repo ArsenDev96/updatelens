@@ -213,8 +213,16 @@ describe( 'HistoryPage', () => {
 	} );
 
 	it.each( [
-		[ 'home_newly_failing', 'newly_failing', 'Newly failing: Homepage' ],
-		[ 'rest_newly_failing', 'newly_failing', 'Newly failing: REST API' ],
+		[
+			'home_newly_failing',
+			'newly_failing',
+			'Newly failing right after the update: Homepage',
+		],
+		[
+			'rest_newly_failing',
+			'newly_failing',
+			'Newly failing right after the update: REST API',
+		],
 		[ 'both_passed', 'passed', 'Passed before and after' ],
 		// Partly compared: each check's own state follows.
 		[
@@ -228,6 +236,14 @@ describe( 'HistoryPage', () => {
 			'1 of 2 compared · Homepage: not compared · REST API: passed before and after',
 		],
 		[ 'no_baseline', 'not_compared', 'Not compared' ],
+		// No follow-up from the updating tab (Dashboard → Updates, a page
+		// left, or a site that did not answer): never presented as passed.
+		[ 'not_followed_up', 'not_compared', 'Not compared' ],
+		[
+			'rest_route_missing',
+			'newly_failing',
+			'Newly failing right after the update: REST API',
+		],
 		[ 'pending', 'pending', 'Waiting for results' ],
 		[ 'disabled', 'disabled', 'Off for this update' ],
 		[ 'both_cross_origin', 'unsupported', 'Not supported on this site' ],
@@ -271,6 +287,48 @@ describe( 'HistoryPage', () => {
 			if ( kind !== 'passed' ) {
 				expect( line.textContent ).not.toMatch( /Passed/ );
 			}
+		}
+	);
+
+	// "Newly failing" needs a stored comparison that establishes it: a verified
+	// pass before and a confirmed failure after. A check that failed before
+	// and after, recovered, or failed after a redirect is never newly failing.
+	it.each( [
+		[ 'failing_both', 'failing', 'Failing after the update: Homepage' ],
+		[
+			'redirect_then_failure',
+			'failing',
+			'Failing after the update: Homepage',
+		],
+		[ 'recovered', 'compared', 'Compared before and after' ],
+	] as Array< [ keyof typeof cases.cases, string, string ] > )(
+		'%s: History never says newly failing',
+		async ( name, kind, text ) => {
+			const evaluation = cases.cases[ name ]
+				.potential_impact_site_checks as SiteCheckImpact;
+			expect(
+				Object.values( evaluation.checks ).map(
+					( check ) => check.state
+				)
+			).not.toContain( 'newly_failing' );
+			apiFetchMock.mockResolvedValue(
+				listResponse( [
+					historyItem( COMPLETED, {
+						site_checks: {
+							status: evaluation.status,
+							checks: evaluation.checks,
+						},
+					} ),
+				] )
+			);
+			renderHistory();
+
+			const [ link ] = await screen.findAllByRole( 'link' );
+			const line = link.querySelector( '[data-outcome]' )!;
+			expect( line ).toHaveAttribute( 'data-outcome', kind );
+			expect( line.textContent?.startsWith( text ) ).toBe( true );
+			expect( link.textContent ).not.toMatch( /newly failing/i );
+			expect( line.querySelector( '.text-rose-800' ) ).toBeNull();
 		}
 	);
 

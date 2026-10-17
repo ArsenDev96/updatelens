@@ -2551,6 +2551,415 @@
         "findings": []
       }
     },
+    "not_followed_up": {
+      "description": "Settled by a later admin page, not by the updating browser's follow-up (Dashboard \u2192 Updates, a page left during the update, or a follow-up the site did not answer).",
+      "site_checks": {
+        "status": "unavailable",
+        "checks": {
+          "home": {
+            "state": "not_run",
+            "reason": "after_missing",
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "end_marker": "current",
+                    "duration_ms": 284,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": false,
+              "reason": "not_followed_up",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "delay_seconds": null
+            }
+          },
+          "rest": {
+            "state": "not_run",
+            "reason": "after_missing",
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "body": "expected_user",
+                    "error_code": null,
+                    "duration_ms": 182,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": false,
+              "reason": "not_followed_up",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "delay_seconds": null
+            }
+          }
+        }
+      },
+      "potential_impact_site_checks": {
+        "status": "not_evaluated",
+        "checks": {
+          "home": {
+            "status": "not_evaluated",
+            "state": "not_run",
+            "change": null,
+            "reason": "not_followed_up",
+            "finding_count": null
+          },
+          "rest": {
+            "status": "not_evaluated",
+            "state": "not_run",
+            "change": null,
+            "reason": "not_followed_up",
+            "finding_count": null
+          }
+        },
+        "findings": []
+      }
+    },
+    "next_update": {
+      "description": "Another plugin update started right after this one, so no check ran after this update alone.",
+      "site_checks": {
+        "status": "unavailable",
+        "checks": {
+          "home": {
+            "state": "not_run",
+            "reason": "after_missing",
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "end_marker": "current",
+                    "duration_ms": 284,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": false,
+              "reason": "next_update",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "delay_seconds": null
+            }
+          },
+          "rest": {
+            "state": "not_run",
+            "reason": "after_missing",
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "body": "expected_user",
+                    "error_code": null,
+                    "duration_ms": 182,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": false,
+              "reason": "next_update",
+              "started_at": null,
+              "completed_at": null,
+              "result": null,
+              "delay_seconds": null
+            }
+          }
+        }
+      },
+      "potential_impact_site_checks": {
+        "status": "not_evaluated",
+        "checks": {
+          "home": {
+            "status": "not_evaluated",
+            "state": "not_run",
+            "change": null,
+            "reason": "next_update",
+            "finding_count": null
+          },
+          "rest": {
+            "status": "not_evaluated",
+            "state": "not_run",
+            "change": null,
+            "reason": "next_update",
+            "finding_count": null
+          }
+        },
+        "findings": []
+      }
+    },
+    "rest_route_missing": {
+      "description": "REST API route /wp/v2/users/me answered HTTP 404 rest_no_route twice (verified as WordPress), homepage passed at both.",
+      "site_checks": {
+        "status": "complete",
+        "checks": {
+          "home": {
+            "state": "passed_both",
+            "reason": null,
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "end_marker": "current",
+                    "duration_ms": 284,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:53:25Z",
+              "completed_at": "2025-10-10T09:53:25Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "end_marker": "current",
+                    "duration_ms": 284,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "delay_seconds": 3
+            }
+          },
+          "rest": {
+            "state": "newly_failing",
+            "reason": null,
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "body": "expected_user",
+                    "error_code": null,
+                    "duration_ms": 182,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:53:25Z",
+              "completed_at": "2025-10-10T09:53:30Z",
+              "result": {
+                "verdict": "fail",
+                "reason": "not_found",
+                "attempts": [
+                  {
+                    "outcome": "not_found",
+                    "status": 404,
+                    "header": "current",
+                    "body": "wp_error",
+                    "error_code": "rest_no_route",
+                    "duration_ms": 217,
+                    "origin": "verified",
+                    "verdict": "fail",
+                    "reason": "not_found"
+                  },
+                  {
+                    "outcome": "not_found",
+                    "status": 404,
+                    "header": "current",
+                    "body": "wp_error",
+                    "error_code": "rest_no_route",
+                    "duration_ms": 217,
+                    "origin": "verified",
+                    "verdict": "fail",
+                    "reason": "not_found"
+                  }
+                ]
+              },
+              "delay_seconds": 3
+            }
+          }
+        }
+      },
+      "potential_impact_site_checks": {
+        "status": "evaluated",
+        "checks": {
+          "home": {
+            "status": "evaluated",
+            "state": "passed_both",
+            "change": null,
+            "reason": null,
+            "finding_count": 0
+          },
+          "rest": {
+            "status": "evaluated",
+            "state": "newly_failing",
+            "change": null,
+            "reason": null,
+            "finding_count": 1
+          }
+        },
+        "findings": [
+          {
+            "code": "site_check_newly_failing",
+            "signal": "site_checks",
+            "check": "rest",
+            "evidence": {
+              "failure": "not_found",
+              "attempt_count": 2
+            },
+            "before": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:49:06Z",
+              "completed_at": "2025-10-10T09:49:07Z",
+              "result": {
+                "verdict": "pass",
+                "reason": null,
+                "attempts": [
+                  {
+                    "outcome": "success",
+                    "status": 200,
+                    "header": "current",
+                    "body": "expected_user",
+                    "error_code": null,
+                    "duration_ms": 182,
+                    "origin": "verified",
+                    "verdict": "pass",
+                    "reason": null
+                  }
+                ]
+              },
+              "age_seconds": 252
+            },
+            "after": {
+              "available": true,
+              "reason": null,
+              "started_at": "2025-10-10T09:53:25Z",
+              "completed_at": "2025-10-10T09:53:30Z",
+              "result": {
+                "verdict": "fail",
+                "reason": "not_found",
+                "attempts": [
+                  {
+                    "outcome": "not_found",
+                    "status": 404,
+                    "header": "current",
+                    "body": "wp_error",
+                    "error_code": "rest_no_route",
+                    "duration_ms": 217,
+                    "origin": "verified",
+                    "verdict": "fail",
+                    "reason": "not_found"
+                  },
+                  {
+                    "outcome": "not_found",
+                    "status": 404,
+                    "header": "current",
+                    "body": "wp_error",
+                    "error_code": "rest_no_route",
+                    "duration_ms": 217,
+                    "origin": "verified",
+                    "verdict": "fail",
+                    "reason": "not_found"
+                  }
+                ]
+              },
+              "delay_seconds": 3
+            },
+            "priority": "high"
+          }
+        ]
+      }
+    },
     "disabled": {
       "description": "Site checks were disabled for this update.",
       "site_checks": {

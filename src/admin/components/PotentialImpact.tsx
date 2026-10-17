@@ -353,6 +353,7 @@ function ResultPanelView( { panel }: { panel: ResultPanel } ) {
 		<section
 			aria-labelledby="updatelens-result-title"
 			data-tone={ panel.tone }
+			data-icon={ panel.icon }
 			className={ cn(
 				'flex flex-col gap-4 rounded-xl border border-l-[6px] px-5 py-6 shadow-surface sm:flex-row sm:items-center sm:gap-7 sm:px-8 sm:py-8',
 				style.panel
@@ -1213,26 +1214,33 @@ function GroupDetails( {
 		}
 	}, [ visibleCount ] );
 
+	// "What changed" only when something follows it: several schedule
+	// changes have no shared facts, and each row below says what changed.
+	const whatChangedShown =
+		total === 1 || facts.rows.length > 0 || facts.notes.length > 0;
+
 	return (
 		<div className="border-t">
-			<div className="px-4 pt-3 sm:px-5">
-				<DetailHeading>
-					{ __( 'What changed', 'updatelens' ) }
-				</DetailHeading>
-				{ total === 1 && (
-					<p className="mt-1 text-sm leading-6 text-slate-800">
-						{ whatChanged( group.findings[ 0 ] ) }
-					</p>
-				) }
-				{ facts.rows.length > 0 && (
-					<RowDetails boxed rows={ facts.rows } />
-				) }
-				{ facts.notes.length > 0 && (
-					<p className="mt-1.5 text-[13px] leading-5 text-slate-600">
-						{ facts.notes.join( ' ' ) }
-					</p>
-				) }
-			</div>
+			{ whatChangedShown && (
+				<div className="px-4 pt-3 sm:px-5">
+					<DetailHeading>
+						{ __( 'What changed', 'updatelens' ) }
+					</DetailHeading>
+					{ total === 1 && (
+						<p className="mt-1 text-sm leading-6 text-slate-800">
+							{ whatChanged( group.findings[ 0 ] ) }
+						</p>
+					) }
+					{ facts.rows.length > 0 && (
+						<RowDetails boxed rows={ facts.rows } />
+					) }
+					{ facts.notes.length > 0 && (
+						<p className="mt-1.5 text-[13px] leading-5 text-slate-600">
+							{ facts.notes.join( ' ' ) }
+						</p>
+					) }
+				</div>
+			) }
 			<Guidance
 				why={ whyItMatters( group ) }
 				next={ whatToCheck( group ) }

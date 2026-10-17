@@ -330,8 +330,10 @@ describe( 'Update results', () => {
 	it( 'without findings: nothing flagged, in green only when everything was assessed', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'both_passed' ) );
 		expect( panel() ).toHaveAttribute( 'data-tone', 'positive' );
+		expect( panel() ).toHaveAttribute( 'data-icon', 'check' );
+		// The green result names its limited scope: two requests, not the site.
 		expect( panel() ).toHaveTextContent(
-			'Nothing flagged for reviewNo concerning patterns matched the completed observations.UpdateLens checks selected patterns only, so this does not guarantee that the update had no other effects.'
+			'Nothing flagged for reviewNo concerning patterns matched the completed observations.UpdateLens checks selected patterns, and its website checks covered only the homepage and the REST API route /wp/v2/users/me, so this does not guarantee that the update had no other effects.'
 		);
 		expect( priorityGroups() ).toEqual( [] );
 		expect( notAssessed() ).toBeNull();
@@ -375,51 +377,130 @@ describe( 'Update results', () => {
 		expect( reportPanel().textContent ).not.toMatch( /Passed/ );
 	} );
 
+	it( 'without findings, a configuration source not assessed: nothing flagged, never green', async () => {
+		await renderReport( MALFORMED_CRON );
+		expect( panel() ).toHaveAttribute( 'data-tone', 'neutral' );
+		expect( panel() ).toHaveTextContent(
+			'Nothing flagged for reviewNo concerning patterns matched the completed observations, but not everything could be assessed.'
+		);
+		expect( notAssessed() ).toEqual( [
+			'WP-Cron: WP-Cron analysis unavailable',
+		] );
+		expect( priorityGroups() ).toEqual( [] );
+	} );
+
+	/** The panel's text without its title and note. */
+	const NOT_FULLY = {
+		all: 'No review rule matched the completed observations, but the website checks were not compared before and after the update. UpdateLens cannot tell whether the website responded as it did before the update.',
+		home: 'No review rule matched the completed observations, but the homepage check was not compared before and after the update. UpdateLens cannot tell whether the homepage responded as it did before the update.',
+		rest: 'No review rule matched the completed observations, but the REST API check was not compared before and after the update. UpdateLens cannot tell whether the REST API route /wp/v2/users/me responded as it did before the update.',
+	};
+
 	it.each( [
 		[
-			'configuration sources only',
-			MALFORMED_CRON,
-			null,
-			[ 'WP-Cron: WP-Cron analysis unavailable' ],
-		],
-		[
-			'website checks only',
+			// The whole site failed after the update (the updating browser's
+			// follow-up could not succeed), Dashboard → Updates, or a page left
+			// during the update: the stored evidence cannot tell them apart.
+			'no follow-up from the updating tab',
 			COMPLETED,
-			'after_not_reported',
+			'not_followed_up',
+			NOT_FULLY.all,
 			[
 				'Website checks not compared: Homepage and REST API (no check after the update)',
 			],
 		],
 		[
-			'one website check only',
+			'checks after the update never reported',
+			COMPLETED,
+			'after_not_reported',
+			NOT_FULLY.all,
+			[
+				'Website checks not compared: Homepage and REST API (no check after the update)',
+			],
+		],
+		[
+			'another update right after this one',
+			COMPLETED,
+			'next_update',
+			NOT_FULLY.all,
+			[
+				'Website checks not compared: Homepage and REST API (another update ran at the same time)',
+			],
+		],
+		[
+			'an update overlapping the checks after it',
+			COMPLETED,
+			'overlapping_update',
+			NOT_FULLY.all,
+			[
+				'Website checks not compared: Homepage and REST API (another update ran at the same time)',
+			],
+		],
+		[
+			'one website check only (REST)',
 			COMPLETED,
 			'one_unavailable',
+			NOT_FULLY.rest,
 			[
 				'Website checks not compared: REST API (no check before the update)',
 			],
 		],
 		[
-			'both',
+			'one website check only (homepage, inconclusive after the update)',
+			COMPLETED,
+			'unconfirmed',
+			NOT_FULLY.home,
+			[ 'Website checks not compared: Homepage (could not be compared)' ],
+		],
+		[
+			'website checks and a configuration source',
 			MALFORMED_CRON,
 			'no_baseline',
+			NOT_FULLY.all,
 			[
 				'WP-Cron: WP-Cron analysis unavailable',
 				'Website checks not compared: Homepage and REST API (no check before the update)',
 			],
 		],
-	] as Array< [ string, AnalysisReport, CaseName | null, string[] ] > )(
-		'without findings, what was not assessed is listed and the panel is not green: %s',
-		async ( _label, base, name, lines ) => {
-			await renderReport( name ? withSiteChecks( base, name ) : base );
+	] as Array< [ string, AnalysisReport, CaseName, string, string[] ] > )(
+		'without findings, website checks used but not compared: not fully assessed, never "Nothing flagged": %s',
+		async ( _label, base, name, text, lines ) => {
+			await renderReport( withSiteChecks( base, name ) );
 			expect( panel() ).toHaveAttribute( 'data-tone', 'neutral' );
+			// No check mark: nothing here reads as all clear.
+			expect( panel() ).toHaveAttribute( 'data-icon', 'info' );
 			expect( panel() ).toHaveTextContent(
-				'No concerning patterns matched the completed observations, but not everything could be assessed.'
+				`Not fully assessed${ text }Open the homepage and WordPress admin yourself to check that the site works.`
+			);
+			expect( panel() ).not.toHaveTextContent( 'Nothing flagged' );
+			// It never claims a failure or a cause the evidence does not show.
+			expect( panel()?.textContent ).not.toMatch(
+				/down|outage|failed|closed|broke/i
 			);
 			expect( notAssessed() ).toEqual( lines );
 			// Not assessed is never a priority.
 			expect( priorityGroups() ).toEqual( [] );
 		}
 	);
+
+	it( 'findings stay listed by priority when website checks were not compared', async () => {
+		await renderReport( withSiteChecks( IMPACT, 'not_followed_up' ) );
+		expect( panel() ).toBeNull();
+		expect( priorityGroups() ).toEqual( [ 'Needs review, 5' ] );
+		expect( notAssessed() ).toEqual( [
+			'Website checks not compared: Homepage and REST API (no check after the update)',
+		] );
+		expect( reportPanel() ).not.toHaveTextContent( 'Nothing flagged' );
+	} );
+
+	it( 'an expired observation keeps its own panel', async () => {
+		await renderReport( EXPIRED );
+		expect( panel() ).toHaveTextContent(
+			/^Not assessed in this partial report/
+		);
+		expect( panel() ).not.toHaveTextContent( 'Not fully assessed' );
+		expect( panel() ).toHaveAttribute( 'data-icon', 'info' );
+	} );
 
 	it.each( [ 'failing_both', 'redirect_then_failure' ] as CaseName[] )(
 		'%s: a check failing after the update keeps the panel from reading as a pass',
@@ -430,11 +511,31 @@ describe( 'Update results', () => {
 		}
 	);
 
-	it.each( [ 'disabled', 'historical', 'both_cross_origin' ] as CaseName[] )(
-		'%s: website checks that were not used do not count against completeness',
-		async ( name ) => {
+	it.each( [
+		[
+			'disabled',
+			'UpdateLens checks selected patterns only, and website checks were off for this update, so this does not guarantee that the update had no other effects.',
+		],
+		[
+			'historical',
+			'UpdateLens checks selected patterns only, and the site’s responses were not checked for this update, so this does not guarantee that the update had no other effects.',
+		],
+		[
+			'both_cross_origin',
+			'UpdateLens checks selected patterns only, and the site’s responses were not checked for this update, so this does not guarantee that the update had no other effects.',
+		],
+		[
+			'home_cross_origin',
+			'UpdateLens checks selected patterns, and its website checks covered only the REST API route /wp/v2/users/me, so this does not guarantee that the update had no other effects.',
+		],
+	] as Array< [ CaseName, string ] > )(
+		'%s: website checks that were not used do not count against completeness, and the panel says what was checked',
+		async ( name, note ) => {
 			await renderReport( withSiteChecks( COMPLETED, name ) );
 			expect( panel() ).toHaveAttribute( 'data-tone', 'positive' );
+			expect( panel() ).toHaveTextContent(
+				`Nothing flagged for reviewNo concerning patterns matched the completed observations.${ note }`
+			);
 			expect( notAssessed() ).toBeNull();
 		}
 	);

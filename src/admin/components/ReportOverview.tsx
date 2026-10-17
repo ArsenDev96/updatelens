@@ -90,11 +90,11 @@ export function ConfigurationChanges( {
 			<h3
 				id="updatelens-configuration-title"
 				tabIndex={ -1 }
-				className="text-xl font-semibold tracking-tight text-slate-950 focus:outline-none"
+				className="text-section-title font-semibold tracking-tight text-slate-950 focus:outline-none"
 			>
 				{ __( 'Configuration changes', 'updatelens' ) }
 			</h3>
-			<p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+			<p className="mt-1 max-w-2xl text-section-description text-muted-foreground">
 				{ __(
 					'Changes observed around the update, by source. Observed changes are not proof that the updated plugin made them.',
 					'updatelens'

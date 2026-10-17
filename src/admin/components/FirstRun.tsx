@@ -60,11 +60,11 @@ export function FirstRun( { pluginsUrl, headingRef }: FirstRunProps ) {
 						id="updatelens-first-run-title"
 						ref={ headingRef }
 						tabIndex={ -1 }
-						className="text-lg font-semibold outline-none"
+						className="text-section-title font-semibold outline-none"
 					>
 						{ __( 'UpdateLens is ready', 'updatelens' ) }
 					</h2>
-					<p className="text-sm text-muted-foreground">
+					<p className="text-section-description text-muted-foreground">
 						{ __(
 							'Update one plugin normally from WordPress admin. UpdateLens will observe what changes during the update and shortly afterward.',
 							'updatelens'

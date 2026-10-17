@@ -86,11 +86,11 @@ export function HistoryPage( {
 					id="updatelens-history-title"
 					ref={ heading }
 					tabIndex={ -1 }
-					className="text-lg font-semibold outline-none"
+					className="text-section-title font-semibold outline-none"
 				>
 					{ __( 'Update History', 'updatelens' ) }
 				</h2>
-				<p className="text-sm text-muted-foreground">
+				<p className="text-section-description text-muted-foreground">
 					{ __(
 						'Plugin updates analyzed by UpdateLens.',
 						'updatelens'

@@ -245,7 +245,7 @@ final class AdminPage {
 		$plugins_url = current_user_can( 'activate_plugins' ) ? admin_url( 'plugins.php' ) : '';
 		?>
 		<div class="wrap">
-			<h1><?php esc_html_e( 'UpdateLens', 'updatelens' ); ?></h1>
+			<h1 class="updatelens-page-title"><?php esc_html_e( 'UpdateLens', 'updatelens' ); ?></h1>
 			<hr class="wp-header-end">
 			<?php if ( $this->assets_loaded ) : ?>
 				<div id="<?php echo esc_attr( self::ROOT_ID ); ?>" data-view="<?php echo esc_attr( $view ); ?>" data-plugins-url="<?php echo esc_url( $plugins_url ); ?>"></div>

@@ -232,7 +232,7 @@ function homeFailureLine( after: SiteCheckSide ): string {
 			);
 		case 'incomplete':
 			return __(
-				'The homepage did not reach its completion marker in two requests after the update. Check whether the whole page loads.',
+				'In two requests after the update, the homepage ended without its completion marker. Check what signed-out visitors see now.',
 				'updatelens'
 			);
 		default:
@@ -386,7 +386,7 @@ export function laterText(
 			);
 		case 'incomplete':
 			return __(
-				'WordPress answered both requests after the update, but the page did not reach the expected completion marker.',
+				'WordPress answered both requests after the update, but the page ended without the completion marker that WordPress’s page footer prints.',
 				'updatelens'
 			);
 		case 'invalid_json':
@@ -501,7 +501,11 @@ export function siteCheckWhyItMatters( finding: SiteCheckFinding ): string[] {
 		case 'incomplete':
 			return [
 				__(
-					'A page that stops before its end can leave parts of the homepage missing for visitors.',
+					'If the page stopped before WordPress’s page footer, for example because of a PHP error, visitors may have seen only part of the homepage at that time.',
+					'updatelens'
+				),
+				__(
+					'A page that replaces the homepage for signed-out visitors, such as a coming-soon or maintenance page, also ends without this marker; the check cannot tell the two apart.',
 					'updatelens'
 				),
 				noCause,
@@ -600,11 +604,11 @@ function homeSteps( after: SiteCheckSide ): string[] {
 		case 'incomplete':
 			return [
 				__(
-					'Open the homepage in a private window and check whether the whole page appears, including the footer.',
+					'Open the homepage in a private window. If it shows a coming-soon or maintenance page that you turned on, this is expected.',
 					'updatelens'
 				),
 				__(
-					'Review PHP warnings and error logs from around the time of the update.',
+					'Otherwise, check whether the whole page appears, including the footer, and review PHP warnings and error logs from around the time of the update.',
 					'updatelens'
 				),
 			];
@@ -1417,7 +1421,7 @@ export function afterReasonText( reason: string ): string {
 			);
 		case 'not_followed_up':
 			return __(
-				'The check after the update runs in the tab that clicked “Update now” on Installed Plugins, right after “Updated!”. No follow-up from that tab reached UpdateLens for this update. That happens when the update ran from Dashboard → Updates, when the page was left or closed during the update, or when the site did not answer the browser’s follow-up request.',
+				'The check after the update runs in the tab that clicked “Update now” on Installed Plugins, right after “Updated!”. No follow-up from that tab reached UpdateLens for this update. That happens when the update ran from Dashboard → Updates, when the page was left or closed during the update, when the site did not answer the browser’s follow-up request, or when another plugin answered that request with its own page, such as a setup screen shown after the plugin updates.',
 				'updatelens'
 			);
 		case 'no_baseline':
@@ -1466,6 +1470,10 @@ export function siteCheckNextTimeText( reason: string | null ): string | null {
 				'updatelens'
 			);
 		case 'not_followed_up':
+			return __(
+				'For a comparison next time, click “Update now” on Installed Plugins and keep that tab open for a few seconds after “Updated!”. If the tab stayed open, another plugin may have answered UpdateLens’s request; this can repeat until any setup screen that plugin shows is completed.',
+				'updatelens'
+			);
 		case 'not_started':
 		case 'not_reported':
 			return __(

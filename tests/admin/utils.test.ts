@@ -31,6 +31,7 @@ import {
 } from '@/admin/utils/labels';
 import type { AnalysisReport } from '@/admin/types/api';
 import { notAssessedLines } from '@/admin/utils/glance';
+import { siteCheckNextTimeText } from '@/admin/utils/siteCheckImpact';
 import { siteCheckOutcome } from '@/admin/utils/siteChecks';
 import { parseRoute, reportTab, routeHref } from '@/admin/utils/route';
 
@@ -795,5 +796,35 @@ describe( 'WP-Cron labels', () => {
 			'WordPress core and other plugins may also schedule or reschedule jobs'
 		);
 		expect( cronPhaseNote() ).not.toMatch( /caus|created by/i );
+	} );
+} );
+
+describe( 'siteCheckNextTimeText', () => {
+	const KEEP_TAB_OPEN =
+		'For a comparison next time, click “Update now” on Installed Plugins and keep that tab open for a few seconds after “Updated!”.';
+
+	it( 'keeps the tab-open advice word for word for a check that did not start or report', () => {
+		expect( siteCheckNextTimeText( 'not_started' ) ).toBe( KEEP_TAB_OPEN );
+		expect( siteCheckNextTimeText( 'not_reported' ) ).toBe( KEEP_TAB_OPEN );
+	} );
+
+	it( 'adds the conditional note about another plugin only without a follow-up', () => {
+		expect( siteCheckNextTimeText( 'not_followed_up' ) ).toBe(
+			`${ KEEP_TAB_OPEN } If the tab stayed open, another plugin may have answered UpdateLens’s request; this can repeat until any setup screen that plugin shows is completed.`
+		);
+	} );
+
+	it( 'is unchanged for other updates and has no advice otherwise', () => {
+		for ( const reason of [
+			'next_update',
+			'overlapping_update',
+			'queued_update',
+		] ) {
+			expect( siteCheckNextTimeText( reason ) ).toBe(
+				'For a comparison next time, update one plugin at a time: on Installed Plugins, wait for “Ready to compare website responses”, click “Update now”, and wait a few seconds after “Updated!” before starting the next update.'
+			);
+		}
+		expect( siteCheckNextTimeText( 'no_baseline' ) ).toBeNull();
+		expect( siteCheckNextTimeText( null ) ).toBeNull();
 	} );
 } );

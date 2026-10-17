@@ -28,7 +28,7 @@ Reports show observed changes, not proof of what the plugin caused. UpdateLens o
 
 Analyzed: manual single-plugin updates from wp-admin (Update now on the Plugins screen, or Dashboard → Updates with one plugin selected).
 
-Not analyzed: bulk updates of several plugins, automatic/background updates, WP-CLI updates, ZIP uploads over an installed plugin, themes, core, translations, Multisite and UpdateLens itself. These updates still run normally.
+Not analyzed: updates of several plugins in one request (Dashboard → Updates with more than one plugin selected), automatic/background updates, WP-CLI updates, ZIP uploads over an installed plugin, themes, core, translations, Multisite and UpdateLens itself. These updates still run normally. Selecting several plugins on Installed Plugins and choosing Update analyzes each plugin separately, but their website checks are not compared.
 
 Known limitations: only options, WP-Cron and Action Scheduler are compared. WP-Cron and Action Scheduler arguments are hidden, so events or actions with the same hook can look alike. A one-time WP-Cron event that is no longer scheduled may have run or been unscheduled. Action Scheduler is compared as active state, not execution history: an action that is no longer active may have run or been canceled, and a short-lived action queued and completed between observations may not appear. Hook and group names do not prove which plugin caused an action.
 
@@ -39,9 +39,9 @@ Website checks are off by default. To use them, open UpdateLens → Settings, se
 When they are on, your browser requests two addresses of your own site: the homepage as an anonymous visitor (without cookies) and the REST API endpoint `/wp/v2/users/me` as the signed-in administrator. A request that does not pass is repeated once. A check runs only when its address uses the same scheme, host and port as wp-admin.
 
 * Checks before an update run in the background on the Plugins and Updates screens while plugin updates are available. Turning website checks on does not test your site right away. On Installed Plugins, a short status next to the screen title says when they are ready to compare ("Ready to compare website responses"); ready means a comparison is possible, not that the checks will pass.
-* Checks after an update run only after a successful Update now on Installed Plugins, in the same tab, and only for checks with a result from the last 10 minutes before the update. Keep that tab open for a few seconds after "Updated!". Other analyzed updates (for example from Dashboard → Updates, which says so) get no check after the update; their report says the checks could not be compared.
+* Checks after an update run only after a successful Update now on Installed Plugins, in the same tab, and only for checks with a result from the last 10 minutes before the update. Keep that tab open for a few seconds after "Updated!". If another plugin answers UpdateLens's request after the update with its own page (some plugins show a setup screen after they update), no check runs after that update. Other analyzed updates (for example from Dashboard → Updates, which says so) get no check after the update; their report says the checks could not be compared.
 
-Plugin updates never wait for a website check. Each report shows the results in its Website checks tab: for the homepage and the REST API, the result before and after the update, what changed, or why they could not be compared. A check that passed before the update and failed afterwards is a high-priority finding; a homepage that started to redirect needs review. Missing, inconclusive and unsupported checks are never counted as passed. Results are observations, not proof that the plugin caused a problem. Page caches, firewalls, login restrictions and maintenance mode can prevent a comparison. Website checks are not uptime monitoring.
+Plugin updates never wait for a website check. Each report shows the results in its Website checks tab: for the homepage and the REST API, the result before and after the update, what changed, or why they could not be compared. A check that passed before the update and failed afterwards is a high-priority finding; a homepage that started to redirect needs review. Missing, inconclusive and unsupported checks are never counted as passed. Results are observations, not proof that the plugin caused a problem. Page caches, firewalls, login restrictions and maintenance pages answered with HTTP 503 can prevent a comparison. A coming-soon or maintenance page answered with HTTP 200 ends without UpdateLens's completion marker: if it was turned on between the checks, the report shows a high-priority homepage finding. A page that still runs WordPress's page footer passes, because the checks do not compare page content. Website checks are not uptime monitoring.
 
 Hosts can keep website checks off with `add_filter( 'updatelens_site_checks_enabled', '__return_false' );`. The filter cannot turn them on.
 
@@ -80,11 +80,11 @@ To install manually, go to Plugins → Add New → Upload Plugin, choose the Upd
 
 = Does UpdateLens prove that the updated plugin caused every reported change? =
 
-No. WordPress core, other plugins and background jobs can change options, WP-Cron events or Action Scheduler actions in the same window. Changes observed during the update request are the most closely associated with it.
+No. WordPress core, other plugins and background jobs can change options, WP-Cron events or Action Scheduler actions in the same window. Changes observed during the update request are the most closely associated with it. On busy sites, expect entries from other plugins: for example a plugin that reacts to every update, a background queue runner, or the follow-up work of a plugin updated just before.
 
 = Does UpdateLens store option values or job arguments? =
 
-No. They are compared through keyed fingerprints that are deleted when an analysis finishes. Reports show names, sizes, autoload state, hooks, groups, times and schedules.
+No. They are compared through keyed fingerprints that are deleted when an analysis finishes. Reports show names, sizes, autoload state, hooks, groups, times and schedules. So a report can show that an option such as `wp_user_roles` changed and by how many bytes, but not what changed inside it, for example which capabilities were added.
 
 == Changelog ==
 

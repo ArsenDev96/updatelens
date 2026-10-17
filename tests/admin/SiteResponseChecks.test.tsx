@@ -204,8 +204,9 @@ describe( 'Website checks tab', () => {
 		// How to read it, only once expanded.
 		// What "verified" means is said once, after the requests.
 		expect( row ).toHaveTextContent(
-			'A pass needs HTTP 200, a response verified as WordPress (the one-time UpdateLens marker came back) and the completion marker'
+			'A pass needs HTTP 200, a response verified as WordPress (the one-time UpdateLens marker came back) and the completion marker, which WordPress’s page footer prints at the end of the page. A pass does not compare what the page shows. A failure counts only when both requests agree.'
 		);
+		expect( row ).not.toHaveTextContent( 'the page loaded to its end' );
 		expect( row ).toHaveTextContent(
 			'Missing, inconclusive and unsupported checks never count as passed.'
 		);
@@ -218,6 +219,16 @@ describe( 'Website checks tab', () => {
 			'false'
 		);
 		expect( section() ).not.toHaveTextContent( 'Request 1' );
+
+		// The REST API note is unchanged and never mentions the homepage's marker.
+		await user.click( checkButton( 'WordPress REST API' ) );
+		const rest = checkButton( 'WordPress REST API' ).closest( 'li' )!;
+		expect( rest ).toHaveTextContent(
+			'A pass needs HTTP 200, a response verified as WordPress (the one-time UpdateLens marker came back) and the signed-in user’s data from /wp/v2/users/me. A failure counts only when both requests agree. UpdateLens loads its reports through its own REST routes, so this check can fail while reports still open. Missing, inconclusive and unsupported checks never count as passed.'
+		);
+		expect( rest.textContent ).not.toMatch(
+			/completion marker|what the page shows/
+		);
 	} );
 
 	it( 'homepage newly failing: what was observed, and a link to the finding', async () => {
@@ -343,16 +354,33 @@ describe( 'Website checks tab', () => {
 			Homepage: 'Not compared',
 			'WordPress REST API': 'Not compared',
 		} );
-		// Dashboard → Updates, a page left or closed, or a site that did not
-		// answer: the stored evidence cannot tell these apart.
+		// Dashboard → Updates, a page left or closed, a site that did not
+		// answer, or another plugin that answered the follow-up with its own
+		// page: the stored evidence cannot tell these apart.
 		expect( section() ).toHaveTextContent(
-			'No follow-up from that tab reached UpdateLens for this update. That happens when the update ran from Dashboard → Updates, when the page was left or closed during the update, or when the site did not answer the browser’s follow-up request.'
+			'No follow-up from that tab reached UpdateLens for this update. That happens when the update ran from Dashboard → Updates, when the page was left or closed during the update, when the site did not answer the browser’s follow-up request, or when another plugin answered that request with its own page, such as a setup screen shown after the plugin updates.'
 		);
 		expect( section().textContent ).not.toMatch(
 			/it ran from Dashboard|the page was left while|outage|site (was|went) down/
 		);
 		expect( section().textContent ).not.toMatch(
 			/Passed before and after/
+		);
+	} );
+
+	it( 'no follow-up from the updating tab: next time, conditional on a tab that stayed open, once', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'not_followed_up' ) );
+		const next =
+			'For a comparison next time, click “Update now” on Installed Plugins and keep that tab open for a few seconds after “Updated!”. If the tab stayed open, another plugin may have answered UpdateLens’s request; this can repeat until any setup screen that plugin shows is completed.';
+		expect( section() ).toHaveTextContent( next );
+		expect(
+			section().textContent!.split(
+				'If the tab stayed open, another plugin may have answered UpdateLens’s request'
+			).length - 1
+		).toBe( 1 );
+		// Never a claim that another plugin did answer it.
+		expect( section().textContent ).not.toMatch(
+			/another plugin (answered|redirected|intercepted) UpdateLens’s request/
 		);
 	} );
 
@@ -388,6 +416,8 @@ describe( 'Website checks tab', () => {
 		expect( section() ).toHaveTextContent(
 			'For a comparison next time, click “Update now” on Installed Plugins and keep that tab open for a few seconds after “Updated!”.'
 		);
+		// The note about another plugin belongs to `not_followed_up` only.
+		expect( section() ).not.toHaveTextContent( 'If the tab stayed open' );
 		expect(
 			within( section() ).queryByRole( 'button', {
 				name: /compare|retry|run/i,

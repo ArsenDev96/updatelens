@@ -578,7 +578,7 @@ export function siteChecksUnused(
 export function siteCheckReadingNote( check: SiteCheckId ): string {
 	return check === 'home'
 		? __(
-				'A pass needs HTTP 200, a response verified as WordPress (the one-time UpdateLens marker came back) and the completion marker (the page loaded to its end). A failure counts only when both requests agree. Missing, inconclusive and unsupported checks never count as passed.',
+				'A pass needs HTTP 200, a response verified as WordPress (the one-time UpdateLens marker came back) and the completion marker, which WordPress’s page footer prints at the end of the page. A pass does not compare what the page shows. A failure counts only when both requests agree. Missing, inconclusive and unsupported checks never count as passed.',
 				'updatelens'
 			)
 		: __(

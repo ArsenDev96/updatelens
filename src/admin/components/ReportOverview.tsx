@@ -10,7 +10,7 @@ import type {
 	ReportPhase,
 } from '../types/api';
 import type { PhaseChangeCounts } from '../utils/changes';
-import { EmbeddedProvider } from '../utils/embedded';
+import { EmbeddedLabelProvider, EmbeddedProvider } from '../utils/embedded';
 import { formatCount } from '../utils/format';
 import { coverageLine } from '../utils/glance';
 import { matchedRows, MatchedRowsProvider } from '../utils/highlight';
@@ -281,6 +281,7 @@ function SourceRow( {
 	onOpen: () => void;
 } ) {
 	const id = useId();
+	const nameId = `${ id }-name`;
 	const statusId = `${ id }-status`;
 	const panelId = `${ id }-panel`;
 	const data = report.phases[ phase ];
@@ -336,6 +337,7 @@ function SourceRow( {
 						{ hasChanges ? (
 							<button
 								type="button"
+								id={ nameId }
 								aria-expanded={ open }
 								aria-controls={ panelId }
 								aria-describedby={ statusId }
@@ -426,6 +428,7 @@ function SourceRow( {
 								provider={ provider }
 								phase={ phase }
 								count={ count }
+								nameId={ nameId }
 							/>
 						</div>
 					) }
@@ -445,17 +448,20 @@ function SourceRow( {
  * @param props.provider Source.
  * @param props.phase    Phase.
  * @param props.count    Its change count.
+ * @param props.nameId   ID of the row's source name (names its list regions).
  */
 function SourceChanges( {
 	report,
 	provider,
 	phase,
 	count,
+	nameId,
 }: {
 	report: AnalysisReport;
 	provider: Provider;
 	phase: PhaseKey;
 	count: number | null;
+	nameId: string;
 } ) {
 	const matched = useMemo(
 		() => ( phase === 'final' ? matchedRows( report, provider ) : null ),
@@ -463,26 +469,28 @@ function SourceChanges( {
 	);
 	return (
 		<EmbeddedProvider value={ true }>
-			<MatchedRowsProvider value={ matched }>
-				<SummaryExtraProvider
-					value={
-						<RulesLine
-							report={ report }
-							signal={ provider }
+			<EmbeddedLabelProvider value={ nameId }>
+				<MatchedRowsProvider value={ matched }>
+					<SummaryExtraProvider
+						value={
+							<RulesLine
+								report={ report }
+								signal={ provider }
+								phase={ phase }
+								count={ count }
+							/>
+						}
+					>
+						<SignalDetail
+							provider={ provider }
 							phase={ phase }
+							data={ report.phases[ phase ] }
 							count={ count }
+							windowSeconds={ report.observation_window_seconds }
 						/>
-					}
-				>
-					<SignalDetail
-						provider={ provider }
-						phase={ phase }
-						data={ report.phases[ phase ] }
-						count={ count }
-						windowSeconds={ report.observation_window_seconds }
-					/>
-				</SummaryExtraProvider>
-			</MatchedRowsProvider>
+					</SummaryExtraProvider>
+				</MatchedRowsProvider>
+			</EmbeddedLabelProvider>
 		</EmbeddedProvider>
 	);
 }

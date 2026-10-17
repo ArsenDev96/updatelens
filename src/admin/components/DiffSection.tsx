@@ -3,7 +3,7 @@ import { useId, useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-import { useEmbedded } from '../utils/embedded';
+import { useEmbedded, useEmbeddedLabel } from '../utils/embedded';
 import { useLocated } from '../utils/highlight';
 
 /** Rows of a diff list shown before "Show more". */
@@ -52,6 +52,8 @@ export function DiffSection< T >( {
 	const located = useLocated();
 	// Inside a report's Configuration changes: one heading level lower.
 	const embedded = useEmbedded();
+	// Embedded, the region is named with its source too ("WP-Cron Changed (1)").
+	const source = useEmbeddedLabel();
 	const [ expanded, setExpanded ] = useState(
 		() =>
 			located !== null &&
@@ -64,6 +66,7 @@ export function DiffSection< T >( {
 	);
 	const listId = useId();
 	const headingId = `${ id }-heading`;
+	const labelledBy = source ? `${ source } ${ headingId }` : headingId;
 	const hidden = items.length - DEFAULT_VISIBLE_DIFF_ROWS;
 	const visible =
 		expanded || hidden <= 0
@@ -91,7 +94,7 @@ export function DiffSection< T >( {
 		const Heading = embedded ? 'h5' : 'h3';
 		return (
 			<section
-				aria-labelledby={ headingId }
+				aria-labelledby={ labelledBy }
 				className={ embedded ? 'space-y-2' : 'space-y-3' }
 			>
 				<div className="flex items-center gap-2.5">
@@ -124,7 +127,7 @@ export function DiffSection< T >( {
 	}
 
 	return (
-		<section aria-labelledby={ headingId } className="space-y-2">
+		<section aria-labelledby={ labelledBy } className="space-y-2">
 			<h3
 				id={ headingId }
 				className={ cn(

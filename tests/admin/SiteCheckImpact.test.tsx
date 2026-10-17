@@ -403,15 +403,67 @@ describe( 'Website checks in Update results', () => {
 		expect( row.textContent ).not.toMatch( FORBIDDEN );
 	} );
 
-	it( 'an incomplete homepage: the page after the update missed its completion marker', async () => {
+	it( 'an incomplete homepage: a page cut short or a replaced homepage, still high priority', async () => {
 		const user = userEvent.setup();
 		await renderReport( withSiteChecks( COMPLETED, 'home_incomplete' ) );
 
-		await user.click( rowButton( rows()[ 0 ] ) );
-		expect( rows()[ 0 ] ).toHaveTextContent(
-			'WordPress answered both requests after the update, but the page did not reach the expected completion marker.'
+		// The priority is the API's and stays high.
+		expect( priorityGroups() ).toEqual( [ 'High priority, 1' ] );
+		expect( rowTitles() ).toEqual( [ 'Homepage check newly failing' ] );
+		expect( rowButton( rows()[ 0 ] ) ).toHaveAccessibleDescription(
+			'In two requests after the update, the homepage ended without its completion marker. Check what signed-out visitors see now.'
 		);
+		await user.click( rowButton( rows()[ 0 ] ) );
+		const row = rows()[ 0 ];
+		expect( row ).toHaveTextContent(
+			'WordPress answered both requests after the update, but the page ended without the completion marker that WordPress’s page footer prints.'
+		);
+		expect( row ).toHaveTextContent( OBSERVED_ONCE );
+		// Both explanations the evidence allows; neither is claimed.
+		expect( row ).toHaveTextContent(
+			'If the page stopped before WordPress’s page footer, for example because of a PHP error, visitors may have seen only part of the homepage at that time.'
+		);
+		expect( row ).toHaveTextContent(
+			'A page that replaces the homepage for signed-out visitors, such as a coming-soon or maintenance page, also ends without this marker; the check cannot tell the two apart.'
+		);
+		expect( row ).toHaveTextContent(
+			'The check does not establish what caused the change.'
+		);
+		expect( row ).toHaveTextContent(
+			'Open the homepage in a private window. If it shows a coming-soon or maintenance page that you turned on, this is expected.'
+		);
+		expect( row ).toHaveTextContent(
+			'Otherwise, check whether the whole page appears, including the footer, and review PHP warnings and error logs from around the time of the update.'
+		);
+		expect( row.textContent ).not.toMatch(
+			/stops before its end|loaded to its end|Check whether the whole page loads/
+		);
+		expect( row.textContent ).not.toMatch( FORBIDDEN );
 	} );
+
+	it.each( [
+		'home_newly_failing',
+		'home_timeouts',
+		'home_unverified_500',
+		'rest_newly_failing',
+		'rest_route_missing',
+	] as const )(
+		'%s: the replaced-homepage explanation stays with the incomplete homepage',
+		async ( name ) => {
+			const user = userEvent.setup();
+			await renderReport( withSiteChecks( COMPLETED, name ) );
+
+			for ( const row of rows() ) {
+				await user.click( rowButton( row ) );
+			}
+			expect( rows().length ).toBeGreaterThan( 0 );
+			for ( const row of rows() ) {
+				expect( row.textContent ).not.toMatch(
+					/coming-soon|maintenance|completion marker/i
+				);
+			}
+		}
+	);
 
 	it( 'a page too large to inspect both times is not a broken page', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'home_not_inspected' ) );

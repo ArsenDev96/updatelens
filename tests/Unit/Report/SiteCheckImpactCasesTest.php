@@ -258,6 +258,52 @@ final class SiteCheckImpactCasesTest extends TestCase {
 				),
 				self::LATER,
 			),
+			'not_followed_up'       => array(
+				'Settled by a later admin page, not by the updating browser\'s follow-up (Dashboard → Updates, a page left during the update, or a follow-up the site did not answer).',
+				$row(
+					$passing,
+					array(),
+					array(
+						'settle_outcome'              => 'admin_shutdown',
+						'site_check_after_started_at' => null,
+					)
+				),
+				self::LATER,
+			),
+			'next_update'           => array(
+				'Another plugin update started right after this one, so no check ran after this update alone.',
+				$row(
+					$passing,
+					array(),
+					array(
+						'settle_outcome'              => 'next_update',
+						'site_check_after_started_at' => null,
+					)
+				),
+				self::LATER,
+			),
+			'rest_route_missing'    => array(
+				'REST API route /wp/v2/users/me answered HTTP 404 rest_no_route twice (verified as WordPress), homepage passed at both.',
+				$row(
+					$passing,
+					array(
+						'rest' => self::after(
+							'rest',
+							self::twice(
+								F::rest(
+									array(
+										'status'      => 404,
+										'user_id'     => null,
+										'error_code'  => 'rest_no_route',
+										'duration_ms' => 217,
+									)
+								)
+							)
+						),
+					) + $after_ok
+				),
+				self::LATER,
+			),
 			'disabled'              => array(
 				'Site checks were disabled for this update.',
 				$row(

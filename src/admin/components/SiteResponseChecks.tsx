@@ -270,7 +270,8 @@ export function SiteResponseChecks( {
 										text.finding
 											? siteCheckNextStep(
 													check,
-													impact?.checks[ check ]
+													impact?.checks[ check ],
+													comparison.after
 												)
 											: null
 									}

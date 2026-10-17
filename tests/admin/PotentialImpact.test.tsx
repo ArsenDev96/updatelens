@@ -279,6 +279,90 @@ describe( 'Potential Impact', () => {
 		expect( button ).toHaveFocus();
 	} );
 
+	it( 'several schedule changes in one group: no empty "What changed", each row says its own change', async () => {
+		const user = userEvent.setup();
+		const daily = cronChange(
+			'acme_digest',
+			T + 600,
+			[ 'daily', 86400 ],
+			[ 'weekly', 604800 ]
+		);
+		const hourly = cronChange(
+			'acme_sync',
+			T + 900,
+			[ 'hourly', 3600 ],
+			[ 'twicedaily', 43200 ]
+		);
+		await renderReport(
+			cronFinal( { changed: [ daily, hourly ] }, [
+				cronChangeFinding( daily ),
+				cronChangeFinding( hourly ),
+			] )
+		);
+		const [ group ] = groups();
+		expect( groupButton( group ).textContent ).toBe(
+			'Recurring WP-Cron schedules changed2, 2 findings, Needs review'
+		);
+		await user.click( groupButton( group ) );
+
+		// The heading appears only with something under it.
+		expect(
+			within( group ).queryByRole( 'heading', {
+				level: 5,
+				name: 'What changed',
+			} )
+		).not.toBeInTheDocument();
+		for ( const heading of [
+			'Why it might matter',
+			'What to check next',
+			'Evidence',
+		] ) {
+			expect(
+				within( group ).getByRole( 'heading', {
+					level: 5,
+					name: heading,
+				} )
+			).toBeInTheDocument();
+		}
+		// Every finding keeps its own evidence row and change.
+		const evidence = within( group ).getByRole( 'heading', {
+			level: 5,
+			name: 'Evidence',
+		} ).parentElement!.nextElementSibling as HTMLElement;
+		const items = within( evidence ).getAllByRole( 'listitem' );
+		expect( items.map( ( item ) => item.textContent ) ).toEqual( [
+			expect.stringContaining( 'acme_digest' ),
+			expect.stringContaining( 'acme_sync' ),
+		] );
+		expect( items[ 0 ] ).toHaveTextContent(
+			'The recurring interval changed.'
+		);
+		expect( items[ 1 ] ).toHaveTextContent(
+			'The recurring interval changed.'
+		);
+	} );
+
+	it.each( [
+		[ 'one schedule change', () => cronFinal( {}, [ CRON_INTERVAL ] ) ],
+		[ 'two large options (with shared facts)', () => IMPACT ],
+	] )(
+		'"What changed" stays when content follows it: %s',
+		async ( _label, report ) => {
+			const user = userEvent.setup();
+			await renderReport( report() );
+			const [ group ] = groups();
+			await user.click( groupButton( group ) );
+			const heading = within( group ).getByRole( 'heading', {
+				level: 5,
+				name: 'What changed',
+			} );
+			// Something follows the heading in its own block.
+			expect(
+				heading.parentElement?.textContent?.trim().length
+			).toBeGreaterThan( 'What changed'.length );
+		}
+	);
+
 	it( 'explains every finding type once expanded: what changed, why, what to check, and a link', async () => {
 		const user = userEvent.setup();
 		await renderReport( IMPACT );
@@ -903,7 +987,9 @@ describe( 'Potential Impact', () => {
 			await renderReport( RANK_MATH );
 
 			expect( resultPanel() ).toHaveTextContent(
-				'Nothing flagged for reviewNo concerning patterns matched the completed observations.UpdateLens checks selected patterns only, so this does not guarantee that the update had no other effects.'
+				// A report without website check data says the site's
+				// responses were not checked: the result covers configuration only.
+				'Nothing flagged for reviewNo concerning patterns matched the completed observations.UpdateLens checks selected patterns only, and the site’s responses were not checked for this update, so this does not guarantee that the update had no other effects.'
 			);
 			// Said once.
 			expect(
@@ -1307,6 +1393,19 @@ describe( 'Potential Impact group wording', () => {
 		expect( guidance( CRON_INTERVAL ) ).toContain(
 			'Open WP-Cron to see the next scheduled run.'
 		);
+	} );
+
+	it( 'a removed WP-Cron event: replacements may be in WP-Cron or Action Scheduler, never claimed', () => {
+		for ( const text of [
+			guidance( CRON_REMOVED ),
+			guidance( CRON_REMOVED, TWO_REMOVED ),
+		] ) {
+			expect( text ).toMatch(
+				/to other hook names in WP-Cron or to Action Scheduler|to another hook name in WP-Cron or to Action Scheduler/
+			);
+			expect( text ).toMatch( /UpdateLens does not link them/ );
+			expect( text ).not.toMatch( /moved to|migrated|was replaced by/i );
+		}
 	} );
 
 	it( 'words guidance for several findings in the plural, never as one plugin', () => {

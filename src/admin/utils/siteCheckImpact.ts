@@ -156,6 +156,27 @@ function unverified( side: SiteCheckSide ): boolean {
 }
 
 /**
+ * Whether WordPress itself said, in every attempt of a side, that the REST
+ * route does not exist: HTTP 404 with the `rest_no_route` error code and
+ * this run's verification marker. Unverified 404s are not counted, since
+ * another part of the setup may have sent them.
+ *
+ * @param side Side.
+ */
+export function routeMissing( side: SiteCheckSide ): boolean {
+	const attempts = side.result?.attempts ?? [];
+	return (
+		attempts.length > 0 &&
+		attempts.every(
+			( attempt ) =>
+				attempt.status === 404 &&
+				attempt.error_code === 'rest_no_route' &&
+				attempt.origin === 'verified'
+		)
+	);
+}
+
+/**
  * Title of a site check finding.
  *
  * @param finding Finding.
@@ -228,49 +249,55 @@ function homeFailureLine( after: SiteCheckSide ): string {
  * @param after AFTER side.
  */
 function restFailureLine( after: SiteCheckSide ): string {
+	if ( routeMissing( after ) ) {
+		return __(
+			'In both requests after the update, WordPress reported that the REST API route /wp/v2/users/me does not exist. Check whether a setting now hides it.',
+			'updatelens'
+		);
+	}
 	switch ( failureKind( after ) ) {
 		case 'http':
 			return sprintf(
 				/* translators: %s: HTTP status code, e.g. "500". */
 				__(
-					'The REST API returned HTTP %s twice after the update. Check whether the block editor works.',
+					'The REST API route /wp/v2/users/me returned HTTP %s twice after the update. Check the features that use it, such as the block editor.',
 					'updatelens'
 				),
 				httpStatus( after ) ?? ''
 			);
 		case 'timeout':
 			return __(
-				'Two REST API requests timed out after the update. Check whether the block editor works.',
+				'Two requests to the REST API route /wp/v2/users/me timed out after the update. Check the features that use it, such as the block editor.',
 				'updatelens'
 			);
 		case 'invalid_json':
 			return __(
-				'The REST API returned invalid JSON twice after the update. Check whether the block editor works.',
+				'The REST API route /wp/v2/users/me returned invalid JSON twice after the update. Check the features that use it, such as the block editor.',
 				'updatelens'
 			);
 		case 'extra_output':
 			return __(
-				'The REST API returned other output before its JSON twice after the update. Check whether the block editor works.',
+				'The REST API route /wp/v2/users/me returned other output before its JSON twice after the update. Check the features that use it, such as the block editor.',
 				'updatelens'
 			);
 		case 'unexpected_json':
 			return __(
-				'The REST API returned an unexpected response twice after the update. Check whether the block editor works.',
+				'The REST API route /wp/v2/users/me returned an unexpected response twice after the update. Check the features that use it, such as the block editor.',
 				'updatelens'
 			);
 		case 'wrong_user':
 			return __(
-				'The REST API answered for a different user twice after the update. Check whether the block editor works.',
+				'The REST API route /wp/v2/users/me answered for a different user twice after the update. Check the features that use it, such as the block editor.',
 				'updatelens'
 			);
 		case 'redirected':
 			return __(
-				'REST API requests were redirected twice after the update. Check whether the block editor works.',
+				'Requests to the REST API route /wp/v2/users/me were redirected twice after the update. Check the features that use it, such as the block editor.',
 				'updatelens'
 			);
 		default:
 			return __(
-				'Two REST API requests failed after the update. Check whether the block editor works.',
+				'Two requests to the REST API route /wp/v2/users/me failed after the update. Check the features that use it, such as the block editor.',
 				'updatelens'
 			);
 	}
@@ -290,10 +317,35 @@ export function siteCheckWhatChanged( finding: SiteCheckFinding ): string {
 					'updatelens'
 				)
 			: __(
-					'The REST API responded as expected before the update.',
+					'The REST API route /wp/v2/users/me responded as expected before the update.',
 					'updatelens'
 				);
-	return `${ before } ${ laterText( finding ) }`;
+	return `${ before } ${ laterText( finding ) } ${ observedOnce(
+		finding.after
+	) }`;
+}
+
+/**
+ * When the requests after the update ran, and that they ran once: a finding
+ * is an observation at that time, not a statement about the site now.
+ *
+ * @param after AFTER side.
+ */
+function observedOnce( after: SiteCheckSide ): string {
+	const when = formatDateTime( after.started_at );
+	return when === null
+		? __(
+				'These requests ran once, right after the update; UpdateLens did not check again.',
+				'updatelens'
+			)
+		: sprintf(
+				/* translators: %s: date and time, e.g. "Oct 17, 2026, 2:04 PM". */
+				__(
+					'These requests ran at %s, right after the update; UpdateLens did not check again.',
+					'updatelens'
+				),
+				when
+			);
 }
 
 /**
@@ -308,6 +360,12 @@ export function laterText(
 	if ( finding.code === 'site_check_changed' ) {
 		return __(
 			'Both requests after the update were redirected. The browser cannot see where a redirect leads.',
+			'updatelens'
+		);
+	}
+	if ( routeMissing( finding.after ) ) {
+		return __(
+			'In both requests after the update, WordPress answered HTTP 404 with the error code rest_no_route: no REST API route matched /wp/v2/users/me.',
 			'updatelens'
 		);
 	}
@@ -377,7 +435,7 @@ export function siteCheckWhyItMatters( finding: SiteCheckFinding ): string[] {
 	if ( finding.code === 'site_check_changed' ) {
 		return [
 			__(
-				'Visitors opening the homepage are now sent to another address. This may be intended, for example a language, login or maintenance redirect.',
+				'Visitors opening the homepage were sent to another address at that time. This may be intended, for example a language, login or maintenance redirect.',
 				'updatelens'
 			),
 			__(
@@ -388,10 +446,23 @@ export function siteCheckWhyItMatters( finding: SiteCheckFinding ): string[] {
 	}
 
 	const kind = failureKind( finding.after );
+	if ( finding.check === 'rest' && routeMissing( finding.after ) ) {
+		return [
+			__(
+				'WordPress itself answered, so this route was not registered on the site at that time. Security or REST API settings can hide user routes on purpose.',
+				'updatelens'
+			),
+			__(
+				'Features that request this route, such as the block editor, may not work as expected while it is missing.',
+				'updatelens'
+			),
+			noCause,
+		];
+	}
 	if ( finding.check === 'rest' ) {
 		const sentences: string[] = [
 			__(
-				'The block editor and other features that use the REST API may not work as expected.',
+				'Features that request this route, such as the block editor, may not have worked as expected at that time.',
 				'updatelens'
 			),
 		];
@@ -418,7 +489,7 @@ export function siteCheckWhyItMatters( finding: SiteCheckFinding ): string[] {
 		case 'timeout':
 			return [
 				__(
-					'The homepage may be slow or unreachable for visitors.',
+					'The homepage may have been slow or unreachable for visitors at that time.',
 					'updatelens'
 				),
 				__(
@@ -438,7 +509,7 @@ export function siteCheckWhyItMatters( finding: SiteCheckFinding ): string[] {
 		default:
 			return [
 				__(
-					'Visitors may see an error instead of the homepage.',
+					'Visitors may have seen an error instead of the homepage at that time.',
 					'updatelens'
 				),
 				noCause,
@@ -477,6 +548,18 @@ export function siteCheckWhatToCheck( finding: SiteCheckFinding ): string[] {
 			),
 			__(
 				'If the redirect is not intended, review redirect, language, maintenance or security settings.',
+				'updatelens'
+			),
+		];
+	}
+	if ( finding.check === 'rest' && routeMissing( finding.after ) ) {
+		return [
+			__(
+				'Check whether a security or REST API setting hides user routes; if it does, this may be intended.',
+				'updatelens'
+			),
+			__(
+				'Open the block editor and try opening or saving a draft.',
 				'updatelens'
 			),
 		];
@@ -1334,7 +1417,7 @@ export function afterReasonText( reason: string ): string {
 			);
 		case 'not_followed_up':
 			return __(
-				'The check after the update runs in the tab that clicked “Update now” on Installed Plugins, right after “Updated!”. This update was not followed up there: it ran from Dashboard → Updates, the page was left while it was updating, or the browser’s follow-up request did not arrive.',
+				'The check after the update runs in the tab that clicked “Update now” on Installed Plugins, right after “Updated!”. No follow-up from that tab reached UpdateLens for this update. That happens when the update ran from Dashboard → Updates, when the page was left or closed during the update, or when the site did not answer the browser’s follow-up request.',
 				'updatelens'
 			);
 		case 'no_baseline':
@@ -1344,12 +1427,12 @@ export function afterReasonText( reason: string ): string {
 			);
 		case 'not_started':
 			return __(
-				'The check after the update did not start, for example because the page was closed or left right after the update.',
+				'The check after the update did not start. That happens when the page was closed or left right after the update, or when the request that starts the check did not succeed.',
 				'updatelens'
 			);
 		case 'not_reported':
 			return __(
-				'The check after the update started, but its result was not reported, for example because the page was closed while it ran.',
+				'The check after the update started, but its result did not reach UpdateLens. That happens when the page was closed while it ran, or when the request that reports the result did not succeed.',
 				'updatelens'
 			);
 		case 'data_corrupt':

@@ -19,6 +19,7 @@ import {
 	comparisonReasonText,
 	crossOriginText,
 	laterText,
+	routeMissing,
 	sideSummaryText,
 	SITE_CHECKS,
 	siteCheckSubject,
@@ -266,6 +267,17 @@ const COMPARED: ReadonlySet< SiteCheckState > = new Set< SiteCheckState >( [
 ] );
 
 /**
+ * Stored reasons (comparison or AFTER side) that say another plugin update
+ * ran around this one: it started right after it, was queued with it or
+ * overlapped its check after the update.
+ */
+const OTHER_UPDATE_REASONS: ReadonlySet< string > = new Set( [
+	'next_update',
+	'queued_update',
+	'overlapping_update',
+] );
+
+/**
  * The first request of a side, when it measured a complete response: a
  * status arrived and the body was read to its end. Timeouts and network
  * errors (the time until the browser gave up), redirects (the time until the
@@ -374,13 +386,20 @@ export function siteCheckRequestTimes(
 
 /**
  * Why a check was not compared, in a few words, for the report summary:
- * "no check before the update", "no check after the update" or "could not
- * be compared". From the API's comparison state and which side is missing;
- * the full reasons are in the Site checks section.
+ * "another update ran at the same time" (only when the stored reasons say
+ * so), "no check before the update", "no check after the update" or "could
+ * not be compared". From the API's comparison state and reasons and which
+ * side is missing; the full reasons are in the Site checks section.
  *
  * @param comparison The check in the report's `site_checks`.
  */
 export function siteCheckGapText( comparison: SiteCheckComparison ): string {
+	if (
+		OTHER_UPDATE_REASONS.has( comparison.reason ?? '' ) ||
+		OTHER_UPDATE_REASONS.has( comparison.after.reason ?? '' )
+	) {
+		return __( 'another update ran at the same time', 'updatelens' );
+	}
 	if ( comparison.state === 'not_comparable' ) {
 		return __( 'could not be compared', 'updatelens' );
 	}
@@ -780,7 +799,7 @@ export function siteCheckOutcome(
 			'failure',
 			sprintf(
 				/* translators: %s: check names, e.g. "Homepage" or "Homepage and REST API". */
-				__( 'Newly failing: %s', 'updatelens' ),
+				__( 'Newly failing right after the update: %s', 'updatelens' ),
 				checkNames( failing )
 			)
 		);
@@ -874,15 +893,27 @@ export function siteCheckOutcome(
  *
  * @param check      Check.
  * @param evaluation Its evaluation.
+ * @param after      Its AFTER side, when known: a route WordPress reported
+ *                   as missing gets the same next step as its finding.
  */
 export function siteCheckNextStep(
 	check: SiteCheckId,
-	evaluation: SiteCheckImpactCheck | undefined
+	evaluation: SiteCheckImpactCheck | undefined,
+	after?: SiteCheckSide
 ): string {
 	if ( evaluation?.state === 'changed' ) {
 		return __( 'Check where the homepage leads now.', 'updatelens' );
 	}
+	if ( check === 'rest' && after && routeMissing( after ) ) {
+		return __(
+			'Check whether a setting now hides this route.',
+			'updatelens'
+		);
+	}
 	return check === 'home'
 		? __( 'Check whether the homepage is accessible now.', 'updatelens' )
-		: __( 'Check whether the block editor works.', 'updatelens' );
+		: __(
+				'Check the features that use this route, such as the block editor.',
+				'updatelens'
+			);
 }

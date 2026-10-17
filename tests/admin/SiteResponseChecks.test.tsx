@@ -279,7 +279,7 @@ describe( 'Website checks tab', () => {
 		expect(
 			checkButton( 'WordPress REST API' ).closest( 'li' )
 		).toHaveTextContent(
-			'Next: Check whether the block editor works. Show the finding'
+			'Next: Check the features that use this route, such as the block editor. Show the finding'
 		);
 		// No next step where there is no finding.
 		expect(
@@ -327,6 +327,49 @@ describe( 'Website checks tab', () => {
 		expect( section().textContent ).not.toMatch( /Passed/ );
 	} );
 
+	it( 'a REST route WordPress reported as missing: the row names the setting to check', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'rest_route_missing' ) );
+		expect( checkRows()![ 'WordPress REST API' ] ).toBe( 'Newly failing' );
+		expect(
+			checkButton( 'WordPress REST API' ).closest( 'li' )
+		).toHaveTextContent(
+			'Next: Check whether a setting now hides this route. Show the finding'
+		);
+	} );
+
+	it( 'no follow-up from the updating tab: every possible cause, none claimed', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'not_followed_up' ) );
+		expect( checkRows() ).toEqual( {
+			Homepage: 'Not compared',
+			'WordPress REST API': 'Not compared',
+		} );
+		// Dashboard → Updates, a page left or closed, or a site that did not
+		// answer: the stored evidence cannot tell these apart.
+		expect( section() ).toHaveTextContent(
+			'No follow-up from that tab reached UpdateLens for this update. That happens when the update ran from Dashboard → Updates, when the page was left or closed during the update, or when the site did not answer the browser’s follow-up request.'
+		);
+		expect( section().textContent ).not.toMatch(
+			/it ran from Dashboard|the page was left while|outage|site (was|went) down/
+		);
+		expect( section().textContent ).not.toMatch(
+			/Passed before and after/
+		);
+	} );
+
+	it( 'another update right after this one: said once, from the stored reason', async () => {
+		await renderReport( withSiteChecks( COMPLETED, 'next_update' ) );
+		expect( checkRows() ).toEqual( {
+			Homepage: 'Not compared',
+			'WordPress REST API': 'Not compared',
+		} );
+		expect( section() ).toHaveTextContent(
+			'Another plugin update started right after this one'
+		);
+		expect( section() ).toHaveTextContent(
+			'For a comparison next time, update one plugin at a time'
+		);
+	} );
+
 	it( 'a check after the update that was never reported', async () => {
 		await renderReport( withSiteChecks( COMPLETED, 'after_not_reported' ) );
 		expect( checkRows() ).toEqual( {
@@ -337,8 +380,9 @@ describe( 'Website checks tab', () => {
 			'Passed HTTP 200',
 			'Not run',
 		] );
+		// The page being closed is one possible cause, never the only one.
 		expect( section() ).toHaveTextContent(
-			'The check after the update started, but its result was not reported, for example because the page was closed while it ran.'
+			'The check after the update started, but its result did not reach UpdateLens. That happens when the page was closed while it ran, or when the request that reports the result did not succeed.'
 		);
 		// How to get a comparison next time, once; never an action for this update.
 		expect( section() ).toHaveTextContent(

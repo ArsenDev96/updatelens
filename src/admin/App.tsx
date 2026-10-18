@@ -55,8 +55,8 @@ export default function App( {
 
 	// The page <h1> ("UpdateLens") is rendered server-side by AdminPage::render().
 	return (
-		<div className="mt-2 max-w-6xl space-y-5 pb-8">
-			<p className="border-b pb-4 text-sm text-muted-foreground">
+		<div className="mt-2 max-w-6xl space-y-6 pb-8">
+			<p className="border-b pb-4 text-sm leading-[22px] text-muted-foreground">
 				{ __(
 					'See what changed when WordPress plugins update.',
 					'updatelens'

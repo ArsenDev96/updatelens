@@ -50,7 +50,7 @@
  * `.wrap h1` (23px, regular) on UpdateLens's screens only.
  */
 .wrap > h1.updatelens-page-title {
-	font-size: 26px;
-	font-weight: 600;
-	line-height: 1.25;
+	font-size: 30px;
+	font-weight: 700;
+	line-height: 1.2;
 }

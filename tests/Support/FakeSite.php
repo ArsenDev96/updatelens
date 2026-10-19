@@ -17,6 +17,7 @@ use UpdateLens\Snapshot\CronSnapshotBuilder;
 use UpdateLens\Snapshot\OptionNoiseFilter;
 use UpdateLens\Snapshot\OptionsSnapshotBuilder;
 use UpdateLens\Snapshot\OptionValueHasher;
+use UpdateLens\Update\CaptureTimeBudget;
 use UpdateLens\Update\ObservationBudget;
 use UpdateLens\Update\PluginUpdateAnalyzer;
 
@@ -129,6 +130,27 @@ final class FakeSite {
 	public $fits_asked = array();
 
 	/**
+	 * Cap (seconds) of each request's capture time budget, or null: unlimited.
+	 *
+	 * @var float|null
+	 */
+	public $time_cap = null;
+
+	/**
+	 * Seconds each options capture takes on the time budget's clock.
+	 *
+	 * @var float
+	 */
+	public $capture_seconds = 0.0;
+
+	/**
+	 * The time budget's clock (seconds); only captures move it.
+	 *
+	 * @var float
+	 */
+	public $budget_clock = 0.0;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param array<string, array{string, string}> $options Initial options.
@@ -150,6 +172,7 @@ final class FakeSite {
 	public function request( $started_at = null ) {
 		$capture = function () {
 			++$this->captures;
+			$this->budget_clock += $this->capture_seconds;
 
 			$rows = array();
 			foreach ( $this->options as $name => $option ) {
@@ -204,7 +227,13 @@ final class FakeSite {
 					$plan[ $signal ] = ! in_array( $stage, $this->no_memory_for, true ) && ! in_array( $stage . ':' . $signal, $this->no_memory_for, true );
 				}
 				return $plan;
-			}
+			},
+			null === $this->time_cap ? null : new CaptureTimeBudget(
+				$this->time_cap,
+				function () {
+					return $this->budget_clock;
+				}
+			)
 		);
 	}
 

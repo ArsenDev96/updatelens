@@ -203,6 +203,26 @@ final class ActionSchedulerObservation {
 	}
 
 	/**
+	 * Columns when a plugin of a multi-plugin update was installed (its
+	 * IMMEDIATE capture): its during-update phase, and removal of its BEFORE
+	 * snapshot. No IMMEDIATE snapshot is kept: the plugin's After update and
+	 * Net result belong to the whole batch. The next plugin's BEFORE columns
+	 * are before() of the same capture.
+	 *
+	 * @param array                          $row       Analysis with Action Scheduler columns.
+	 * @param ActionSchedulerSnapshot|string $immediate IMMEDIATE capture.
+	 * @return array<string, string|null>
+	 */
+	public function batch_item( array $row, $immediate ) {
+		$changes = self::cleared();
+		if ( ! self::is_resolved( $row, ObservationPhase::DURING_UPDATE ) ) {
+			$changes += $this->phase( ObservationPhase::DURING_UPDATE, $row, self::BEFORE_SNAPSHOT, $immediate );
+		}
+
+		return $changes;
+	}
+
+	/**
 	 * Columns when the analysis settles: the post-update and final phases, and
 	 * removal of the temporary snapshots.
 	 *

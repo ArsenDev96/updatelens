@@ -66,6 +66,8 @@ final class AnalysisReadModel {
 		SettleOutcome::NEXT_UPDATE,
 		SettleOutcome::EXPIRED,
 		SettleOutcome::NOT_APPLICABLE,
+		SettleOutcome::BATCH,
+		SettleOutcome::BATCH_INCOMPLETE,
 	);
 
 	/**
@@ -83,6 +85,7 @@ final class AnalysisReadModel {
 		CronPhaseReason::UPDATE_FAILED,
 		CronPhaseReason::ANALYSIS_ABANDONED,
 		CronPhaseReason::ANALYSIS_ENDED,
+		CronPhaseReason::BATCH_UPDATE,
 	);
 
 	/**
@@ -107,6 +110,7 @@ final class AnalysisReadModel {
 		ActionSchedulerPhaseReason::UPDATE_FAILED,
 		ActionSchedulerPhaseReason::ANALYSIS_ABANDONED,
 		ActionSchedulerPhaseReason::ANALYSIS_ENDED,
+		ActionSchedulerPhaseReason::BATCH_UPDATE,
 	);
 
 	/**
@@ -459,7 +463,7 @@ final class AnalysisReadModel {
 			case AnalysisStatus::COMPLETED:
 				return SettleOutcome::EXPIRED === $metadata['settle_outcome'] ? UnavailableReason::SETTLE_EXPIRED : UnavailableReason::NOT_RECORDED;
 			case AnalysisStatus::FAILED:
-				return in_array( $error_code, array( PluginUpdateAnalyzer::ERROR_ANALYSIS_FAILED, PluginUpdateAnalyzer::ERROR_SNAPSHOT_CORRUPT ), true )
+				return in_array( $error_code, PluginUpdateAnalyzer::ANALYSIS_ERRORS, true )
 					? UnavailableReason::ANALYSIS_FAILED
 					: UnavailableReason::UPDATE_FAILED;
 			case AnalysisStatus::INCOMPATIBLE:

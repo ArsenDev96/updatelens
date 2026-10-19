@@ -60,6 +60,17 @@ defined( 'ABSPATH' ) || exit;
  * - If another update starts in the request that created an analysis, that
  *   analysis is abandoned: its settled state would include the other update.
  * - A request that activates or deactivates the plugin does not settle it.
+ *
+ * Multi-plugin updates (one request, several plugins: a batch) are observed
+ * per plugin when the tracker passes a batch key (see batch_item_starting()):
+ * each plugin's During update runs from the capture right before its download
+ * to the capture right after its package was installed, and the next plugin
+ * of the same batch starts from that capture (handed on, never re-read). The
+ * plugins stay `captured` until the batch ends, so no other request can settle
+ * or expire them meanwhile; then they close with outcome `batch` (After update
+ * and Net result belong to the whole batch, which is not recorded yet). The
+ * observations of one request share a time budget (CaptureTimeBudget); what
+ * does not fit is recorded as skipped, never as a comparison.
  */
 final class PluginUpdateAnalyzer {
 
@@ -81,6 +92,14 @@ final class PluginUpdateAnalyzer {
 	const ERROR_CONTEXT_CHANGED        = 'fingerprint_context_changed';
 	const ERROR_STALE                  = 'stale';
 	const ERROR_ANOTHER_UPDATE_STARTED = 'another_update_started';
+	const ERROR_TIME_BUDGET            = 'capture_time_budget';
+	const ERROR_UPDATE_NOT_INSTALLED   = 'update_not_installed';
+
+	/**
+	 * Codes of analyses that ended because of UpdateLens, not the update
+	 * (their unresolved phases read `analysis_ended`, never `update_failed`).
+	 */
+	const ANALYSIS_ERRORS = array( self::ERROR_ANALYSIS_FAILED, self::ERROR_SNAPSHOT_CORRUPT, self::ERROR_TIME_BUDGET );
 
 	/**
 	 * Fixed, safe messages per error code. WordPress error messages are never
@@ -93,6 +112,7 @@ final class PluginUpdateAnalyzer {
 		self::ERROR_CONTEXT_CHANGED        => 'Option values cannot be compared because the fingerprint context changed (for example, rotated WordPress salts).',
 		self::ERROR_STALE                  => 'The update never reported completion; the analysis was abandoned.',
 		self::ERROR_ANOTHER_UPDATE_STARTED => 'Another update ran in the same request, so later observations could not be separated from it.',
+		self::ERROR_TIME_BUDGET            => 'UpdateLens skipped this observation to keep the update request within its time budget.',
 	);
 
 	/**
@@ -188,6 +208,27 @@ final class PluginUpdateAnalyzer {
 	private $update_seen = false;
 
 	/**
+	 * Time budget of the observations taken in this request.
+	 *
+	 * @var CaptureTimeBudget
+	 */
+	private $time_budget;
+
+	/**
+	 * The multi-plugin update (batch) this request observes, or null:
+	 * - key:       the upgrader running it;
+	 * - items:     plugin file => analysis ID (null: not analysed), in order;
+	 * - results:   plugin file => true once its install result was handled;
+	 * - observed:  plugin file => true once its IMMEDIATE observation was stored;
+	 * - handoff:   BEFORE columns for the next download of this batch, from the
+	 *              last item's IMMEDIATE capture (encoded), or null;
+	 * - open:      false once the batch ended or its observation stopped.
+	 *
+	 * @var array{key: string, items: array<string, int|null>, results: array<string, true>, observed: array<string, true>, handoff: array|null, open: bool}|null
+	 */
+	private $batch = null;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param AnalysisRepository        $repository   Analysis storage.
@@ -205,8 +246,11 @@ final class PluginUpdateAnalyzer {
 	 * @param callable|null             $fits  Returns which signals an observation stage (ObservationBudget
 	 *                                         constant) may capture: ObservationBudget::plan(), or one bool
 	 *                                         for all signals. Null: everything fits.
+	 * @param CaptureTimeBudget|null    $time_budget Time budget of this request's observations (decides
+	 *                                         only for multi-plugin updates). Null: unlimited.
 	 */
-	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null, ?float $request_started_at = null, ?SiteCheckObservation $site_checks = null, ?callable $fits = null ) {
+	public function __construct( AnalysisRepository $repository, callable $capture, callable $capture_cron, ?callable $now = null, ?callable $capture_action_scheduler = null, ?float $request_started_at = null, ?SiteCheckObservation $site_checks = null, ?callable $fits = null, ?CaptureTimeBudget $time_budget = null ) {
+		$this->time_budget        = null === $time_budget ? CaptureTimeBudget::unlimited() : $time_budget;
 		$this->fits               = null === $fits ? static function () {
 			return true;
 		} : $fits;
@@ -281,7 +325,8 @@ final class PluginUpdateAnalyzer {
 			$capture_action_scheduler,
 			RequestStart::get(),
 			SiteCheckObservation::from_wordpress(),
-			$fits
+			$fits,
+			CaptureTimeBudget::from_php()
 		);
 	}
 
@@ -298,9 +343,18 @@ final class PluginUpdateAnalyzer {
 	 * @param int                                    $user_id     Current user ID (0 if none).
 	 * @param array|null                             $activity    This update's SiteCheck\UpdateActivity::begin()
 	 *                                                            record (the order against other updates), or null.
+	 * @param string|null                            $batch       Set for every download of a multi-plugin update
+	 *                                                            observed per plugin (UpdateClassifier::is_batch()):
+	 *                                                            its key (the upgrader). $plugin_file is then null
+	 *                                                            only for UpdateLens itself. See batch_item_starting().
 	 * @return void
 	 */
-	public function update_starting( $plugin_file, array $plugin = array(), $user_id = 0, $activity = null ) {
+	public function update_starting( $plugin_file, array $plugin = array(), $user_id = 0, $activity = null, $batch = null ) {
+		if ( null !== $batch ) {
+			$this->batch_item_starting( (string) $batch, $plugin_file, $plugin, $user_id );
+			return;
+		}
+
 		if ( null !== $plugin_file && isset( $this->request_analyses[ $plugin_file ] ) ) {
 			return; // The same update reported twice.
 		}
@@ -311,44 +365,120 @@ final class PluginUpdateAnalyzer {
 		foreach ( $this->request_analyses as $id ) {
 			$this->abandon_open( $id, self::ERROR_ANOTHER_UPDATE_STARTED );
 		}
+		$this->batch = null; // Another update also ends the observation of a batch in this request.
 
-		$to_settle = array();
-		if ( $first_update ) {
-			foreach ( $this->awaiting_from_earlier_requests() as $row ) {
-				if ( $this->is_settle_window_open( $row ) ) {
-					$to_settle[] = $row;
-				} else {
-					$this->expire( $row );
-				}
-			}
-		}
-
+		$to_settle = $first_update ? $this->due_before_update() : array();
 		if ( ! $to_settle && null === $plugin_file ) {
 			return;
 		}
 
 		// The whole observation (up to SETTLED) must fit, or none is begun.
-		$plan = $this->plan( ObservationBudget::BEFORE );
-		try {
-			$snapshot = $plan[ ObservationBudget::OPTIONS ] ? call_user_func( $this->capture ) : null;
-		} catch ( Throwable $e ) {
-			$snapshot = null;
+		$started  = $this->time_budget->start();
+		$captured = $this->capture_before_update( $this->plan( ObservationBudget::BEFORE ), $to_settle );
+		if ( null !== $captured && null !== $plugin_file ) {
+			list( $snapshot, $cron_snapshot, $action_scheduler_snapshot ) = $captured;
+			$this->begin( $plugin_file, $plugin, $user_id, $this->before_columns( $snapshot, $cron_snapshot, $action_scheduler_snapshot ), $activity );
 		}
-		if ( null === $snapshot ) {
-			foreach ( $to_settle as $row ) {
-				$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NEXT_UPDATE );
+		$this->time_budget->stop( $started );
+	}
+
+	/**
+	 * A download of a multi-plugin update (several plugins in one request,
+	 * `bulk_upgrade()`): begin that plugin's own observation.
+	 *
+	 * - Its BEFORE is the previous plugin's IMMEDIATE capture, handed on in
+	 *   encoded form, when that observation was stored and nothing else was
+	 *   downloaded in between (nothing UpdateLens attributes happens between
+	 *   the two points in `bulk_upgrade()`); otherwise a fresh capture.
+	 * - Starting a plugin never closes, settles or abandons the plugins before
+	 *   it: they stay `captured` until the batch ends (batch_finished()).
+	 * - A plugin whose observation does not fit (memory, or the request's time
+	 *   budget for the captures it still needs) or whose capture fails is
+	 *   recorded as skipped (`failed` with the reason), never left out.
+	 * - UpdateLens itself ($plugin_file null): its files are replaced now, so
+	 *   nothing more is observed in this request (the batch closes as
+	 *   `batch_incomplete`).
+	 * - The same plugin a second time abandons its first observation.
+	 * - Any other update in the same request still abandons the batch's
+	 *   plugins (update_starting()).
+	 *
+	 * BEFORE site check baselines are not attached to these plugins: a website
+	 * check after the update would describe the whole batch.
+	 *
+	 * @param string      $batch       Batch key (the upgrader).
+	 * @param string|null $plugin_file Plugin to analyse, or null for UpdateLens itself.
+	 * @param array       $plugin      Plugin header data before the update.
+	 * @param int         $user_id     Current user ID.
+	 * @return void
+	 */
+	private function batch_item_starting( $batch, $plugin_file, array $plugin, $user_id ) {
+		if ( null === $this->batch || $batch !== $this->batch['key'] ) {
+			// A new multi-plugin update: what this request analysed before was another update.
+			foreach ( $this->request_analyses as $id ) {
+				$this->abandon_open( $id, self::ERROR_ANOTHER_UPDATE_STARTED );
+			}
+			$this->batch = array(
+				'key'      => $batch,
+				'items'    => array(),
+				'results'  => array(),
+				'observed' => array(),
+				'handoff'  => null,
+				'open'     => true,
+			);
+		}
+
+		// Valid only for the very next download of this batch: taken now, or dropped.
+		$handoff                = $this->batch['handoff'];
+		$this->batch['handoff'] = null;
+
+		$first_update      = ! $this->update_seen;
+		$this->update_seen = true;
+
+		if ( ! $this->batch['open'] ) {
+			return;
+		}
+		if ( null === $plugin_file ) {
+			$this->close_batch( SettleOutcome::BATCH_INCOMPLETE, self::ERROR_UPDATE_NOT_INSTALLED );
+			return;
+		}
+		if ( array_key_exists( $plugin_file, $this->batch['items'] ) ) {
+			// Updated again in the same batch: its first observation no longer describes the final state.
+			if ( null !== $this->batch['items'][ $plugin_file ] ) {
+				$this->abandon_open( $this->batch['items'][ $plugin_file ], self::ERROR_ANOTHER_UPDATE_STARTED );
 			}
 			return;
 		}
-		list( $cron_snapshot, $action_scheduler_snapshot ) = $this->capture_signals( $plan );
+		$this->batch['items'][ $plugin_file ] = null;
 
-		foreach ( $to_settle as $row ) {
-			$this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::NEXT_UPDATE );
+		// Only the first update of a request can find analyses of earlier requests to settle,
+		// and it never has a handoff (one exists only after a plugin of this request).
+		$to_settle = $first_update ? $this->due_before_update() : array();
+		$plan      = $this->plan( ObservationBudget::BEFORE );
+		$skipped   = null;
+		if ( ! $plan[ ObservationBudget::OPTIONS ] ) {
+			$skipped = self::ERROR_ANALYSIS_FAILED;
+		} elseif ( ! $this->time_budget->allows( null === $handoff ? 2 : 1 ) ) {
+			$skipped = self::ERROR_TIME_BUDGET;
 		}
 
-		if ( null !== $plugin_file ) {
-			$this->begin( $plugin_file, $plugin, $user_id, $snapshot, $cron_snapshot, $action_scheduler_snapshot, $activity );
+		$started = $this->time_budget->start();
+		$before  = $handoff;
+		if ( null === $before && ( null === $skipped || array() !== $to_settle ) ) {
+			$captured = $this->capture_before_update( $plan, $to_settle );
+			if ( null === $captured ) {
+				$skipped = null === $skipped ? self::ERROR_ANALYSIS_FAILED : $skipped;
+			} else {
+				list( $snapshot, $cron_snapshot, $action_scheduler_snapshot ) = $captured;
+				$before = $this->before_columns( $snapshot, $cron_snapshot, $action_scheduler_snapshot );
+			}
 		}
+
+		if ( null === $skipped && null !== $before ) {
+			$this->batch['items'][ $plugin_file ] = $this->begin( $plugin_file, $plugin, $user_id, $before, null, false );
+		} else {
+			$this->record_skipped( $plugin_file, $plugin, $user_id, null === $skipped ? self::ERROR_ANALYSIS_FAILED : $skipped );
+		}
+		$this->time_budget->stop( $started );
 	}
 
 	/**
@@ -390,6 +520,23 @@ final class PluginUpdateAnalyzer {
 			return false;
 		}
 
+		$started = $this->time_budget->start();
+		try {
+			return $this->take_immediate( $row, $plan, $version_after );
+		} finally {
+			$this->time_budget->stop( $started );
+		}
+	}
+
+	/**
+	 * The IMMEDIATE observation of a single-plugin update (update_finished()).
+	 *
+	 * @param array               $row           Analysis in `captured`.
+	 * @param array<string, bool> $plan          The IMMEDIATE stage's plan.
+	 * @param string|null         $version_after Installed version after the update.
+	 * @return bool Whether it was stored.
+	 */
+	private function take_immediate( array $row, array $plan, $version_after ) {
 		$before = $this->decode_snapshot( $row, 'options_before_snapshot', SettleOutcome::NOT_APPLICABLE );
 		if ( null === $before ) {
 			return false;
@@ -434,10 +581,191 @@ final class PluginUpdateAnalyzer {
 	}
 
 	/**
+	 * A plugin of the multi-plugin update this request observes was installed,
+	 * or failed to install (`upgrader_install_package_result`; bulk updates
+	 * fire no `upgrader_process_complete` per plugin).
+	 *
+	 * On success, takes its IMMEDIATE capture and stores its During update
+	 * (BEFORE → IMMEDIATE), its version and the capture time. The plugin stays
+	 * `captured` until the batch ends: its After update and Net result belong
+	 * to the whole batch. No IMMEDIATE snapshot is stored; the capture is
+	 * handed on, encoded, as the BEFORE of the next download of this batch.
+	 * A failed install ends the plugin `failed` with WordPress's code. An
+	 * IMMEDIATE that does not fit the memory or time budget ends it `failed`
+	 * (`analysis_error`, `capture_time_budget`); the update continues.
+	 *
+	 * @param string      $plugin_file   Plugin basename.
+	 * @param string|null $error_code    Null if the package was installed, else a WordPress error code.
+	 * @param string|null $version_after Installed version after the update.
+	 * @return bool True only if this call stored the IMMEDIATE observation.
+	 */
+	public function batch_item_installed( $plugin_file, $error_code, $version_after ) {
+		if ( null === $this->batch || ! $this->batch['open'] || empty( $this->batch['items'][ $plugin_file ] ) || isset( $this->batch['results'][ $plugin_file ] ) ) {
+			return false; // Not a plugin of this batch, not analysed, or already handled.
+		}
+		$this->batch['results'][ $plugin_file ] = true;
+
+		try {
+			$row = $this->repository->find( $this->batch['items'][ $plugin_file ] );
+		} catch ( Throwable $e ) {
+			return false;
+		}
+		if ( null === $row || AnalysisStatus::CAPTURED !== $row['status'] ) {
+			return false; // Ended meanwhile (abandoned, or by another request).
+		}
+
+		if ( null !== $error_code ) {
+			$this->finish( $row, AnalysisStatus::FAILED, self::sanitize_error_code( $error_code ), SettleOutcome::NOT_APPLICABLE );
+			return false;
+		}
+
+		$plan = $this->plan( ObservationBudget::IMMEDIATE );
+		if ( ! $plan[ ObservationBudget::OPTIONS ] ) {
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NOT_APPLICABLE );
+			return false;
+		}
+		if ( ! $this->time_budget->allows( 1 ) ) {
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_TIME_BUDGET, SettleOutcome::NOT_APPLICABLE );
+			return false;
+		}
+
+		$started = $this->time_budget->start();
+		try {
+			$handoff = $this->take_batch_immediate( $row, $plan, $version_after );
+		} finally {
+			$this->time_budget->stop( $started );
+		}
+		if ( null === $handoff ) {
+			return false;
+		}
+
+		$this->batch['observed'][ $plugin_file ] = true;
+		$this->batch['handoff']                  = $handoff;
+
+		return true;
+	}
+
+	/**
+	 * The IMMEDIATE observation of a plugin of a batch (batch_item_installed()).
+	 *
+	 * @param array               $row           Analysis in `captured`.
+	 * @param array<string, bool> $plan          The IMMEDIATE stage's plan.
+	 * @param string|null         $version_after Installed version after the update.
+	 * @return array|null The capture as BEFORE columns for the next download
+	 *                    (before_columns()), or null if nothing was stored.
+	 */
+	private function take_batch_immediate( array $row, array $plan, $version_after ) {
+		$before = $this->decode_snapshot( $row, 'options_before_snapshot', SettleOutcome::NOT_APPLICABLE );
+		if ( null === $before ) {
+			return null;
+		}
+		unset( $row['options_before_snapshot'] );
+
+		try {
+			$immediate = call_user_func( $this->capture );
+
+			list( $cron_immediate, $action_scheduler_immediate ) = $this->capture_signals( $plan );
+
+			$during_update_json = $this->diff_codec->encode( $this->diff_builder->build( $before, $immediate ) );
+			unset( $before );
+			// Kept until the next download as encoded text only (never the decoded snapshot).
+			$handoff            = $this->before_columns( $immediate, $cron_immediate, $action_scheduler_immediate );
+			$handoff['options'] = $this->snapshot_codec->encode( $immediate );
+			unset( $immediate );
+		} catch ( IncompatibleSnapshotsException $e ) {
+			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED, SettleOutcome::NOT_APPLICABLE );
+			return null;
+		} catch ( Throwable $e ) {
+			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NOT_APPLICABLE );
+			return null;
+		}
+
+		$captured_at = $this->precise_now();
+		$applied     = $this->transition(
+			$row,
+			array(
+				'version_after'              => null === $version_after ? null : (string) $version_after,
+				'options_during_update_diff' => $during_update_json,
+				'options_before_snapshot'    => null,
+				'immediate_captured_at'      => sprintf( '%.6F', $captured_at ),
+				'updated_at'                 => self::datetime( (int) floor( $captured_at ) ),
+			),
+			$this->cron->batch_item( $row, $cron_immediate ),
+			$this->action_scheduler->batch_item( $row, $action_scheduler_immediate )
+		);
+
+		return true === $applied ? $handoff : null;
+	}
+
+	/**
+	 * The multi-plugin update this request observes ended (its one
+	 * `upgrader_process_complete`, after every plugin).
+	 *
+	 * Its plugins close now: those with a stored IMMEDIATE observation
+	 * `completed` with outcome `batch` (After update and Net result belong to
+	 * the whole batch: no diff, reason `batch_update` for WP-Cron and Action
+	 * Scheduler); those whose package was never installed (download or unpack
+	 * failed) `failed` with `update_not_installed`. Plugins already ended keep
+	 * their state.
+	 *
+	 * @return void
+	 */
+	public function batch_finished() {
+		if ( null !== $this->batch && $this->batch['open'] ) {
+			$this->close_batch( SettleOutcome::BATCH, self::ERROR_UPDATE_NOT_INSTALLED );
+		}
+		// Forgotten once ended: a later multi-plugin update in this request is its own
+		// batch, even if its upgrader gets the same object hash.
+		$this->batch = null;
+	}
+
+	/**
+	 * Close the plugins of this request's batch and stop observing it.
+	 *
+	 * @param string $outcome       Outcome of the plugins whose IMMEDIATE observation was stored
+	 *                              (SettleOutcome::BATCH or BATCH_INCOMPLETE).
+	 * @param string $not_installed Error code of plugins still `captured` without an install result.
+	 * @return void
+	 */
+	private function close_batch( $outcome, $not_installed ) {
+		$this->batch['open']    = false;
+		$this->batch['handoff'] = null;
+
+		foreach ( $this->batch['items'] as $plugin_file => $id ) {
+			if ( null === $id ) {
+				continue;
+			}
+			try {
+				$row = $this->repository->find_signals( $id );
+			} catch ( Throwable $e ) {
+				continue; // Left for the shutdown of this request (update_not_completed).
+			}
+			if ( null === $row || AnalysisStatus::CAPTURED !== $row['status'] ) {
+				continue;
+			}
+
+			if ( isset( $this->batch['observed'][ $plugin_file ] ) ) {
+				$this->transition(
+					$row,
+					array( 'status' => AnalysisStatus::COMPLETED ) + $this->closing_changes( $outcome ),
+					$this->cron->close( $row, CronPhaseReason::BATCH_UPDATE ),
+					$this->action_scheduler->close( $row, ActionSchedulerPhaseReason::BATCH_UPDATE )
+				);
+			} elseif ( isset( $this->batch['results'][ $plugin_file ] ) ) {
+				// Installed, but its observation could not be stored.
+				$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NOT_APPLICABLE );
+			} else {
+				$this->finish( $row, AnalysisStatus::FAILED, $not_installed, SettleOutcome::NOT_APPLICABLE );
+			}
+		}
+	}
+
+	/**
 	 * The request is ending (WordPress `shutdown`).
 	 *
-	 * Fails analyses this request started whose update never reported back.
-	 * On an eligible wp-admin page request that ran no update (see
+	 * Fails analyses this request started whose update never reported back,
+	 * after closing the plugins of a multi-plugin update whose end was not
+	 * observed (`batch_incomplete`). On an eligible wp-admin page request that ran no update (see
 	 * SettleEligibility), also abandons stale analyses, expires those past
 	 * their settle window and settles the rest that this request may settle.
 	 *
@@ -453,6 +781,11 @@ final class PluginUpdateAnalyzer {
 	 * @return void
 	 */
 	public function request_ending( $may_settle, array $activation_changed = array() ) {
+		if ( null !== $this->batch && $this->batch['open'] ) {
+			// The batch never reported its end (fatal error, timeout, abort): its
+			// plugins keep their During update; nothing is captured now.
+			$this->close_batch( SettleOutcome::BATCH_INCOMPLETE, self::ERROR_UPDATE_NOT_COMPLETED );
+		}
 		foreach ( $this->request_analyses as $id ) {
 			$this->fail_if_captured( $id );
 		}
@@ -723,6 +1056,111 @@ final class PluginUpdateAnalyzer {
 	}
 
 	/**
+	 * Analyses of earlier requests to settle before this request's first
+	 * update (`next_update`); those past their settle window expire now.
+	 *
+	 * @return array<int, array> Open analyses in `awaiting_settle` whose window is open.
+	 */
+	private function due_before_update() {
+		$to_settle = array();
+		foreach ( $this->awaiting_from_earlier_requests() as $row ) {
+			if ( $this->is_settle_window_open( $row ) ) {
+				$to_settle[] = $row;
+			} else {
+				$this->expire( $row );
+			}
+		}
+
+		return $to_settle;
+	}
+
+	/**
+	 * Capture the state before an update and settle the earlier analyses due
+	 * now with it (`next_update`). If options do not fit or the capture fails,
+	 * those analyses fail (`analysis_error`) and nothing is returned.
+	 *
+	 * @param array<string, bool> $plan      The BEFORE stage's plan.
+	 * @param array<int, array>   $to_settle due_before_update().
+	 * @return array{0: OptionsSnapshot, 1: CronSnapshot|string, 2: ActionSchedulerSnapshot|string}|null
+	 */
+	private function capture_before_update( array $plan, array $to_settle ) {
+		try {
+			$snapshot = $plan[ ObservationBudget::OPTIONS ] ? call_user_func( $this->capture ) : null;
+		} catch ( Throwable $e ) {
+			$snapshot = null;
+		}
+		if ( ! $snapshot instanceof OptionsSnapshot ) {
+			foreach ( $to_settle as $row ) {
+				$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NEXT_UPDATE );
+			}
+			return null;
+		}
+		list( $cron_snapshot, $action_scheduler_snapshot ) = $this->capture_signals( $plan );
+
+		foreach ( $to_settle as $row ) {
+			$this->settle( $row, $snapshot, $cron_snapshot, $action_scheduler_snapshot, SettleOutcome::NEXT_UPDATE );
+		}
+
+		return array( $snapshot, $cron_snapshot, $action_scheduler_snapshot );
+	}
+
+	/**
+	 * A capture as the BEFORE columns of a new analysis. The options snapshot
+	 * stays an object until begin() encodes it (its failure ends nothing
+	 * else); WP-Cron and Action Scheduler are encoded now, or carry the reason
+	 * they are unavailable.
+	 *
+	 * @param OptionsSnapshot                $snapshot                  Options.
+	 * @param CronSnapshot|string            $cron_snapshot             WP-Cron, or the reason it is unavailable.
+	 * @param ActionSchedulerSnapshot|string $action_scheduler_snapshot Action Scheduler, or the reason it is unavailable.
+	 * @return array{options: OptionsSnapshot|string, cron: array, action_scheduler: array}
+	 */
+	private function before_columns( OptionsSnapshot $snapshot, $cron_snapshot, $action_scheduler_snapshot ) {
+		return array(
+			'options'          => $snapshot,
+			'cron'             => $this->cron->before( $cron_snapshot ),
+			'action_scheduler' => $this->action_scheduler->before( $action_scheduler_snapshot ),
+		);
+	}
+
+	/**
+	 * Record a plugin of a multi-plugin update whose observation was skipped
+	 * before it began: `failed` with the reason (an UpdateLens limit, never
+	 * "the update failed"), no snapshots, every phase `analysis_ended`.
+	 *
+	 * @param string $plugin_file Plugin basename.
+	 * @param array  $plugin      Plugin header data.
+	 * @param int    $user_id     User ID.
+	 * @param string $error_code  ERROR_TIME_BUDGET or ERROR_ANALYSIS_FAILED.
+	 * @return void
+	 */
+	private function record_skipped( $plugin_file, array $plugin, $user_id, $error_code ) {
+		$now = self::datetime( $this->now() );
+		$row = array(
+			'plugin_file'    => $plugin_file,
+			'plugin_name'    => isset( $plugin['name'] ) ? (string) $plugin['name'] : '',
+			'version_before' => isset( $plugin['version'] ) ? (string) $plugin['version'] : '',
+			'user_id'        => (int) $user_id,
+			'status'         => AnalysisStatus::FAILED,
+			'settle_outcome' => SettleOutcome::NOT_APPLICABLE,
+			'started_at'     => $now,
+			'updated_at'     => $now,
+			'completed_at'   => $now,
+			'error_code'     => $error_code,
+			'error_message'  => self::ERROR_MESSAGES[ $error_code ],
+		)
+			// A row without snapshots: every phase gets the reason.
+			+ $this->cron->close( array( CronObservation::BEFORE_SNAPSHOT => null ), CronPhaseReason::ANALYSIS_ENDED )
+			+ $this->action_scheduler->close( array( ActionSchedulerObservation::BEFORE_SNAPSHOT => null ), ActionSchedulerPhaseReason::ANALYSIS_ENDED );
+
+		try {
+			$this->repository->create( $row );
+		} catch ( Throwable $e ) {
+			return; // Nothing more can be recorded; the update continues.
+		}
+	}
+
+	/**
 	 * Create the analysis with its BEFORE snapshots.
 	 *
 	 * If the row cannot be written with the Cron or Action Scheduler
@@ -730,21 +1168,21 @@ final class PluginUpdateAnalyzer {
 	 * phases marked `storage_failed`, see attempts()), so neither signal's
 	 * storage ever prevents the options analysis or drops the other signal.
 	 *
-	 * @param string                         $plugin_file   Plugin basename.
-	 * @param array                          $plugin        Plugin header data.
-	 * @param int                            $user_id       User ID.
-	 * @param OptionsSnapshot                $snapshot      BEFORE options snapshot.
-	 * @param CronSnapshot|string            $cron_snapshot BEFORE Cron snapshot or the reason it is unavailable.
-	 * @param ActionSchedulerSnapshot|string $action_scheduler_snapshot BEFORE Action Scheduler snapshot or the reason it is unavailable.
-	 * @param array|null                     $activity      This update's UpdateActivity::begin() record, or null.
-	 * @return void
+	 * @param string     $plugin_file        Plugin basename.
+	 * @param array      $plugin             Plugin header data.
+	 * @param int        $user_id            User ID.
+	 * @param array      $before             BEFORE columns (before_columns(), or a handoff whose
+	 *                                       `options` is already encoded).
+	 * @param array|null $activity           This update's UpdateActivity::begin() record, or null.
+	 * @param bool       $attach_site_checks Whether to attach BEFORE site check baselines.
+	 * @return int|null Analysis ID, or null if none was created.
 	 */
-	private function begin( $plugin_file, array $plugin, $user_id, OptionsSnapshot $snapshot, $cron_snapshot, $action_scheduler_snapshot, $activity = null ) {
+	private function begin( $plugin_file, array $plugin, $user_id, array $before, $activity = null, $attach_site_checks = true ) {
 		try {
 			$open = $this->repository->find_open_for_plugin( $plugin_file );
 			if ( null !== $open ) {
 				if ( AnalysisStatus::CAPTURED === $open['status'] && ! $this->is_stale( $open ) ) {
-					return; // Another request is updating this plugin right now.
+					return null; // Another request is updating this plugin right now.
 				}
 				$this->finish( $open, AnalysisStatus::ABANDONED, AnalysisStatus::CAPTURED === $open['status'] ? self::ERROR_STALE : self::ERROR_ANOTHER_UPDATE_STARTED, SettleOutcome::NOT_APPLICABLE );
 			}
@@ -759,14 +1197,14 @@ final class PluginUpdateAnalyzer {
 				'active_plugin'           => $plugin_file,
 				'started_at'              => $now,
 				'updated_at'              => $now,
-				'options_before_snapshot' => $this->snapshot_codec->encode( $snapshot ),
+				'options_before_snapshot' => is_string( $before['options'] ) ? $before['options'] : $this->snapshot_codec->encode( $before['options'] ),
 			);
-			if ( null !== $this->site_checks ) {
+			if ( $attach_site_checks && null !== $this->site_checks ) {
 				// Chosen now, from what is stored when the update starts; never changed later.
 				$row += $this->site_checks->before( (int) $user_id, $activity );
 			}
-			$cron             = $this->cron->before( $cron_snapshot );
-			$action_scheduler = $this->action_scheduler->before( $action_scheduler_snapshot );
+			$cron             = $before['cron'];
+			$action_scheduler = $before['action_scheduler'];
 
 			$id = null;
 			foreach ( self::attempts( $row, $cron, $action_scheduler ) as $attempt ) {
@@ -778,13 +1216,15 @@ final class PluginUpdateAnalyzer {
 				}
 			}
 			if ( null === $id ) {
-				return; // No analysis for this update.
+				return null; // No analysis for this update.
 			}
 		} catch ( Throwable $e ) {
-			return; // No analysis for this update; the update itself continues.
+			return null; // No analysis for this update; the update itself continues.
 		}
 
 		$this->request_analyses[ $plugin_file ] = $id;
+
+		return $id;
 	}
 
 	/**
@@ -967,7 +1407,7 @@ final class PluginUpdateAnalyzer {
 		if ( AnalysisStatus::ABANDONED === $status ) {
 			return CronPhaseReason::ANALYSIS_ABANDONED;
 		}
-		if ( AnalysisStatus::FAILED === $status && ! in_array( $error_code, array( self::ERROR_ANALYSIS_FAILED, self::ERROR_SNAPSHOT_CORRUPT ), true ) ) {
+		if ( AnalysisStatus::FAILED === $status && ! in_array( $error_code, self::ANALYSIS_ERRORS, true ) ) {
 			return CronPhaseReason::UPDATE_FAILED;
 		}
 
@@ -986,7 +1426,7 @@ final class PluginUpdateAnalyzer {
 		if ( AnalysisStatus::ABANDONED === $status ) {
 			return ActionSchedulerPhaseReason::ANALYSIS_ABANDONED;
 		}
-		if ( AnalysisStatus::FAILED === $status && ! in_array( $error_code, array( self::ERROR_ANALYSIS_FAILED, self::ERROR_SNAPSHOT_CORRUPT ), true ) ) {
+		if ( AnalysisStatus::FAILED === $status && ! in_array( $error_code, self::ANALYSIS_ERRORS, true ) ) {
 			return ActionSchedulerPhaseReason::UPDATE_FAILED;
 		}
 

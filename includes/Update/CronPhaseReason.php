@@ -70,4 +70,11 @@ final class CronPhaseReason {
 	 * before this phase was observed.
 	 */
 	const ANALYSIS_ENDED = 'analysis_ended';
+
+	/**
+	 * A plugin of a multi-plugin update (one request, several plugins): its
+	 * After update and Net result are observed for the whole batch, not for
+	 * this plugin alone.
+	 */
+	const BATCH_UPDATE = 'batch_update';
 }

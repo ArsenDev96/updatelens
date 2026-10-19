@@ -231,4 +231,137 @@ final class UpdateClassifierTest extends TestCase {
 	public function test_ignored_completions( array $hook_extra ) {
 		$this->assertNull( UpdateClassifier::completed_plugin( $hook_extra ) );
 	}
+
+	/**
+	 * A download of a multi-plugin update (several plugins in one bulk_upgrade()).
+	 *
+	 * @param array $overrides Overrides.
+	 * @return array
+	 */
+	private function batch_context( array $overrides = array() ) {
+		return array_replace(
+			$this->context(
+				array(
+					'bulk'         => true,
+					'update_count' => 3,
+					'hook_extra'   => array(
+						'plugin'      => self::PLUGIN,
+						'temp_backup' => array( 'slug' => 'acme' ),
+					),
+					'batch_items'  => true,
+				)
+			),
+			$overrides
+		);
+	}
+
+	/**
+	 * With the internal switch, each plugin of a multi-plugin update is an item of a batch.
+	 */
+	public function test_batch_items_with_the_switch() {
+		$this->assertTrue( UpdateClassifier::is_batch( $this->batch_context() ) );
+		$this->assertSame( self::PLUGIN, UpdateClassifier::plugin_to_analyze( $this->batch_context() ) );
+	}
+
+	/**
+	 * UpdateLens itself is part of the batch, but never analysed.
+	 */
+	public function test_updatelens_in_a_batch() {
+		$context = $this->batch_context(
+			array(
+				'hook_extra' => array(
+					'plugin'      => 'updatelens/updatelens.php',
+					'temp_backup' => array( 'slug' => 'updatelens' ),
+				),
+			)
+		);
+
+		$this->assertTrue( UpdateClassifier::is_batch( $context ) );
+		$this->assertNull( UpdateClassifier::plugin_to_analyze( $context ) );
+	}
+
+	/**
+	 * Not a batch: the switch off (as released), one plugin, or not an
+	 * interactive single-site plugin update. Without the switch, multi-plugin
+	 * updates stay ignored exactly as before.
+	 *
+	 * @return array<string, array{array, bool}>
+	 */
+	public function provide_not_batches() {
+		return array(
+			'switch off'          => array( array( 'batch_items' => false ), false ),
+			'switch missing'      => array( array( 'batch_items' => null ), false ),
+			'one plugin'          => array( array( 'update_count' => 1 ), true ),
+			'not bulk'            => array(
+				array(
+					'bulk'         => false,
+					'update_count' => 0,
+				),
+				true,
+			),
+			'cron or WP-CLI'      => array( array( 'is_interactive_admin' => false ), false ),
+			'multisite'           => array( array( 'is_multisite' => true ), false ),
+			'theme upgrader'      => array( array( 'is_plugin_upgrader' => false ), false ),
+			'update count absent' => array( array( 'update_count' => null ), false ),
+		);
+	}
+
+	/**
+	 * Downloads that are not items of a batch; single-plugin paths stay analysed.
+	 *
+	 * @dataProvider provide_not_batches
+	 *
+	 * @param array $overrides Context overrides.
+	 * @param bool  $single    Whether it is still analysed as a single-plugin update.
+	 */
+	public function test_not_batches( array $overrides, $single ) {
+		$context = $this->batch_context( $overrides );
+
+		$this->assertFalse( UpdateClassifier::is_batch( $context ) );
+		$this->assertSame( $single ? self::PLUGIN : null, UpdateClassifier::plugin_to_analyze( $context ) );
+	}
+
+	/**
+	 * The one completion of a multi-plugin update ends its batch; single-plugin
+	 * completions and other updates do not.
+	 */
+	public function test_completes_batch() {
+		$this->assertTrue(
+			UpdateClassifier::completes_batch(
+				array(
+					'action'  => 'update',
+					'type'    => 'plugin',
+					'bulk'    => true,
+					'plugins' => array( self::PLUGIN, 'other/other.php' ),
+				)
+			)
+		);
+
+		foreach ( $this->provide_ignored_completions() as $name => $case ) {
+			if ( 'bulk of two' !== $name ) {
+				$this->assertFalse( UpdateClassifier::completes_batch( $case[0] ), $name );
+			}
+		}
+		$this->assertFalse(
+			UpdateClassifier::completes_batch(
+				array(
+					'action'  => 'update',
+					'type'    => 'plugin',
+					'bulk'    => true,
+					'plugins' => array( self::PLUGIN ),
+				)
+			),
+			'One plugin: a single-plugin update.'
+		);
+		$this->assertFalse(
+			UpdateClassifier::completes_batch(
+				array(
+					'action'  => 'update',
+					'type'    => 'plugin',
+					'plugins' => array( self::PLUGIN, 'other/other.php' ),
+				)
+			),
+			'Not bulk.'
+		);
+	}
 }

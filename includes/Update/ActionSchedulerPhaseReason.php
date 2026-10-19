@@ -126,6 +126,13 @@ final class ActionSchedulerPhaseReason {
 	const ANALYSIS_ENDED = 'analysis_ended';
 
 	/**
+	 * A plugin of a multi-plugin update (one request, several plugins): its
+	 * After update and Net result are observed for the whole batch, not for
+	 * this plugin alone.
+	 */
+	const BATCH_UPDATE = 'batch_update';
+
+	/**
 	 * Every reason, for validation by readers.
 	 */
 	const ALL = array(
@@ -146,6 +153,7 @@ final class ActionSchedulerPhaseReason {
 		self::UPDATE_FAILED,
 		self::ANALYSIS_ABANDONED,
 		self::ANALYSIS_ENDED,
+		self::BATCH_UPDATE,
 	);
 
 	/**

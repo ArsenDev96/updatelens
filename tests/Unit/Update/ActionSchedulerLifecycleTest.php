@@ -1187,7 +1187,7 @@ final class ActionSchedulerLifecycleTest extends TestCase {
 			$this->assertSame( ActionSchedulerPhaseReason::MALFORMED_STATE, ActionSchedulerPhaseReason::from_malformed( $malformed ) );
 		}
 		$this->assertSame( ActionSchedulerPhaseReason::ALL, array_values( array_unique( ActionSchedulerPhaseReason::ALL ) ) );
-		$this->assertCount( 17, ActionSchedulerPhaseReason::ALL );
+		$this->assertCount( 18, ActionSchedulerPhaseReason::ALL );
 	}
 
 	/**

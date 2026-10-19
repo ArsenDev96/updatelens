@@ -294,8 +294,8 @@ Before WP-Cron reporting, each phase _was_ the options object. It is now `phases
 
 - `plugin.file`: plugin basename (`dir/file.php`), or `null` if the stored value is not a valid basename. `version_after` is `null` until the update finished.
 - `status`: `captured`, `awaiting_settle`, `completed`, `failed`, `incompatible`, `abandoned`, or `unknown` (unrecognised stored value; never reinterpreted).
-- `settle_outcome`: `null` while open, else `admin_shutdown`, `follow_up`, `next_update`, `expired`, `not_applicable`, or `unknown`. `follow_up`: the post-update observation was taken by the follow-up request the updating administrator's browser sends once the WordPress update queue is idle (Installed Plugins) or once Dashboard → Updates' update page has loaded; `admin_shutdown`: at the end of a later wp-admin page request.
-- `error`: `null` or `{"code": "…"}`, a sanitized identifier (e.g. `update_not_completed`, `fingerprint_context_changed`, or a WordPress updater code such as `incompatible_archive`). No messages, paths or URLs.
+- `settle_outcome`: `null` while open, else `admin_shutdown`, `follow_up`, `next_update`, `expired`, `not_applicable`, `batch`, `batch_incomplete`, or `unknown`. `follow_up`: the post-update observation was taken by the follow-up request the updating administrator's browser sends once the WordPress update queue is idle (Installed Plugins) or once Dashboard → Updates' update page has loaded; `admin_shutdown`: at the end of a later wp-admin page request. `batch` / `batch_incomplete`: a plugin of a multi-plugin update (several plugins in one request), closed when that update ended (or, `batch_incomplete`, without its end being observed); its After update and Net result belong to the whole batch, so they are unavailable here. These two only occur with the internal development switch `UPDATELENS_INTERNAL_BATCH_ITEMS` (0.4.0 development, until batch reports exist); without it, multi-plugin updates are not analyzed.
+- `error`: `null` or `{"code": "…"}`, a sanitized identifier (e.g. `update_not_completed`, `fingerprint_context_changed`, or a WordPress updater code such as `incompatible_archive`). No messages, paths or URLs. `capture_time_budget` (internal switch only, like `batch` above): UpdateLens skipped observing a plugin of a multi-plugin update to keep the update request within its time budget; an UpdateLens limit, not a failed update.
 - `observation_window_seconds`: length of the post-update observation window. Presentation derives its wording ("within 5 minutes") from it.
 - `potential_impact`: review rules evaluated on the Net result, with per-signal evaluation status, plus the site check comparison evaluated separately in `potential_impact.site_checks` (see [`potential_impact`](#potential_impact)). Added later; every other field is unchanged.
 - `site_checks`: the homepage and REST API checks before and after the update, compared per check (see [`site_checks`](#site_checks)). Added later; every other field is unchanged. Not part of any phase; Potential Impact reads its comparison (`potential_impact.site_checks`).
@@ -353,6 +353,7 @@ An unavailable `cron` object has `reason`:
 | `update_failed`               | The WordPress update failed or did not report completion.                   |
 | `analysis_abandoned`          | Stale, or another update ran in the same request.                           |
 | `analysis_ended`              | The overall analysis stopped (failed or incompatible) before this phase.    |
+| `batch_update`                | A plugin of a multi-plugin update: this phase is observed for the batch.    |
 | `data_corrupt`                | A Cron diff is stored but could not be read (it is never returned).         |
 | `not_recorded`                | No Cron data and no other explanation.                                      |
 | `unknown`                     | An unrecognised stored reason (never reinterpreted).                        |
@@ -394,6 +395,7 @@ An unavailable `action_scheduler` object has `reason`. `not_installed` is a norm
 | `update_failed`                    | The WordPress update failed or did not report completion.                                      |
 | `analysis_abandoned`               | Stale, or another update ran in the same request.                                              |
 | `analysis_ended`                   | The overall analysis stopped (failed or incompatible) before this phase.                       |
+| `batch_update`                     | A plugin of a multi-plugin update: this phase is observed for the whole batch.                 |
 | `data_corrupt`                     | A diff is stored but could not be read (it is never returned).                                 |
 | `not_recorded`                     | No Action Scheduler data and no other explanation.                                             |
 | `unknown`                          | An unrecognised stored reason (never reinterpreted).                                           |

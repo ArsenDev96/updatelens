@@ -26,9 +26,12 @@ defined( 'ABSPATH' ) || exit;
  * - `upgrader_pre_download` (last): an update is about to touch files. It
  *   receives the upgrader, whose `bulk`/`update_count` tell a one-plugin batch
  *   from a multi-plugin one (`upgrader_package_options` does not).
- * - `upgrader_install_package_result` (last): the per-plugin result.
+ * - `upgrader_install_package_result` (last): the per-plugin result; for a
+ *   plugin of a multi-plugin update, also its immediate state (bulk updates
+ *   fire no per-plugin `upgrader_process_complete`).
  * - `upgrader_process_complete` (last, after core's own handlers): the update
- *   finished; capture the immediate state.
+ *   finished; capture the immediate state, or close the plugins of a
+ *   multi-plugin update.
  * - `shutdown` (last): fail unfinished analyses; settle on later admin pages
  *   that SettleEligibility allows; end this request's updater activity.
  * - `wp_ajax_updatelens_settle`: the follow-up request the updating
@@ -42,8 +45,21 @@ defined( 'ABSPATH' ) || exit;
  * activity ledger (SiteCheck\UpdateActivity), before anything else, and the
  * analysis gets that record: it decides which site check baselines may be
  * attached (an update in between makes an older baseline unusable).
+ *
+ * Multi-plugin updates are observed per plugin only when the internal switch
+ * BATCH_ITEMS_CONSTANT is defined as true (0.4.0 P2: the per-plugin
+ * observations exist, batch reports do not yet). Otherwise they are ignored,
+ * as before.
  */
 final class PluginUpdateTracker {
+
+	/**
+	 * Internal switch: define as true to observe the plugins of multi-plugin
+	 * updates per plugin. For validating that foundation on disposable sites
+	 * only: without batch reports (not built yet), these plugins have no After
+	 * update or Net result and their reports are not finished.
+	 */
+	const BATCH_ITEMS_CONSTANT = 'UPDATELENS_INTERNAL_BATCH_ITEMS';
 
 	/**
 	 * Lifecycle orchestration.
@@ -96,13 +112,30 @@ final class PluginUpdateTracker {
 	private $after;
 
 	/**
+	 * Whether the plugins of multi-plugin updates are observed (BATCH_ITEMS_CONSTANT).
+	 *
+	 * @var bool
+	 */
+	private $batch_items;
+
+	/**
+	 * Whether this request runs a multi-plugin update observed per plugin.
+	 *
+	 * @var bool
+	 */
+	private $batch_seen = false;
+
+	/**
 	 * Constructor. Create on `plugins_loaded`, after active plugins are loaded.
 	 *
 	 * @param PluginUpdateAnalyzer $analyzer Lifecycle orchestration.
 	 * @param UpdateActivity|null  $activity Updater activity ledger (default: options table).
 	 * @param SiteCheckAfter|null  $after    AFTER site checks (default: analyses table and ledger).
+	 * @param bool|null            $batch_items Observe the plugins of multi-plugin updates (default:
+	 *                                          BATCH_ITEMS_CONSTANT defined as true).
 	 */
-	public function __construct( PluginUpdateAnalyzer $analyzer, ?UpdateActivity $activity = null, ?SiteCheckAfter $after = null ) {
+	public function __construct( PluginUpdateAnalyzer $analyzer, ?UpdateActivity $activity = null, ?SiteCheckAfter $after = null, ?bool $batch_items = null ) {
+		$this->batch_items    = null === $batch_items ? ( defined( self::BATCH_ITEMS_CONSTANT ) && true === constant( self::BATCH_ITEMS_CONSTANT ) ) : $batch_items;
 		$this->analyzer       = $analyzer;
 		$this->activity       = $activity;
 		$this->after          = $after;
@@ -154,22 +187,27 @@ final class PluginUpdateTracker {
 			}
 
 			$is_plugin_upgrader = $upgrader instanceof \Plugin_Upgrader;
-			$plugin_file        = UpdateClassifier::plugin_to_analyze(
-				array(
-					'is_plugin_upgrader'   => $is_plugin_upgrader,
-					'bulk'                 => $is_plugin_upgrader && $upgrader->bulk,
-					'update_count'         => (int) $upgrader->update_count,
-					'hook_extra'           => is_array( $hook_extra ) ? $hook_extra : array(),
-					'is_multisite'         => is_multisite(),
-					'is_interactive_admin' => self::is_interactive_admin(),
-					'self_plugin'          => plugin_basename( UPDATELENS_FILE ),
-				)
+			$context            = array(
+				'is_plugin_upgrader'   => $is_plugin_upgrader,
+				'bulk'                 => $is_plugin_upgrader && $upgrader->bulk,
+				'update_count'         => (int) $upgrader->update_count,
+				'hook_extra'           => is_array( $hook_extra ) ? $hook_extra : array(),
+				'is_multisite'         => is_multisite(),
+				'is_interactive_admin' => self::is_interactive_admin(),
+				'self_plugin'          => plugin_basename( UPDATELENS_FILE ),
+				'batch_items'          => $this->batch_items,
 			);
+			$plugin_file        = UpdateClassifier::plugin_to_analyze( $context );
+			// One key per run of bulk_upgrade(): the upgrader object.
+			$batch = UpdateClassifier::is_batch( $context ) ? spl_object_hash( $upgrader ) : null;
+			if ( null !== $batch ) {
+				$this->batch_seen = true;
+			}
 
 			$plugin = null === $plugin_file ? array() : self::plugin_data( $plugin_file );
 			self::quietly(
-				function () use ( $plugin_file, $plugin, $activity ) {
-					$this->analyzer->update_starting( $plugin_file, $plugin, get_current_user_id(), $activity );
+				function () use ( $plugin_file, $plugin, $activity, $batch ) {
+					$this->analyzer->update_starting( $plugin_file, $plugin, get_current_user_id(), $activity, $batch );
 				}
 			);
 		} catch ( Throwable $e ) {
@@ -187,8 +225,29 @@ final class PluginUpdateTracker {
 	 * @return array|\WP_Error
 	 */
 	public function on_install_package_result( $result, $hook_extra = array() ) {
-		if ( is_array( $hook_extra ) && ! empty( $hook_extra['plugin'] ) && is_string( $hook_extra['plugin'] ) ) {
-			$this->install_results[ $hook_extra['plugin'] ] = is_wp_error( $result ) ? (string) $result->get_error_code() : true;
+		try {
+			if ( ! is_array( $hook_extra ) || empty( $hook_extra['plugin'] ) || ! is_string( $hook_extra['plugin'] ) ) {
+				return $result;
+			}
+			$plugin_file                           = $hook_extra['plugin'];
+			$this->install_results[ $plugin_file ] = is_wp_error( $result ) ? (string) $result->get_error_code() : true;
+
+			if ( $this->batch_seen ) {
+				// A plugin of a multi-plugin update: its own immediate state, now.
+				$error = $this->install_error( $plugin_file );
+				$after = null;
+				if ( null === $error ) {
+					$data  = self::plugin_data( $plugin_file );
+					$after = '' === $data['version'] ? null : $data['version'];
+				}
+				self::quietly(
+					function () use ( $plugin_file, $error, $after ) {
+						$this->analyzer->batch_item_installed( $plugin_file, $error, $after );
+					}
+				);
+			}
+		} catch ( Throwable $e ) {
+			return $result; // Never interfere with the update.
 		}
 
 		return $result;
@@ -203,21 +262,26 @@ final class PluginUpdateTracker {
 	 */
 	public function on_process_complete( $upgrader, $hook_extra = array() ) {
 		try {
-			$plugin_file = UpdateClassifier::completed_plugin( is_array( $hook_extra ) ? $hook_extra : array() );
+			$hook_extra = is_array( $hook_extra ) ? $hook_extra : array();
+			if ( $this->batch_seen && UpdateClassifier::completes_batch( $hook_extra ) ) {
+				self::quietly(
+					function () {
+						$this->analyzer->batch_finished();
+					}
+				);
+				return;
+			}
+
+			$plugin_file = UpdateClassifier::completed_plugin( $hook_extra );
 			if ( null === $plugin_file ) {
 				return;
 			}
 
-			// No result means the package was never installed (e.g. the download failed).
-			$result = array_key_exists( $plugin_file, $this->install_results ) ? $this->install_results[ $plugin_file ] : 'update_not_installed';
-
-			if ( true === $result ) {
+			$error = $this->install_error( $plugin_file );
+			$after = null;
+			if ( null === $error ) {
 				$data  = self::plugin_data( $plugin_file );
-				$error = null;
 				$after = '' === $data['version'] ? null : $data['version'];
-			} else {
-				$error = '' === $result ? 'update_failed' : $result;
-				$after = null;
 			}
 			$awaiting = self::quietly(
 				function () use ( $plugin_file, $error, $after ) {
@@ -230,6 +294,23 @@ final class PluginUpdateTracker {
 		} catch ( Throwable $e ) {
 			return; // Never interfere with the update.
 		}
+	}
+
+	/**
+	 * The error code of a plugin's install in this request, or null if its
+	 * package was installed. No result means it was never installed (e.g. the
+	 * download failed).
+	 *
+	 * @param string $plugin_file Plugin basename.
+	 * @return string|null
+	 */
+	private function install_error( $plugin_file ) {
+		$result = array_key_exists( $plugin_file, $this->install_results ) ? $this->install_results[ $plugin_file ] : 'update_not_installed';
+		if ( true === $result ) {
+			return null;
+		}
+
+		return '' === $result ? 'update_failed' : $result;
 	}
 
 	/**

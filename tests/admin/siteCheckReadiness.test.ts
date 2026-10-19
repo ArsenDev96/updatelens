@@ -36,7 +36,7 @@ const LABELS = {
 	ready_rest: 'Ready to compare the REST API only',
 	unavailable: 'Website checks unavailable for now',
 	other_screen:
-		'Website responses are compared only for updates started with “Update now” on Installed Plugins, not from this screen.',
+		'Website responses are compared only for updates of a single plugin: select one plugin on this screen, or use “Update now” on Installed Plugins.',
 	plugins_link: 'Go to Installed Plugins',
 };
 

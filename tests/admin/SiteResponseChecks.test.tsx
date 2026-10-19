@@ -354,11 +354,12 @@ describe( 'Website checks tab', () => {
 			Homepage: 'Not compared',
 			'WordPress REST API': 'Not compared',
 		} );
-		// Dashboard → Updates, a page left or closed, a site that did not
-		// answer, or another plugin that answered the follow-up with its own
-		// page: the stored evidence cannot tell these apart.
+		// A page left or closed, a site that did not answer, another plugin
+		// that answered the follow-up with its own page, or an update from
+		// Dashboard → Updates before its update page sent a follow-up: the
+		// stored evidence cannot tell these apart.
 		expect( section() ).toHaveTextContent(
-			'No follow-up from that tab reached UpdateLens for this update. That happens when the update ran from Dashboard → Updates, when the page was left or closed during the update, when the site did not answer the browser’s follow-up request, or when another plugin answered that request with its own page, such as a setup screen shown after the plugin updates.'
+			'No follow-up from that tab reached UpdateLens for this update. That happens when the page was left or closed during the update, when the site did not answer the browser’s follow-up request, when another plugin answered that request with its own page, such as a setup screen shown after the plugin updates, or for an update from Dashboard → Updates made while an earlier UpdateLens version was installed.'
 		);
 		expect( section().textContent ).not.toMatch(
 			/it ran from Dashboard|the page was left while|outage|site (was|went) down/

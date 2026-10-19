@@ -134,7 +134,8 @@ describe( 'Settings page', () => {
 		// Further explanations are in "How site checks work".
 		for ( const point of [
 			/Turning website checks on does not test your site right away\./,
-			/Updates from Dashboard → Updates get no check after the update, so they are not compared\./,
+			/with one plugin selected on Dashboard → Updates/,
+			/Updates of several plugins at once get no check after the update, so they are not compared\./,
 			/Missing, inconclusive and unsupported checks are never counted as passed\./,
 		] ) {
 			expect( screen.getByText( point ) ).not.toBeVisible();

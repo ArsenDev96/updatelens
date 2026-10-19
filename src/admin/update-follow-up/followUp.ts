@@ -35,6 +35,15 @@
  * With site checks enabled (`siteChecks` in the settings), the response
  * names the analyses this request settled; their AFTER site checks then run
  * (afterChecks.ts), unless an update started meanwhile.
+ *
+ * Dashboard → Updates runs the update in the page itself (the update page,
+ * `update.php?action=update-selected`, in an iframe), not over Ajax. There
+ * PHP prints `updatelensUpdateFollowUpPage` with the plugin that page's own
+ * request analysed, only after its update stored the IMMEDIATE observation
+ * (a failed update lists nothing; an update of several plugins is not
+ * analysed). The follow-up is sent once, for that plugin, when the page has
+ * loaded: by then the update request has ended, its shutdown work included
+ * (measured on WordPress 7.1). Same request, same server-side rules.
  */
 import { runSiteChecks } from '../site-check/runner';
 import { createAfterChecks, parseSettled } from './afterChecks';
@@ -328,6 +337,53 @@ export interface FollowUpWindow {
 	wp?: { updates?: UpdatesState };
 	fetch?: typeof fetch;
 	updatelensUpdateFollowUp?: unknown;
+	/** Only on an update page whose own request analysed a plugin (Dashboard → Updates). */
+	updatelensUpdateFollowUpPage?: unknown;
+	addEventListener?: (
+		type: 'load',
+		listener: () => void,
+		options?: { once?: boolean }
+	) => void;
+}
+
+/**
+ * The plugins the update page's own request analysed, from
+ * `updatelensUpdateFollowUpPage` (AdminAssets::add_update_page_follow_up()).
+ * Anything malformed yields nothing, so nothing is sent.
+ *
+ * @param value The printed object.
+ */
+export function pagePlugins( value: unknown ): string[] {
+	if ( typeof value !== 'object' || value === null ) {
+		return [];
+	}
+	const plugins = ( value as { plugins?: unknown } ).plugins;
+	if (
+		! Array.isArray( plugins ) ||
+		plugins.length === 0 ||
+		plugins.length > MAX_PLUGINS ||
+		! plugins.every(
+			( plugin ) => typeof plugin === 'string' && plugin !== ''
+		)
+	) {
+		return [];
+	}
+
+	return plugins as string[];
+}
+
+/**
+ * Run once the page has loaded (now, if it already has).
+ *
+ * @param win      Window.
+ * @param callback Callback.
+ */
+function whenLoaded( win: FollowUpWindow, callback: () => void ): void {
+	if ( win.document.readyState === 'complete' ) {
+		callback();
+		return;
+	}
+	win.addEventListener?.( 'load', callback, { once: true } );
 }
 
 /**
@@ -440,6 +496,23 @@ export function bindUpdateFollowUp( win: FollowUpWindow ): boolean {
 		}
 	} );
 	document.on( 'ajaxComplete', () => followUp.check() );
+
+	// Dashboard → Updates: this page's own request ran the update. The plugin
+	// is listed only once the page has loaded, so an `ajaxComplete` before
+	// that cannot send it while the update request may still be running.
+	const updatedHere = pagePlugins( win.updatelensUpdateFollowUpPage );
+	if ( updatedHere.length > 0 ) {
+		whenLoaded( win, () => {
+			try {
+				updatedHere.forEach( ( plugin ) =>
+					followUp.pluginUpdated( plugin )
+				);
+				followUp.check();
+			} catch {
+				// Never in the way of WordPress; a later admin page can still settle.
+			}
+		} );
+	}
 
 	return true;
 }

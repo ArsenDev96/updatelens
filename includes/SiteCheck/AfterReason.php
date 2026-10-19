@@ -39,8 +39,9 @@ defined( 'ABSPATH' ) || exit;
  *   could run after this update alone.
  * - `not_followed_up`: settled by a later page load, not by the updating
  *   browser's follow-up request (AFTER checks start only from there): the
- *   update ran outside Installed Plugins (Dashboard → Updates), the page was
- *   left while the update ran, or the follow-up request did not arrive.
+ *   page was left while the update ran, the follow-up request did not
+ *   arrive, or (before Dashboard → Updates' update page sent its own
+ *   follow-up) the update ran from Dashboard → Updates.
  * - `not_started`: the AFTER start never arrived within its window (tab
  *   closed, page left, request failed, site checks turned off).
  * - `not_reported`: started, but no result was accepted before its session

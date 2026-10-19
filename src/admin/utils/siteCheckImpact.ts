@@ -1421,7 +1421,7 @@ export function afterReasonText( reason: string ): string {
 			);
 		case 'not_followed_up':
 			return __(
-				'The check after the update runs in the tab that clicked “Update now” on Installed Plugins, right after “Updated!”. No follow-up from that tab reached UpdateLens for this update. That happens when the update ran from Dashboard → Updates, when the page was left or closed during the update, when the site did not answer the browser’s follow-up request, or when another plugin answered that request with its own page, such as a setup screen shown after the plugin updates.',
+				'The check after the update runs in the browser tab that ran the update, right after it finished (“Updated!” on Installed Plugins, or the finished update page on Dashboard → Updates). No follow-up from that tab reached UpdateLens for this update. That happens when the page was left or closed during the update, when the site did not answer the browser’s follow-up request, when another plugin answered that request with its own page, such as a setup screen shown after the plugin updates, or for an update from Dashboard → Updates made while an earlier UpdateLens version was installed.',
 				'updatelens'
 			);
 		case 'no_baseline':

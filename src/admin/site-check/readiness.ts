@@ -3,8 +3,8 @@
  * checks are in place for the next "Update now" ("Preparing website checks…",
  * "Ready to compare website responses", "Preparing website checks for another
  * update…"). Ready means a comparison is possible, never that it will pass.
- * On Dashboard → Updates, whose updates get no later check, a fixed note
- * says so instead and links to Installed Plugins.
+ * On Dashboard → Updates, where only single-plugin updates get a later check,
+ * a fixed note says so instead and links to Installed Plugins.
  *
  * Built only from what PHP said when the page loaded (Baselines::status():
  * a stored, attachable baseline and its verdict per check) and from what this
@@ -30,7 +30,7 @@ export interface ReadinessLabels {
 	ready_home: string;
 	ready_rest: string;
 	unavailable: string;
-	/** The Updates screen: only "Update now" on Installed Plugins is compared. */
+	/** The Updates screen: only single-plugin updates are compared. */
 	other_screen: string;
 	plugins_link: string;
 }
@@ -61,7 +61,7 @@ export interface ReadinessSettings {
 	max_age: number;
 	/**
 	 * `plugins`: the readiness line. `updates` (Dashboard → Updates): a note
-	 * that only "Update now" on Installed Plugins is compared, with a link.
+	 * that only single-plugin updates are compared, with a link.
 	 */
 	screen: 'plugins' | 'updates';
 	/** Installed Plugins, plugins with an update (admin URL from PHP). */
@@ -415,8 +415,8 @@ function sameOriginLink( doc: Document, url: string ): boolean {
  *
  * Installed Plugins (`plugins`): a polite status beside "Add Plugin" that
  * render() updates. Dashboard → Updates (`updates`): a fixed note below the
- * title that updates from there are not compared, with a link to Installed
- * Plugins; render() leaves it alone (earlier checks still run there).
+ * title that only single-plugin updates are compared, with a link to
+ * Installed Plugins; render() leaves it alone (earlier checks still run there).
  *
  * @param doc      Document.
  * @param settings `status` from PHP.

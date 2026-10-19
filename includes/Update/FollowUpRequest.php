@@ -16,7 +16,9 @@ defined( 'ABSPATH' ) || exit;
  *
  * After plugin updates from the WordPress updates UI, the browser asks once
  * (when the update queue is idle) for the post-update observation of the
- * plugins it updated. It lists a plugin also when WordPress answered its
+ * plugins it updated. On Dashboard → Updates, the update page itself asks once
+ * it has loaded, for the plugin its own request analysed (page_plugins()).
+ * Over Ajax, the browser lists a plugin also when WordPress answered its
  * update with an error, since the plugin may still have been installed (a
  * translation update in the same request failed): only analyses this site's
  * upgrader hooks saw installed are settled, others answer `not_pending`. The
@@ -99,6 +101,45 @@ final class FollowUpRequest {
 	 * The result could not be stored; the analysis still awaits a settled snapshot.
 	 */
 	const STORAGE_FAILED = 'storage_failed';
+
+	/**
+	 * Admin page that runs Dashboard → Updates (and the bulk action on
+	 * Installed Plugins without JavaScript) inside an iframe.
+	 */
+	const PAGE_SCREEN = 'update.php';
+
+	/**
+	 * Its `action` for plugin updates (`bulk_upgrade()`).
+	 */
+	const PAGE_ACTION = 'update-selected';
+
+	/**
+	 * Plugins the update page itself should send the follow-up for, once it
+	 * has loaded (the page's own request was the update request).
+	 *
+	 * Only Dashboard → Updates' update page (`update.php?action=update-selected`,
+	 * not Ajax), and only a single analysed plugin: an update of several plugins
+	 * in one request is not analysed (UpdateClassifier). `$context['plugins']`
+	 * holds the plugins whose IMMEDIATE observation this request stored, so a
+	 * failed update or an update not analysed lists nothing. The server still
+	 * decides everything when the follow-up arrives (owner, status, request
+	 * start, window).
+	 *
+	 * $context keys: screen (string, `$pagenow`), action (string, the page's
+	 * `action` query value), doing_ajax (bool), plugins (string[]).
+	 *
+	 * @param array $context Request data.
+	 * @return string[] Plugin basenames (empty: no follow-up from the page).
+	 */
+	public static function page_plugins( array $context ) {
+		if ( ! isset( $context['screen'], $context['action'] ) || self::PAGE_SCREEN !== $context['screen'] || self::PAGE_ACTION !== $context['action'] || ! empty( $context['doing_ajax'] ) ) {
+			return array();
+		}
+
+		$plugins = self::plugins( isset( $context['plugins'] ) ? $context['plugins'] : null );
+
+		return null !== $plugins && 1 === count( $plugins ) ? $plugins : array();
+	}
 
 	/**
 	 * Plugin basenames from the request input, or null if the input is invalid.

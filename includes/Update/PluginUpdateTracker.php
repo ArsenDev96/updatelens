@@ -8,6 +8,7 @@
 namespace UpdateLens\Update;
 
 use Throwable;
+use UpdateLens\Admin\AdminAssets;
 use UpdateLens\SiteCheck\FrontendMarker;
 use UpdateLens\SiteCheck\Settings;
 use UpdateLens\SiteCheck\UpdateActivity;
@@ -32,6 +33,10 @@ defined( 'ABSPATH' ) || exit;
  *   that SettleEligibility allows; end this request's updater activity.
  * - `wp_ajax_updatelens_settle`: the follow-up request the updating
  *   administrator's browser sends after the update (FollowUpRequest).
+ * - `admin_print_footer_scripts` (early, before WordPress prints footer
+ *   scripts): on Dashboard → Updates' update page, whose own request ran the
+ *   update, tell the follow-up script which plugin this request analysed, so
+ *   the page sends the follow-up once it has loaded.
  *
  * Every updater download also records the request in the site-wide updater
  * activity ledger (SiteCheck\UpdateActivity), before anything else, and the
@@ -53,6 +58,14 @@ final class PluginUpdateTracker {
 	 * @var array<string, true|string>
 	 */
 	private $install_results = array();
+
+	/**
+	 * Plugins whose IMMEDIATE observation this request stored (their analyses
+	 * now await a settled snapshot), in completion order.
+	 *
+	 * @var string[]
+	 */
+	private $awaiting_settle = array();
 
 	/**
 	 * Active plugins when the tracker was created (on `plugins_loaded`).
@@ -107,6 +120,8 @@ final class PluginUpdateTracker {
 		add_action( 'upgrader_process_complete', array( $this, 'on_process_complete' ), PHP_INT_MAX, 2 );
 		add_action( 'shutdown', array( $this, 'on_shutdown' ), PHP_INT_MAX );
 		add_action( 'wp_ajax_' . FollowUpRequest::ACTION, array( $this, 'on_follow_up' ) );
+		// Before `_wp_footer_scripts` (priority 10) prints the follow-up script.
+		add_action( 'admin_print_footer_scripts', array( $this, 'on_print_footer_scripts' ), 1 );
 	}
 
 	/**
@@ -204,13 +219,49 @@ final class PluginUpdateTracker {
 				$error = '' === $result ? 'update_failed' : $result;
 				$after = null;
 			}
-			self::quietly(
+			$awaiting = self::quietly(
 				function () use ( $plugin_file, $error, $after ) {
-					$this->analyzer->update_finished( $plugin_file, $error, $after );
+					return $this->analyzer->update_finished( $plugin_file, $error, $after );
 				}
 			);
+			if ( true === $awaiting && ! in_array( $plugin_file, $this->awaiting_settle, true ) ) {
+				$this->awaiting_settle[] = $plugin_file;
+			}
 		} catch ( Throwable $e ) {
 			return; // Never interfere with the update.
+		}
+	}
+
+	/**
+	 * Footer scripts are about to be printed (`admin_print_footer_scripts`).
+	 *
+	 * On Dashboard → Updates' update page (FollowUpRequest::page_plugins()),
+	 * hand the plugin this request analysed to the follow-up script, which
+	 * sends the follow-up once the page has loaded. Nothing on any other page,
+	 * and nothing if no analysis of this request awaits a settled snapshot.
+	 *
+	 * @return void
+	 */
+	public function on_print_footer_scripts() {
+		if ( array() === $this->awaiting_settle ) {
+			return;
+		}
+
+		try {
+			$plugins = FollowUpRequest::page_plugins(
+				array(
+					'screen'     => isset( $GLOBALS['pagenow'] ) && is_string( $GLOBALS['pagenow'] ) ? $GLOBALS['pagenow'] : '',
+					// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Only selects the page; core checked this page's nonce before it ran the update.
+					'action'     => isset( $_GET['action'] ) && is_string( $_GET['action'] ) ? sanitize_key( wp_unslash( $_GET['action'] ) ) : '',
+					'doing_ajax' => wp_doing_ajax(),
+					'plugins'    => $this->awaiting_settle,
+				)
+			);
+			if ( array() !== $plugins ) {
+				AdminAssets::add_update_page_follow_up( $plugins );
+			}
+		} catch ( Throwable $e ) {
+			return; // Never interfere with the page.
 		}
 	}
 

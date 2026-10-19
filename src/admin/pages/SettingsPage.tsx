@@ -497,13 +497,13 @@ function HowItWorks( {
 					</li>
 					<li>
 						{ __(
-							'After an update: in the same browser tab, right after a successful update of a single plugin with “Update now” on Installed Plugins, while the tab stays open and the site can record the result.',
+							'After an update: in the same browser tab, right after a successful update of a single plugin, with “Update now” on Installed Plugins or with one plugin selected on Dashboard → Updates, while the tab stays open and the site can record the result.',
 							'updatelens'
 						) }
 					</li>
 					<li>
 						{ __(
-							'Updates from Dashboard → Updates get no check after the update, so they are not compared.',
+							'Updates of several plugins at once get no check after the update, so they are not compared.',
 							'updatelens'
 						) }
 					</li>

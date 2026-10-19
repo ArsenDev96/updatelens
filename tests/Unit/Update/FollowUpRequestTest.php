@@ -125,4 +125,43 @@ final class FollowUpRequestTest extends TestCase {
 		$this->assertSame( 'updatelens_settle', FollowUpRequest::ACTION );
 		$this->assertSame( 'update_plugins', FollowUpRequest::CAPABILITY );
 	}
+
+	/**
+	 * Requests in which the update page may or may not send the follow-up.
+	 *
+	 * @return array<string, array{array, string[]}>
+	 */
+	public function provide_page_contexts() {
+		$page = array(
+			'screen'     => 'update.php',
+			'action'     => 'update-selected',
+			'doing_ajax' => false,
+			'plugins'    => array( 'acme/acme.php' ),
+		);
+
+		return array(
+			'Dashboard → Updates, one plugin analysed'  => array( $page, array( 'acme/acme.php' ) ),
+			'nothing analysed (failed or not analysed)' => array( array( 'plugins' => array() ) + $page, array() ),
+			'several plugins (outside P1)'              => array( array( 'plugins' => array( 'a/a.php', 'b/b.php' ) ) + $page, array() ),
+			'invalid plugin'                            => array( array( 'plugins' => array( '../a.php' ) ) + $page, array() ),
+			'plugins not a list'                        => array( array( 'plugins' => 'acme/acme.php' ) + $page, array() ),
+			'Ajax request (Installed Plugins)'          => array( array( 'doing_ajax' => true ) + $page, array() ),
+			'single update without JavaScript'          => array( array( 'action' => 'upgrade-plugin' ) + $page, array() ),
+			'theme updates'                             => array( array( 'action' => 'update-selected-themes' ) + $page, array() ),
+			'another screen'                            => array( array( 'screen' => 'plugins.php' ) + $page, array() ),
+			'missing screen and action'                 => array( array( 'plugins' => array( 'acme/acme.php' ) ), array() ),
+		);
+	}
+
+	/**
+	 * Only Dashboard → Updates' update page, only one analysed plugin.
+	 *
+	 * @dataProvider provide_page_contexts
+	 *
+	 * @param array    $context  Request data.
+	 * @param string[] $expected Plugins.
+	 */
+	public function test_page_plugins( array $context, array $expected ) {
+		$this->assertSame( $expected, FollowUpRequest::page_plugins( $context ) );
+	}
 }

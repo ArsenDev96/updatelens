@@ -6,6 +6,7 @@ import {
 	isPluginUpdateRequest,
 	isUpdatesIdle,
 	observeUpdateRequest,
+	pagePlugins,
 	respondedPlugin,
 	sendFollowUp,
 	type FollowUpSettings,
@@ -1134,6 +1135,191 @@ describe( 'AFTER checks after an error answer', () => {
 		);
 		await new Promise( ( resolve ) => setTimeout( resolve, 0 ) );
 
+		expect( p.fetch ).toHaveBeenCalledTimes( 1 );
+	} );
+} );
+
+describe( 'update page follow-up (Dashboard → Updates)', () => {
+	const PLUGIN = 'acme/acme.php';
+	const sameOrigin = () => ( {
+		...SETTINGS,
+		ajaxUrl: `${ window.location.origin }/wp-admin/admin-ajax.php`,
+		siteChecks: { nonce: 'sc-nonce' },
+	} );
+
+	/**
+	 * Dashboard → Updates' update page: its own request ran the update, so
+	 * PHP printed the analysed plugin; nothing goes over Ajax.
+	 *
+	 * @param pageData   `updatelensUpdateFollowUpPage`.
+	 * @param settings   `updatelensUpdateFollowUp`.
+	 * @param readyState The document's state when the script runs.
+	 */
+	function updatePage(
+		pageData: unknown,
+		settings: unknown = SETTINGS,
+		readyState: DocumentReadyState = 'interactive'
+	) {
+		const p = page( settings );
+		const listeners: Array< () => void > = [];
+		p.win.document = { readyState } as Document;
+		p.win.updatelensUpdateFollowUpPage = pageData;
+		p.win.addEventListener = ( type, listener ) => {
+			if ( type === 'load' ) {
+				listeners.push( listener );
+			}
+		};
+
+		return {
+			...p,
+			/** The page finished loading. */
+			load: () => listeners.splice( 0 ).forEach( ( fn ) => fn() ),
+		};
+	}
+
+	it( 'sends one follow-up for the plugin PHP named, once the page has loaded', () => {
+		const p = updatePage( { plugins: [ PLUGIN ] } );
+		expect( bindUpdateFollowUp( p.win ) ).toBe( true );
+		expect( p.fetch ).not.toHaveBeenCalled();
+
+		p.load();
+		expect( p.fetch ).toHaveBeenCalledTimes( 1 );
+		const [ url, init ] = p.fetch.mock.calls[ 0 ];
+		expect( url ).toBe( SETTINGS.ajaxUrl );
+		expect( init ).toMatchObject( {
+			method: 'POST',
+			credentials: 'same-origin',
+			keepalive: true,
+		} );
+		const body = init!.body as URLSearchParams;
+		expect( body.get( 'action' ) ).toBe( 'updatelens_settle' );
+		expect( body.get( '_ajax_nonce' ) ).toBe( 'abc123' );
+		expect( body.getAll( 'plugins[]' ) ).toEqual( [ PLUGIN ] );
+
+		// Nothing more: later Ajax or a second load event send no duplicate.
+		p.trigger( 'ajaxComplete' );
+		p.load();
+		expect( p.fetch ).toHaveBeenCalledTimes( 1 );
+	} );
+
+	it( 'sends nothing on Ajax that completes before the page has loaded', () => {
+		const p = updatePage( { plugins: [ PLUGIN ] } );
+		bindUpdateFollowUp( p.win );
+		p.trigger( 'ajaxComplete' );
+		expect( p.fetch ).not.toHaveBeenCalled();
+
+		p.load();
+		expect( p.fetch ).toHaveBeenCalledTimes( 1 );
+		expect( sentPlugins( p.fetch.mock.calls[ 0 ] ) ).toEqual( [ PLUGIN ] );
+	} );
+
+	it( 'sends at once when the page has already loaded', () => {
+		const p = updatePage( { plugins: [ PLUGIN ] }, SETTINGS, 'complete' );
+		bindUpdateFollowUp( p.win );
+		expect( p.fetch ).toHaveBeenCalledTimes( 1 );
+		expect( sentPlugins( p.fetch.mock.calls[ 0 ] ) ).toEqual( [ PLUGIN ] );
+	} );
+
+	it( 'sends nothing on pages whose own request analysed no plugin', () => {
+		// Installed Plugins, a failed update, an update of several plugins.
+		const p = updatePage( undefined );
+		bindUpdateFollowUp( p.win );
+		p.load();
+		expect( p.fetch ).not.toHaveBeenCalled();
+	} );
+
+	it( 'ignores malformed page data and UpdateLens itself', () => {
+		const tooMany = Array.from(
+			{ length: MAX_PLUGINS + 1 },
+			( _, i ) => `p${ i }/p${ i }.php`
+		);
+		for ( const data of [
+			null,
+			'acme/acme.php',
+			{},
+			{ plugins: [] },
+			{ plugins: PLUGIN },
+			{ plugins: [ PLUGIN, 1 ] },
+			{ plugins: [ '' ] },
+			{ plugins: tooMany },
+		] ) {
+			expect( pagePlugins( data ) ).toEqual( [] );
+		}
+		expect( pagePlugins( { plugins: [ PLUGIN ] } ) ).toEqual( [ PLUGIN ] );
+
+		const self = updatePage( { plugins: [ SETTINGS.selfPlugin ] } );
+		bindUpdateFollowUp( self.win );
+		self.load();
+		expect( self.fetch ).not.toHaveBeenCalled();
+	} );
+
+	it( 'starts the AFTER checks the page’s follow-up response asks for, once', async () => {
+		const p = updatePage( { plugins: [ PLUGIN ] }, sameOrigin() );
+		p.fetch.mockImplementation( ( _url, init ) => {
+			const fields = new URLSearchParams( String( init?.body ) );
+			const data =
+				fields.get( 'action' ) === 'updatelens_settle'
+					? {
+							results: [
+								{
+									plugin: PLUGIN,
+									result: 'settled',
+									analysis: 9,
+									site_checks: true,
+								},
+							],
+						}
+					: {
+							code: 'not_needed',
+							purpose: 'after',
+							reason: 'no_baseline',
+						};
+			return Promise.resolve(
+				new Response( JSON.stringify( { success: true, data } ) )
+			);
+		} );
+		bindUpdateFollowUp( p.win );
+
+		p.load();
+		await vi.waitFor( () => expect( p.fetch ).toHaveBeenCalledTimes( 2 ) );
+		expect(
+			Object.fromEntries(
+				new URLSearchParams(
+					String( p.fetch.mock.calls[ 1 ][ 1 ]?.body )
+				)
+			)
+		).toEqual( {
+			action: 'updatelens_site_check_start',
+			_ajax_nonce: 'sc-nonce',
+			purpose: 'after',
+			analysis: '9',
+		} );
+
+		p.load();
+		await new Promise( ( resolve ) => setTimeout( resolve, 0 ) );
+		expect( p.fetch ).toHaveBeenCalledTimes( 2 );
+	} );
+
+	it( 'starts no AFTER checks when the server did not settle the plugin', async () => {
+		const p = updatePage( { plugins: [ PLUGIN ] }, sameOrigin() );
+		p.fetch.mockImplementation( () =>
+			Promise.resolve(
+				new Response(
+					JSON.stringify( {
+						success: true,
+						data: {
+							results: [
+								{ plugin: PLUGIN, result: 'not_pending' },
+							],
+						},
+					} )
+				)
+			)
+		);
+		bindUpdateFollowUp( p.win );
+
+		p.load();
+		await new Promise( ( resolve ) => setTimeout( resolve, 0 ) );
 		expect( p.fetch ).toHaveBeenCalledTimes( 1 );
 	} );
 } );

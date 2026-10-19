@@ -361,37 +361,38 @@ final class PluginUpdateAnalyzer {
 	 * @param string      $plugin_file   Plugin basename.
 	 * @param string|null $error_code    Null if the update succeeded, else a WordPress error code.
 	 * @param string|null $version_after Installed version after the update.
-	 * @return void
+	 * @return bool True only if this call stored the IMMEDIATE observation: the
+	 *              analysis now awaits its settled snapshot.
 	 */
 	public function update_finished( $plugin_file, $error_code, $version_after ) {
 		if ( ! isset( $this->request_analyses[ $plugin_file ] ) ) {
-			return; // Not an update this request is analysing.
+			return false; // Not an update this request is analysing.
 		}
 
 		try {
 			$row = $this->repository->find( $this->request_analyses[ $plugin_file ] );
 		} catch ( Throwable $e ) {
-			return;
+			return false;
 		}
 		if ( null === $row || AnalysisStatus::CAPTURED !== $row['status'] ) {
-			return; // Already handled.
+			return false; // Already handled.
 		}
 
 		if ( null !== $error_code ) {
 			$this->finish( $row, AnalysisStatus::FAILED, self::sanitize_error_code( $error_code ), SettleOutcome::NOT_APPLICABLE );
-			return;
+			return false;
 		}
 
 		$plan = $this->plan( ObservationBudget::IMMEDIATE );
 		if ( ! $plan[ ObservationBudget::OPTIONS ] ) {
 			// Skipped before anything large is allocated; the update continues.
 			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NOT_APPLICABLE );
-			return;
+			return false;
 		}
 
 		$before = $this->decode_snapshot( $row, 'options_before_snapshot', SettleOutcome::NOT_APPLICABLE );
 		if ( null === $before ) {
-			return;
+			return false;
 		}
 		unset( $row['options_before_snapshot'] ); // Decoded; the JSON is no longer needed.
 
@@ -404,17 +405,17 @@ final class PluginUpdateAnalyzer {
 			$immediate_json     = $this->snapshot_codec->encode( $immediate );
 		} catch ( IncompatibleSnapshotsException $e ) {
 			$this->finish( $row, AnalysisStatus::INCOMPATIBLE, self::ERROR_CONTEXT_CHANGED, SettleOutcome::NOT_APPLICABLE );
-			return;
+			return false;
 		} catch ( Throwable $e ) {
 			$this->finish( $row, AnalysisStatus::FAILED, self::ERROR_ANALYSIS_FAILED, SettleOutcome::NOT_APPLICABLE );
-			return;
+			return false;
 		}
 
 		// Taken after the IMMEDIATE captures (the files were replaced before them):
 		// a request that started later included the new plugin files.
 		$captured_at = $this->precise_now();
 		$now         = (int) floor( $captured_at );
-		$this->transition(
+		$applied     = $this->transition(
 			$row,
 			array(
 				'status'                     => AnalysisStatus::AWAITING_SETTLE,
@@ -428,6 +429,8 @@ final class PluginUpdateAnalyzer {
 			$this->cron->immediate( $row, $cron_immediate ),
 			$this->action_scheduler->immediate( $row, $action_scheduler_immediate )
 		);
+
+		return true === $applied;
 	}
 
 	/**

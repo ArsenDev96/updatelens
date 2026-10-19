@@ -133,7 +133,7 @@ final class BaselinePage {
 				'refresh_in'          => AjaxEndpoints::without_unsupported( Baselines::refresh_in( $readiness ), $unsupported ),
 			),
 			// The readiness line near the update controls (no request of its own).
-			// Dashboard → Updates gets a note instead: its updates are not compared.
+			// Dashboard → Updates gets a note instead: only its single-plugin updates are compared.
 			'status'   => array(
 				'max_age'     => Baselines::MAX_AGE_SECONDS,
 				'screen'      => 'update-core.php' === $hook_suffix ? 'updates' : 'plugins',
@@ -160,7 +160,7 @@ final class BaselinePage {
 			'ready_home'     => __( 'Ready to compare the homepage only', 'updatelens' ),
 			'ready_rest'     => __( 'Ready to compare the REST API only', 'updatelens' ),
 			'unavailable'    => __( 'Website checks unavailable for now', 'updatelens' ),
-			'other_screen'   => __( 'Website responses are compared only for updates started with “Update now” on Installed Plugins, not from this screen.', 'updatelens' ),
+			'other_screen'   => __( 'Website responses are compared only for updates of a single plugin: select one plugin on this screen, or use “Update now” on Installed Plugins.', 'updatelens' ),
 			'plugins_link'   => __( 'Go to Installed Plugins', 'updatelens' ),
 		);
 	}

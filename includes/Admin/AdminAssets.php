@@ -76,6 +76,12 @@ final class AdminAssets {
 	const FOLLOW_UP_SETTINGS = 'updatelensUpdateFollowUp';
 
 	/**
+	 * Global object naming the plugin the update page's own request analysed
+	 * (Dashboard → Updates), added only after that update ran.
+	 */
+	const FOLLOW_UP_PAGE_SETTINGS = 'updatelensUpdateFollowUpPage';
+
+	/**
 	 * Script handle of the site check baseline script.
 	 */
 	const SITE_CHECK_HANDLE = 'updatelens-site-check-baseline';
@@ -130,6 +136,8 @@ final class AdminAssets {
 	 * Ajax and fires `wp-plugin-update-success`) and only for users who may
 	 * update plugins. The script asks once, after the update queue is idle, for
 	 * the post-update observation of the plugins it updated (FollowUpRequest).
+	 * On Dashboard → Updates' update page (which enqueues `updates` too), it
+	 * sends it once the page has loaded (add_update_page_follow_up()).
 	 * With site checks enabled (single site), it then runs the AFTER site
 	 * checks of the analyses that request settled (`siteChecks`: the site
 	 * check nonce). It has no user-facing text.
@@ -165,6 +173,27 @@ final class AdminAssets {
 		wp_enqueue_script( self::FOLLOW_UP_HANDLE, UPDATELENS_URL . self::DIST_DIR . $files['script'], array( 'jquery', 'updates' ), UPDATELENS_VERSION, true );
 		wp_localize_script( self::FOLLOW_UP_HANDLE, self::FOLLOW_UP_SETTINGS, $settings );
 		add_filter( 'script_loader_tag', array( self::class, 'add_module_type' ), 10, 2 );
+	}
+
+	/**
+	 * Tell the follow-up script that this page's own request updated plugins
+	 * (Dashboard → Updates runs the update in the page that shows its
+	 * progress): it sends the follow-up for them once the page has loaded.
+	 *
+	 * Called while footer scripts are about to be printed, after the update
+	 * ran; the follow-up script is printed in the footer, so the data still
+	 * reaches it. Nothing happens if the script is not enqueued (no
+	 * `update_plugins`, no build) or already printed.
+	 *
+	 * @param string[] $plugins Plugin basenames (FollowUpRequest::page_plugins()).
+	 * @return bool Whether the data was added.
+	 */
+	public static function add_update_page_follow_up( array $plugins ) {
+		if ( array() === $plugins || ! wp_script_is( self::FOLLOW_UP_HANDLE, 'enqueued' ) || wp_script_is( self::FOLLOW_UP_HANDLE, 'done' ) ) {
+			return false;
+		}
+
+		return (bool) wp_localize_script( self::FOLLOW_UP_HANDLE, self::FOLLOW_UP_PAGE_SETTINGS, array( 'plugins' => array_values( $plugins ) ) );
 	}
 
 	/**
